@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 97d524c8ea6b0e145a34679a81fd4244, type: 3}
+  m_Name: WorldGenerationSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.WorldGenerationSettings
+  worldSize: 128
+  worldHeight: 32
+  chunkSizeXZ: 8
+  chunkHeight: 4
+  seed: 1339073250
+  terrainNoiseScale: 0.035
+  terrainOctaves: 4
+  terrainLacunarity: 2
+  terrainPersistence: 0.5
+  baseTerrainHeightCells: 3
+  terrainAmplitudeCells: 3
+  islandFalloff: 0.85
+  seaLevelCell: 3
+  seaLevelStep: 0
+  riverCount: 4
+  riverDepthSteps: 2
+  lakeCount: 2
+  lakeRadius: 2
+  desertMoistureThreshold: 0.28
+  wetlandMoistureThreshold: 0.72
+  snowTemperatureThreshold: 0.24
+  waterMoistureRadius: 6
