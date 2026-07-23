@@ -16,7 +16,7 @@ MonoBehaviour:
   worldHeight: 32
   chunkSizeXZ: 8
   chunkHeight: 4
-  seed: 1339073250
+  seed: -1115092422
   terrainNoiseScale: 0.035
   terrainOctaves: 4
   terrainLacunarity: 2

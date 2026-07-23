@@ -13,10 +13,16 @@ namespace MiniCivilization.World.Meshing
 
     public static class WaterChunkMeshBuilder
     {
-        private static readonly float[] Knots = { 0f, 0.2f, 0.8f, 1f };
+        private const float Shoulder = 0.2f;
+        private const float CoreMin = Shoulder;
+        private const float CoreMax = 1f - Shoulder;
         private const float SurfaceOffset = 0.002f;
 
-        public static WaterChunkMeshBuffers Build(WorldData world, int patchX, int patchZ, WorldSurfaceCatalog catalog)
+        public static WaterChunkMeshBuffers Build(
+            WorldData world,
+            int patchX,
+            int patchZ,
+            WorldSurfaceCatalog catalog)
         {
             var buffers = new WaterChunkMeshBuffers();
             var startX = patchX * world.ChunkSizeX;
@@ -27,50 +33,163 @@ namespace MiniCivilization.World.Meshing
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)
             {
-                if (!world.GetSurfaceColumn(x, z).HasWater)
+                var column = world.GetSurfaceColumn(x, z);
+                if (column.HasWater)
                 {
-                    continue;
+                    AddTop(world, catalog, buffers, x, z, startX, startZ);
+                    AddWaterfalls(world, catalog, buffers.Waterfalls, x, z, startX, startZ);
                 }
-
-                AddSurface(world, catalog, buffers.Surface, x, z, startX, startZ);
-                AddWaterfalls(world, catalog, buffers.Waterfalls, x, z, startX, startZ);
+                else if (column.HasSurface)
+                {
+                    AddRenderApron(world, catalog, buffers, x, z, startX, startZ);
+                }
             }
 
             return buffers;
         }
 
-        private static void AddSurface(WorldData world, WorldSurfaceCatalog catalog, MeshBuffers buffers, int x, int z, int startX, int startZ)
+        private static void AddTop(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            WaterChunkMeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ)
         {
-            for (var segmentZ = 0; segmentZ < 3; segmentZ++)
-            for (var segmentX = 0; segmentX < 3; segmentX++)
+            var height = world.GetSurfaceColumn(x, z).WaterTopUnits;
+            AddSurfaceQuad(
+                buffers.Surface,
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMin, height),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMax, height),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMax, height),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMin, height));
+
+            AddShoulder(world, catalog, buffers.Surface, x, z, startX, startZ, -1, 0);
+            AddShoulder(world, catalog, buffers.Surface, x, z, startX, startZ, 1, 0);
+            AddShoulder(world, catalog, buffers.Surface, x, z, startX, startZ, 0, -1);
+            AddShoulder(world, catalog, buffers.Surface, x, z, startX, startZ, 0, 1);
+
+            AddCornerJoin(world, catalog, buffers, x, z, startX, startZ, 0f, 0f);
+            AddCornerJoin(world, catalog, buffers, x, z, startX, startZ, 1f, 0f);
+            AddCornerJoin(world, catalog, buffers, x, z, startX, startZ, 0f, 1f);
+            AddCornerJoin(world, catalog, buffers, x, z, startX, startZ, 1f, 1f);
+        }
+
+        private static void AddShoulder(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            int directionX,
+            int directionZ)
+        {
+            var profile = SurfaceHeightResolver.ResolveEdge(
+                world,
+                x,
+                z,
+                directionX,
+                directionZ,
+                SurfaceLayer.Water);
+
+            if (directionX < 0)
             {
-                var u0 = Knots[segmentX];
-                var u1 = Knots[segmentX + 1];
-                var v0 = Knots[segmentZ];
-                var v1 = Knots[segmentZ + 1];
-                var a = CreateWaterVertex(world, catalog, x, z, startX, startZ, u0, v0);
-                var b = CreateWaterVertex(world, catalog, x, z, startX, startZ, u0, v1);
-                var c = CreateWaterVertex(world, catalog, x, z, startX, startZ, u1, v1);
-                var d = CreateWaterVertex(world, catalog, x, z, startX, startZ, u1, v0);
-                buffers.AddTriangle(a, b, c);
-                buffers.AddTriangle(a, c, d);
+                AddSurfaceQuad(
+                    buffers,
+                    CreateVertex(world, catalog, x, z, startX, startZ, 0f, CoreMin, profile.OuterHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, 0f, CoreMax, profile.OuterHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMax, profile.CurrentHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMin, profile.CurrentHeightUnits));
+                return;
             }
+
+            if (directionX > 0)
+            {
+                AddSurfaceQuad(
+                    buffers,
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMin, profile.CurrentHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMax, profile.CurrentHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, 1f, CoreMax, profile.OuterHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, 1f, CoreMin, profile.OuterHeightUnits));
+                return;
+            }
+
+            if (directionZ < 0)
+            {
+                AddSurfaceQuad(
+                    buffers,
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, 0f, profile.OuterHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMin, profile.CurrentHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMin, profile.CurrentHeightUnits),
+                    CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, 0f, profile.OuterHeightUnits));
+                return;
+            }
+
+            AddSurfaceQuad(
+                buffers,
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, CoreMax, profile.CurrentHeightUnits),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMin, 1f, profile.OuterHeightUnits),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, 1f, profile.OuterHeightUnits),
+                CreateVertex(world, catalog, x, z, startX, startZ, CoreMax, CoreMax, profile.CurrentHeightUnits));
         }
 
-        private static SurfaceVertex CreateWaterVertex(WorldData world, WorldSurfaceCatalog catalog, int x, int z, int startX, int startZ, float localX, float localZ)
+        private static void AddCornerJoin(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            WaterChunkMeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float cornerX,
+            float cornerZ)
         {
-            var height = GetWaterVertexHeightUnits(world, x, z, localX, localZ);
-            var appearance = MaterialBlendResolver.ResolveWater(world, catalog, x, z, localX, localZ);
-            return new SurfaceVertex(
-                new Vector3(x - startX + localX, WorldGrid.ToWorldHeight(height) + SurfaceOffset, z - startZ + localZ),
-                new Vector2(x + localX, z + localZ),
-                appearance);
+            var inwardX = cornerX <= 0f ? 1f : -1f;
+            var inwardZ = cornerZ <= 0f ? 1f : -1f;
+            var shoulderX = cornerX + inwardX * Shoulder;
+            var shoulderZ = cornerZ + inwardZ * Shoulder;
+            var directionX = -Mathf.RoundToInt(inwardX);
+            var directionZ = -Mathf.RoundToInt(inwardZ);
+            var edgeX = SurfaceHeightResolver.ResolveEdge(
+                world, x, z, directionX, 0, SurfaceLayer.Water);
+            var edgeZ = SurfaceHeightResolver.ResolveEdge(
+                world, x, z, 0, directionZ, SurfaceLayer.Water);
+            var cornerHeight = ResolveRenderCornerHeight(
+                world, x, z, cornerX, cornerZ);
+
+            var topAlongX = CreateVertex(
+                world, catalog, x, z, startX, startZ,
+                shoulderX, cornerZ, edgeZ.OuterHeightUnits);
+            var topAlongZ = CreateVertex(
+                world, catalog, x, z, startX, startZ,
+                cornerX, shoulderZ, edgeX.OuterHeightUnits);
+            var inner = CreateVertex(
+                world, catalog, x, z, startX, startZ,
+                shoulderX, shoulderZ, edgeX.CurrentHeightUnits);
+            var corner = CreateVertex(
+                world, catalog, x, z, startX, startZ,
+                cornerX, cornerZ, cornerHeight);
+
+            // Water corners always use the actual tile's C/X/Z/I vertices.
+            // Dry cardinal quadrants are covered by the source cell's render
+            // apron, so they do not invalidate a connected one-tier rise.
+            buffers.Surface.AddTriangleFacing(
+                corner, topAlongX, topAlongZ, Vector3.up);
+            buffers.Surface.AddTriangleFacing(
+                topAlongX, inner, topAlongZ, Vector3.up);
         }
 
-        private static int GetWaterVertexHeightUnits(WorldData world, int x, int z, float localX, float localZ)
-            => SurfaceHeightResolver.ResolveVertex(world, x, z, localX, localZ, SurfaceLayer.Water);
-
-        private static void AddWaterfalls(WorldData world, WorldSurfaceCatalog catalog, MeshBuffers buffers, int x, int z, int startX, int startZ)
+        private static void AddWaterfalls(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ)
         {
             AddWaterfallSide(world, catalog, buffers, x, z, startX, startZ, -1, 0);
             AddWaterfallSide(world, catalog, buffers, x, z, startX, startZ, 1, 0);
@@ -78,58 +197,510 @@ namespace MiniCivilization.World.Meshing
             AddWaterfallSide(world, catalog, buffers, x, z, startX, startZ, 0, 1);
         }
 
-        private static void AddWaterfallSide(WorldData world, WorldSurfaceCatalog catalog, MeshBuffers buffers, int x, int z, int startX, int startZ, int directionX, int directionZ)
+        private static void AddWaterfallSide(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            int directionX,
+            int directionZ)
         {
-            var current = world.GetSurfaceColumn(x, z);
-            var neighborX = x + directionX;
-            var neighborZ = z + directionZ;
-            if (!world.ContainsColumn(neighborX, neighborZ))
+            var profile = SurfaceHeightResolver.ResolveEdge(
+                world,
+                x,
+                z,
+                directionX,
+                directionZ,
+                SurfaceLayer.Water);
+            if (!profile.NeighborExists
+                || profile.CurrentHeightUnits - profile.NeighborHeightUnits < 2)
             {
                 return;
             }
 
-            var neighbor = world.GetSurfaceColumn(neighborX, neighborZ);
-            if (!neighbor.HasWater || current.WaterTopUnits - neighbor.WaterTopUnits < 2)
-            {
-                return;
-            }
+            var startTopCorner = TerrainChunkMeshBuilder.GetBoundaryCornerHeight(
+                world, x, z, directionX, directionZ, 0f, SurfaceLayer.Water);
+            var endTopCorner = TerrainChunkMeshBuilder.GetBoundaryCornerHeight(
+                world, x, z, directionX, directionZ, 1f, SurfaceLayer.Water);
+            var startBottomCorner = TerrainChunkMeshBuilder.GetNeighborBoundaryCornerHeight(
+                world, x, z, directionX, directionZ, 0f, SurfaceLayer.Water);
+            var endBottomCorner = TerrainChunkMeshBuilder.GetNeighborBoundaryCornerHeight(
+                world, x, z, directionX, directionZ, 1f, SurfaceLayer.Water);
 
-            var topUnits = current.WaterTopUnits - 1;
-            var bottomUnits = neighbor.WaterTopUnits;
-            var topAppearance = MaterialBlendResolver.ResolveWaterAppearance(catalog, current.WaterMaterialId);
-            var bottomAppearance = MaterialBlendResolver.ResolveWaterAppearance(catalog, neighbor.WaterMaterialId);
-
-            for (var segment = 0; segment < 3; segment++)
-            {
-                var t0 = Knots[segment];
-                var t1 = Knots[segment + 1];
-                GetBoundaryCoordinates(directionX, directionZ, t0, out var u0, out var v0);
-                GetBoundaryCoordinates(directionX, directionZ, t1, out var u1, out var v1);
-                TerrainChunkMeshBuilder.AddVerticalQuad(
-                    buffers,
-                    x,
-                    z,
-                    startX,
-                    startZ,
-                    directionX,
-                    directionZ,
-                    u0,
-                    v0,
-                    u1,
-                    v1,
-                    topUnits,
-                    topUnits,
-                    bottomUnits,
-                    bottomUnits,
-                    topAppearance,
-                    topAppearance,
-                    bottomAppearance,
-                    bottomAppearance,
-                    SurfaceOffset);
-            }
+            AddWaterfallSegment(
+                world, catalog, buffers, x, z, startX, startZ,
+                directionX, directionZ, 0f, Shoulder,
+                startTopCorner, profile.OuterHeightUnits,
+                startBottomCorner, profile.NeighborHeightUnits);
+            AddWaterfallSegment(
+                world, catalog, buffers, x, z, startX, startZ,
+                directionX, directionZ, Shoulder, 1f - Shoulder,
+                profile.OuterHeightUnits, profile.OuterHeightUnits,
+                profile.NeighborHeightUnits, profile.NeighborHeightUnits);
+            AddWaterfallSegment(
+                world, catalog, buffers, x, z, startX, startZ,
+                directionX, directionZ, 1f - Shoulder, 1f,
+                profile.OuterHeightUnits, endTopCorner,
+                profile.NeighborHeightUnits, endBottomCorner);
         }
 
-        private static void GetBoundaryCoordinates(int directionX, int directionZ, float t, out float u, out float v)
+        private static void AddWaterfallSegment(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            int directionX,
+            int directionZ,
+            float t0,
+            float t1,
+            int top0,
+            int top1,
+            int bottom0,
+            int bottom1)
+        {
+            if (top0 <= bottom0 && top1 <= bottom1)
+            {
+                return;
+            }
+
+            GetBoundaryCoordinates(directionX, directionZ, t0, out var u0, out var v0);
+            GetBoundaryCoordinates(directionX, directionZ, t1, out var u1, out var v1);
+            var topAppearance0 = MaterialBlendResolver.ResolveWater(
+                world, catalog, x, z, u0, v0);
+            var topAppearance1 = MaterialBlendResolver.ResolveWater(
+                world, catalog, x, z, u1, v1);
+            var neighbor = world.GetSurfaceColumn(x + directionX, z + directionZ);
+            var bottomAppearance = MaterialBlendResolver.ResolveWaterAppearance(
+                catalog,
+                neighbor.WaterMaterialId);
+
+            TerrainChunkMeshBuilder.AddVerticalQuad(
+                buffers,
+                x,
+                z,
+                startX,
+                startZ,
+                directionX,
+                directionZ,
+                u0,
+                v0,
+                u1,
+                v1,
+                top0,
+                top1,
+                bottom0,
+                bottom1,
+                topAppearance0,
+                topAppearance1,
+                bottomAppearance,
+                bottomAppearance,
+                SurfaceOffset);
+        }
+
+        private static void AddRenderApron(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            WaterChunkMeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ)
+        {
+            AddApronSide(world, catalog, buffers.Surface, x, z, startX, startZ, -1, 0);
+            AddApronSide(world, catalog, buffers.Surface, x, z, startX, startZ, 1, 0);
+            AddApronSide(world, catalog, buffers.Surface, x, z, startX, startZ, 0, -1);
+            AddApronSide(world, catalog, buffers.Surface, x, z, startX, startZ, 0, 1);
+
+            AddApronCorner(world, catalog, buffers, x, z, startX, startZ, 0f, 0f);
+            AddApronCorner(world, catalog, buffers, x, z, startX, startZ, 1f, 0f);
+            AddApronCorner(world, catalog, buffers, x, z, startX, startZ, 0f, 1f);
+            AddApronCorner(world, catalog, buffers, x, z, startX, startZ, 1f, 1f);
+        }
+
+        private static void AddApronSide(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            int neighborDirectionX,
+            int neighborDirectionZ)
+        {
+            var sourceX = x + neighborDirectionX;
+            var sourceZ = z + neighborDirectionZ;
+            if (!HasWater(world, sourceX, sourceZ))
+            {
+                return;
+            }
+
+            var height = ResolveSourceEdgeHeight(
+                world,
+                sourceX,
+                sourceZ,
+                -neighborDirectionX,
+                -neighborDirectionZ);
+            var materialId = world.GetSurfaceColumn(sourceX, sourceZ).WaterMaterialId;
+
+            if (neighborDirectionX < 0)
+            {
+                AddApronQuad(
+                    catalog, buffers, x, z, startX, startZ, materialId,
+                    0f, CoreMin, height,
+                    0f, CoreMax, height,
+                    CoreMin, CoreMax, height,
+                    CoreMin, CoreMin, height);
+                return;
+            }
+
+            if (neighborDirectionX > 0)
+            {
+                AddApronQuad(
+                    catalog, buffers, x, z, startX, startZ, materialId,
+                    CoreMax, CoreMin, height,
+                    CoreMax, CoreMax, height,
+                    1f, CoreMax, height,
+                    1f, CoreMin, height);
+                return;
+            }
+
+            if (neighborDirectionZ < 0)
+            {
+                AddApronQuad(
+                    catalog, buffers, x, z, startX, startZ, materialId,
+                    CoreMin, 0f, height,
+                    CoreMin, CoreMin, height,
+                    CoreMax, CoreMin, height,
+                    CoreMax, 0f, height);
+                return;
+            }
+
+            AddApronQuad(
+                catalog, buffers, x, z, startX, startZ, materialId,
+                CoreMin, CoreMax, height,
+                CoreMin, 1f, height,
+                CoreMax, 1f, height,
+                CoreMax, CoreMax, height);
+        }
+
+        private static void AddApronCorner(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            WaterChunkMeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float cornerX,
+            float cornerZ)
+        {
+            var directionX = cornerX <= 0f ? -1 : 1;
+            var directionZ = cornerZ <= 0f ? -1 : 1;
+            var sourceXX = x + directionX;
+            var sourceXZ = z;
+            var sourceZX = x;
+            var sourceZZ = z + directionZ;
+            var hasX = HasWater(world, sourceXX, sourceXZ);
+            var hasZ = HasWater(world, sourceZX, sourceZZ);
+            var diagonalX = x + directionX;
+            var diagonalZ = z + directionZ;
+            var hasDiagonal = HasWater(world, diagonalX, diagonalZ);
+            var inwardX = -directionX;
+            var inwardZ = -directionZ;
+            var shoulderX = cornerX + inwardX * Shoulder;
+            var shoulderZ = cornerZ + inwardZ * Shoulder;
+
+            if (!hasX && !hasZ)
+            {
+                return;
+            }
+
+            if (hasX && hasZ)
+            {
+                if (!hasDiagonal)
+                {
+                    // Two diagonal water quadrants form a saddle. They must
+                    // remain visually disconnected.
+                    return;
+                }
+
+                AddSplitApronCorner(
+                    world, catalog, buffers.Surface, x, z, startX, startZ,
+                    cornerX, cornerZ, shoulderX, shoulderZ,
+                    sourceXX, sourceXZ, sourceZX, sourceZZ);
+                return;
+            }
+
+            var sourceX = hasX ? sourceXX : sourceZX;
+            var sourceZ = hasX ? sourceXZ : sourceZZ;
+            var edgeHeight = ResolveSourceEdgeHeight(
+                world,
+                sourceX,
+                sourceZ,
+                hasX ? -directionX : 0,
+                hasZ ? -directionZ : 0);
+            // The apron only extends its owning edge. It must not inherit the
+            // actual water tile's raised corner or connect across a height step.
+            var cornerHeight = edgeHeight;
+            var materialId = world.GetSurfaceColumn(sourceX, sourceZ).WaterMaterialId;
+
+            if (hasX)
+            {
+                AddApronQuad(
+                    catalog, buffers.Surface, x, z, startX, startZ, materialId,
+                    cornerX, cornerZ, cornerHeight,
+                    cornerX, shoulderZ, edgeHeight,
+                    shoulderX, shoulderZ, edgeHeight,
+                    shoulderX, cornerZ, cornerHeight);
+                return;
+            }
+
+            AddApronQuad(
+                catalog, buffers.Surface, x, z, startX, startZ, materialId,
+                cornerX, cornerZ, cornerHeight,
+                cornerX, shoulderZ, cornerHeight,
+                shoulderX, shoulderZ, edgeHeight,
+                shoulderX, cornerZ, edgeHeight);
+        }
+
+        private static void AddSplitApronCorner(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float cornerX,
+            float cornerZ,
+            float shoulderX,
+            float shoulderZ,
+            int sourceXX,
+            int sourceXZ,
+            int sourceZX,
+            int sourceZZ)
+        {
+            var xEdgeHeight = ResolveSourceEdgeHeight(
+                world, sourceXX, sourceXZ, x - sourceXX, z - sourceXZ);
+            var zEdgeHeight = ResolveSourceEdgeHeight(
+                world, sourceZX, sourceZZ, x - sourceZX, z - sourceZZ);
+            // Keep each scaled apron on its own source edge plane. Corner-rise
+            // polygons belong exclusively to actual water tiles.
+            var xCornerHeight = xEdgeHeight;
+            var zCornerHeight = zEdgeHeight;
+            var xMaterial = world.GetSurfaceColumn(sourceXX, sourceXZ).WaterMaterialId;
+            var zMaterial = world.GetSurfaceColumn(sourceZX, sourceZZ).WaterMaterialId;
+
+            var xCorner = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                cornerX, cornerZ, xCornerHeight, xMaterial);
+            var xInner = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                shoulderX, shoulderZ, xEdgeHeight, xMaterial);
+            var xAlongZ = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                cornerX, shoulderZ, xEdgeHeight, xMaterial);
+            buffers.AddTriangleFacing(xCorner, xInner, xAlongZ, Vector3.up);
+
+            var zCorner = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                cornerX, cornerZ, zCornerHeight, zMaterial);
+            var zAlongX = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                shoulderX, cornerZ, zEdgeHeight, zMaterial);
+            var zInner = CreateApronVertex(
+                catalog, x, z, startX, startZ,
+                shoulderX, shoulderZ, zEdgeHeight, zMaterial);
+            buffers.AddTriangleFacing(zCorner, zAlongX, zInner, Vector3.up);
+        }
+
+        private static void AddApronQuad(
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            ushort materialId,
+            float ax,
+            float az,
+            int ah,
+            float bx,
+            float bz,
+            int bh,
+            float cx,
+            float cz,
+            int ch,
+            float dx,
+            float dz,
+            int dh)
+        {
+            AddSurfaceQuad(
+                buffers,
+                CreateApronVertex(catalog, x, z, startX, startZ, ax, az, ah, materialId),
+                CreateApronVertex(catalog, x, z, startX, startZ, bx, bz, bh, materialId),
+                CreateApronVertex(catalog, x, z, startX, startZ, cx, cz, ch, materialId),
+                CreateApronVertex(catalog, x, z, startX, startZ, dx, dz, dh, materialId));
+        }
+
+        private static SurfaceVertex CreateApronVertex(
+            WorldSurfaceCatalog catalog,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float localX,
+            float localZ,
+            int heightUnits,
+            ushort materialId)
+        {
+            return new SurfaceVertex(
+                new Vector3(
+                    x - startX + localX,
+                    WorldGrid.ToWorldHeight(heightUnits) + SurfaceOffset,
+                    z - startZ + localZ),
+                new Vector2(x + localX, z + localZ),
+                MaterialBlendResolver.ResolveWaterAppearance(catalog, materialId));
+        }
+
+        private static int ResolveSourceEdgeHeight(
+            WorldData world,
+            int sourceX,
+            int sourceZ,
+            int directionX,
+            int directionZ)
+            => SurfaceHeightResolver.ResolveEdge(
+                world,
+                sourceX,
+                sourceZ,
+                directionX,
+                directionZ,
+                SurfaceLayer.Water).OuterHeightUnits;
+
+        private static int ResolveRenderCornerHeight(
+            WorldData world,
+            int x,
+            int z,
+            float cornerX,
+            float cornerZ)
+        {
+            var currentHeight = world.GetSurfaceColumn(x, z).WaterTopUnits;
+            var resolvedHeight = SurfaceHeightResolver.ResolveCornerHeight(
+                world, x, z, cornerX, cornerZ, SurfaceLayer.Water);
+            var directionX = cornerX >= 1f ? 1 : -1;
+            var directionZ = cornerZ >= 1f ? 1 : -1;
+
+            var hasX = TryGetWaterHeight(
+                world, x + directionX, z, out var xHeight);
+            var hasZ = TryGetWaterHeight(
+                world, x, z + directionZ, out var zHeight);
+            var hasDiagonal = TryGetWaterHeight(
+                world,
+                x + directionX,
+                z + directionZ,
+                out var diagonalHeight);
+
+            // At least one edge-connected water cell must own the rise.
+            // A diagonal-only cell is a saddle and must stay disconnected.
+            if (!hasX && !hasZ)
+            {
+                return resolvedHeight;
+            }
+
+            // Existing water quadrants may not be level with or below this
+            // cell. Missing cardinal quadrants are intentionally ignored:
+            // the current water cell already covers them with a render apron.
+            if (hasX && xHeight <= currentHeight
+                || hasZ && zHeight <= currentHeight
+                || hasDiagonal && diagonalHeight <= currentHeight)
+            {
+                return resolvedHeight;
+            }
+
+            var targetHeight = int.MaxValue;
+            if (hasX)
+            {
+                targetHeight = Math.Min(targetHeight, xHeight);
+            }
+
+            if (hasZ)
+            {
+                targetHeight = Math.Min(targetHeight, zHeight);
+            }
+
+            if (hasDiagonal)
+            {
+                targetHeight = Math.Min(targetHeight, diagonalHeight);
+            }
+
+            return Math.Min(currentHeight + 1, targetHeight);
+        }
+
+        private static bool TryGetWaterHeight(
+            WorldData world,
+            int x,
+            int z,
+            out int height)
+        {
+            if (!HasWater(world, x, z))
+            {
+                height = 0;
+                return false;
+            }
+
+            height = world.GetSurfaceColumn(x, z).WaterTopUnits;
+            return true;
+        }
+
+        private static bool HasWater(WorldData world, int x, int z)
+            => world.ContainsColumn(x, z)
+                && world.GetSurfaceColumn(x, z).HasWater;
+
+        private static SurfaceVertex CreateVertex(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float localX,
+            float localZ,
+            int heightUnits)
+        {
+            return new SurfaceVertex(
+                new Vector3(
+                    x - startX + localX,
+                    WorldGrid.ToWorldHeight(heightUnits) + SurfaceOffset,
+                    z - startZ + localZ),
+                new Vector2(x + localX, z + localZ),
+                MaterialBlendResolver.ResolveWater(
+                    world, catalog, x, z, localX, localZ));
+        }
+
+        private static void AddSurfaceQuad(
+            MeshBuffers buffers,
+            in SurfaceVertex a,
+            in SurfaceVertex b,
+            in SurfaceVertex c,
+            in SurfaceVertex d)
+        {
+            buffers.AddTriangleFacing(a, b, c, Vector3.up);
+            buffers.AddTriangleFacing(a, c, d, Vector3.up);
+        }
+
+        private static void GetBoundaryCoordinates(
+            int directionX,
+            int directionZ,
+            float t,
+            out float u,
+            out float v)
         {
             if (directionX < 0) { u = 0f; v = t; return; }
             if (directionX > 0) { u = 1f; v = t; return; }

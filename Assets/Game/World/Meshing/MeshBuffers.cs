@@ -59,6 +59,34 @@ namespace MiniCivilization.World.Meshing
             indices.Add(start + 2);
         }
 
+        internal void AddTriangleFacing(
+            in SurfaceVertex a,
+            in SurfaceVertex b,
+            in SurfaceVertex c,
+            Vector3 expectedNormal)
+        {
+            var normal = Vector3.Cross(b.Position - a.Position, c.Position - a.Position);
+            if (Vector3.Dot(normal, expectedNormal) >= 0f)
+            {
+                AddTriangle(a, b, c);
+            }
+            else
+            {
+                AddTriangle(a, c, b);
+            }
+        }
+
+        internal void AddQuadFacing(
+            in SurfaceVertex topA,
+            in SurfaceVertex topB,
+            in SurfaceVertex bottomA,
+            in SurfaceVertex bottomB,
+            Vector3 expectedNormal)
+        {
+            AddTriangleFacing(bottomA, topA, topB, expectedNormal);
+            AddTriangleFacing(bottomA, topB, bottomB, expectedNormal);
+        }
+
         public Mesh CreateMesh(string name)
         {
             var mesh = new Mesh

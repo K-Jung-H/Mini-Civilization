@@ -1,4 +1,3 @@
-using System;
 using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Meshing
@@ -9,99 +8,175 @@ namespace MiniCivilization.World.Meshing
         Water
     }
 
+    internal readonly struct SurfaceEdgeProfile
+    {
+        public readonly int CurrentHeightUnits;
+        public readonly int OuterHeightUnits;
+        public readonly int NeighborHeightUnits;
+        public readonly bool NeighborExists;
+
+        public SurfaceEdgeProfile(
+            int currentHeightUnits,
+            int outerHeightUnits,
+            int neighborHeightUnits,
+            bool neighborExists)
+        {
+            CurrentHeightUnits = currentHeightUnits;
+            OuterHeightUnits = outerHeightUnits;
+            NeighborHeightUnits = neighborHeightUnits;
+            NeighborExists = neighborExists;
+        }
+    }
+
     internal static class SurfaceHeightResolver
     {
-        public static int ResolveVertex(
+        public static SurfaceEdgeProfile ResolveEdge(
             WorldData world,
             int x,
             int z,
-            float localX,
-            float localZ,
+            int directionX,
+            int directionZ,
             SurfaceLayer layer)
         {
             var currentHeight = GetHeight(world.GetSurfaceColumn(x, z), layer);
-            var onXBoundary = localX <= 0f || localX >= 1f;
-            var onZBoundary = localZ <= 0f || localZ >= 1f;
+            var neighborExists = TryGetHeight(
+                world,
+                x + directionX,
+                z + directionZ,
+                layer,
+                out var neighborHeight);
+            var quantized = QuantizedSurfaceResolver.Resolve(
+                currentHeight,
+                neighborHeight,
+                neighborExists);
 
-            if (onXBoundary && onZBoundary)
-            {
-                return ResolveSharedCorner(world, x, z, localX, localZ, currentHeight, layer);
-            }
-
-            if (onXBoundary)
-            {
-                var offsetX = localX <= 0f ? -1 : 1;
-                currentHeight = ResolveAgainstColumn(world, x + offsetX, z, currentHeight, layer);
-            }
-
-            if (onZBoundary)
-            {
-                var offsetZ = localZ <= 0f ? -1 : 1;
-                currentHeight = ResolveAgainstColumn(world, x, z + offsetZ, currentHeight, layer);
-            }
-
-            return currentHeight;
+            return new SurfaceEdgeProfile(
+                currentHeight,
+                quantized.OuterHeightUnits,
+                neighborHeight,
+                neighborExists);
         }
 
-        private static int ResolveSharedCorner(
+        public static int ResolveCornerHeight(
             WorldData world,
             int x,
             int z,
-            float localX,
-            float localZ,
-            int currentHeight,
+            float cornerX,
+            float cornerZ,
             SurfaceLayer layer)
         {
-            var vertexX = x + (localX >= 1f ? 1 : 0);
-            var vertexZ = z + (localZ >= 1f ? 1 : 0);
-            var resolved = currentHeight;
+            var currentHeight = GetHeight(world.GetSurfaceColumn(x, z), layer);
+            var directionX = cornerX >= 1f ? 1 : -1;
+            var directionZ = cornerZ >= 1f ? 1 : -1;
+            var lowerX = IsLower(
+                world, x + directionX, z, layer, currentHeight);
+            var lowerZ = IsLower(
+                world, x, z + directionZ, layer, currentHeight);
+            var lowerDiagonal = IsLower(
+                world, x + directionX, z + directionZ, layer, currentHeight);
 
-            // All cells of the same height incident to a grid corner must resolve that
-            // corner from the same four-column set. This keeps equal-height edges sealed
-            // while lower tiers retain their own vertex for the vertical cliff face.
-            for (var incidentZ = vertexZ - 1; incidentZ <= vertexZ; incidentZ++)
-            for (var incidentX = vertexX - 1; incidentX <= vertexX; incidentX++)
+            // A concave corner is owned by the low cell whenever both
+            // orthogonal neighbors facing this corner are higher. The
+            // diagonal column does not determine whether the closure exists.
+            if (TryResolveConcaveRiseCorner(
+                    world,
+                    x,
+                    z,
+                    directionX,
+                    directionZ,
+                    layer,
+                    currentHeight,
+                    out var concaveHeight))
             {
-                resolved = ResolveAgainstColumn(world, incidentX, incidentZ, resolved, layer, currentHeight);
+                return concaveHeight;
             }
 
-            return resolved;
+            // A diagonal difference alone must never carve a corner notch.
+            // One descending edge continues only when the diagonal continues
+            // the same shoreline/contour. Two descending edges form a convex
+            // step-pyramid corner.
+            var continuesShoulder = lowerX && lowerZ
+                || lowerX && lowerDiagonal
+                || lowerZ && lowerDiagonal;
+            return continuesShoulder ? currentHeight - 1 : currentHeight;
         }
 
-        private static int ResolveAgainstColumn(
+        private static bool TryResolveConcaveRiseCorner(
             WorldData world,
-            int neighborX,
-            int neighborZ,
-            int currentResolvedHeight,
+            int x,
+            int z,
+            int directionX,
+            int directionZ,
             SurfaceLayer layer,
-            int profileHeight = -1)
+            int currentHeight,
+            out int resolvedHeight)
         {
-            if (!world.ContainsColumn(neighborX, neighborZ))
+            if (!TryGetHeight(
+                    world,
+                    x + directionX,
+                    z,
+                    layer,
+                    out var xHeight)
+                || !TryGetHeight(
+                    world,
+                    x,
+                    z + directionZ,
+                    layer,
+                    out var zHeight)
+                || !TryGetHeight(
+                    world,
+                    x + directionX,
+                    z + directionZ,
+                    layer,
+                    out var diagonalHeight)
+                || xHeight <= currentHeight
+                || zHeight <= currentHeight
+                || diagonalHeight <= currentHeight)
             {
-                return currentResolvedHeight;
+                resolvedHeight = currentHeight;
+                return false;
             }
 
-            var column = world.GetSurfaceColumn(neighborX, neighborZ);
-            if (!HasLayer(column, layer))
-            {
-                return currentResolvedHeight;
-            }
-
-            var currentHeight = profileHeight >= 0 ? profileHeight : currentResolvedHeight;
-            var neighborHeight = GetHeight(column, layer);
-            if (neighborHeight >= currentHeight)
-            {
-                return currentResolvedHeight;
-            }
-
-            var outerHeight = QuantizedSurfaceResolver.Resolve(currentHeight, neighborHeight, true).OuterHeightUnits;
-            return Math.Min(currentResolvedHeight, outerHeight);
+            resolvedHeight = System.Math.Min(
+                currentHeight + 1,
+                System.Math.Min(xHeight, zHeight));
+            return true;
         }
 
-        private static bool HasLayer(in SurfaceColumnData column, SurfaceLayer layer)
-            => layer == SurfaceLayer.Terrain ? column.HasSurface : column.HasWater;
+        public static bool TryGetHeight(
+            WorldData world,
+            int x,
+            int z,
+            SurfaceLayer layer,
+            out int height)
+        {
+            if (!world.ContainsColumn(x, z))
+            {
+                height = 0;
+                return false;
+            }
+
+            var column = world.GetSurfaceColumn(x, z);
+            if (layer == SurfaceLayer.Terrain)
+            {
+                height = column.SolidTopUnits;
+                return column.HasSurface;
+            }
+
+            height = column.WaterTopUnits;
+            return column.HasWater;
+        }
 
         private static int GetHeight(in SurfaceColumnData column, SurfaceLayer layer)
             => layer == SurfaceLayer.Terrain ? column.SolidTopUnits : column.WaterTopUnits;
+
+        private static bool IsLower(
+            WorldData world,
+            int x,
+            int z,
+            SurfaceLayer layer,
+            int currentHeight)
+            => TryGetHeight(world, x, z, layer, out var height)
+                && height < currentHeight;
     }
 }
