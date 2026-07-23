@@ -16,7 +16,7 @@ namespace MiniCivilization.World.Meshing
         private const float Shoulder = 0.2f;
         private const float CoreMin = Shoulder;
         private const float CoreMax = 1f - Shoulder;
-        private const float SurfaceOffset = 0.002f;
+        private const float SurfaceOffset = -0.01f;
 
         public static WaterChunkMeshBuffers Build(
             WorldData world,
@@ -173,6 +173,25 @@ namespace MiniCivilization.World.Meshing
                 world, catalog, x, z, startX, startZ,
                 cornerX, cornerZ, cornerHeight);
 
+            if (TryAddApronNotchCap(
+                    world,
+                    catalog,
+                    buffers.Surface,
+                    x,
+                    z,
+                    startX,
+                    startZ,
+                    cornerX,
+                    cornerZ,
+                    shoulderX,
+                    shoulderZ,
+                    directionX,
+                    directionZ,
+                    edgeX.CurrentHeightUnits))
+            {
+                return;
+            }
+
             // Water corners always use the actual tile's C/X/Z/I vertices.
             // Dry cardinal quadrants are covered by the source cell's render
             // apron, so they do not invalidate a connected one-tier rise.
@@ -180,6 +199,166 @@ namespace MiniCivilization.World.Meshing
                 corner, topAlongX, topAlongZ, Vector3.up);
             buffers.Surface.AddTriangleFacing(
                 topAlongX, inner, topAlongZ, Vector3.up);
+
+            AddCornerSeam(
+                world,
+                catalog,
+                buffers.Surface,
+                x,
+                z,
+                startX,
+                startZ,
+                cornerX,
+                cornerZ,
+                cornerHeight,
+                edgeX,
+                topAlongZ,
+                directionX,
+                0);
+            AddCornerSeam(
+                world,
+                catalog,
+                buffers.Surface,
+                x,
+                z,
+                startX,
+                startZ,
+                cornerX,
+                cornerZ,
+                cornerHeight,
+                edgeZ,
+                topAlongX,
+                0,
+                directionZ);
+        }
+
+        private static bool TryAddApronNotchCap(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float cornerX,
+            float cornerZ,
+            float shoulderX,
+            float shoulderZ,
+            int directionX,
+            int directionZ,
+            int heightUnits)
+        {
+            var xApronX = x + directionX;
+            var xApronZ = z;
+            var zApronX = x;
+            var zApronZ = z + directionZ;
+            var diagonalX = x + directionX;
+            var diagonalZ = z + directionZ;
+            if (!IsApronTarget(world, xApronX, xApronZ)
+                || !IsApronTarget(world, zApronX, zApronZ)
+                || !HasWater(world, diagonalX, diagonalZ)
+                || world.GetSurfaceColumn(diagonalX, diagonalZ).WaterTopUnits
+                    != heightUnits)
+            {
+                return false;
+            }
+
+            var materialId = world.GetSurfaceColumn(x, z).WaterMaterialId;
+            var xApronEnd = CreateApronVertex(
+                catalog,
+                x,
+                z,
+                startX,
+                startZ,
+                cornerX + directionX * Shoulder,
+                shoulderZ,
+                heightUnits,
+                materialId);
+            var recessedShoulder = CreateApronVertex(
+                catalog,
+                x,
+                z,
+                startX,
+                startZ,
+                shoulderX,
+                shoulderZ,
+                heightUnits,
+                materialId);
+            var zApronEnd = CreateApronVertex(
+                catalog,
+                x,
+                z,
+                startX,
+                startZ,
+                shoulderX,
+                cornerZ + directionZ * Shoulder,
+                heightUnits,
+                materialId);
+
+            // One owning water tile fills one V-shaped notch. The opposite
+            // diagonal water tile produces the second triangle with the same
+            // outer base and its own recessed Shoulder vertex.
+            buffers.AddTriangleFacing(
+                xApronEnd,
+                recessedShoulder,
+                zApronEnd,
+                Vector3.up);
+            return true;
+        }
+
+        private static void AddCornerSeam(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            MeshBuffers buffers,
+            int x,
+            int z,
+            int startX,
+            int startZ,
+            float cornerX,
+            float cornerZ,
+            int cornerHeight,
+            in SurfaceEdgeProfile edge,
+            in SurfaceVertex boundaryShoulder,
+            int directionX,
+            int directionZ)
+        {
+            // Existing water neighbors own their shared boundary. This seam
+            // only closes an exposed side of the current actual water tile.
+            if (edge.NeighborExists
+                || cornerHeight == edge.OuterHeightUnits)
+            {
+                return;
+            }
+
+            var baseCorner = CreateVertex(
+                world,
+                catalog,
+                x,
+                z,
+                startX,
+                startZ,
+                cornerX,
+                cornerZ,
+                edge.OuterHeightUnits);
+            var raisedCorner = CreateVertex(
+                world,
+                catalog,
+                x,
+                z,
+                startX,
+                startZ,
+                cornerX,
+                cornerZ,
+                cornerHeight);
+            var outward = new Vector3(directionX, 0f, directionZ);
+
+            // All three vertices remain on the current cell's 0..1 boundary;
+            // no dry-cell apron vertex participates in this polygon.
+            buffers.AddTriangleFacing(
+                raisedCorner,
+                baseCorner,
+                boundaryShoulder,
+                outward);
         }
 
         private static void AddWaterfalls(
@@ -426,8 +605,8 @@ namespace MiniCivilization.World.Meshing
             {
                 if (!hasDiagonal)
                 {
-                    // Two diagonal water quadrants form a saddle. They must
-                    // remain visually disconnected.
+                    // The two diagonal water tiles each own their V-shaped
+                    // notch cap; the dry cell must not connect their aprons.
                     return;
                 }
 
@@ -662,6 +841,11 @@ namespace MiniCivilization.World.Meshing
         private static bool HasWater(WorldData world, int x, int z)
             => world.ContainsColumn(x, z)
                 && world.GetSurfaceColumn(x, z).HasWater;
+
+        private static bool IsApronTarget(WorldData world, int x, int z)
+            => world.ContainsColumn(x, z)
+                && world.GetSurfaceColumn(x, z).HasSurface
+                && !world.GetSurfaceColumn(x, z).HasWater;
 
         private static SurfaceVertex CreateVertex(
             WorldData world,
