@@ -16,18 +16,19 @@ namespace MiniCivilization.World.Meshing
             float localX,
             float localZ)
         {
-            var currentId = world.GetSurfaceColumn(x, z).SurfaceMaterialId;
-            ResolveAxis(localX, out var offsetX, out var blendX);
-            ResolveAxis(localZ, out var offsetZ, out var blendZ);
+            return ResolveTerrain(world, catalog, x, z, localX, localZ, null);
+        }
 
-            var current = ResolveTerrainAppearance(catalog, currentId);
-            var xAppearance = ResolveTerrainNeighbor(world, catalog, x + offsetX, z, current);
-            var zAppearance = ResolveTerrainNeighbor(world, catalog, x, z + offsetZ, current);
-            var diagonalAppearance = ResolveTerrainNeighbor(world, catalog, x + offsetX, z + offsetZ, current);
-
-            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
-            var row1 = SurfaceAppearance.Lerp(zAppearance, diagonalAppearance, blendX);
-            return SurfaceAppearance.Lerp(row0, row1, blendZ);
+        public static SurfaceAppearance ResolveTerrain(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int z,
+            float localX,
+            float localZ,
+            SurfaceType surfaceOverride)
+        {
+            return ResolveTerrain(world, catalog, x, z, localX, localZ, (SurfaceType?)surfaceOverride);
         }
 
         public static SurfaceAppearance ResolveWater(
@@ -38,14 +39,60 @@ namespace MiniCivilization.World.Meshing
             float localX,
             float localZ)
         {
-            var currentId = world.GetSurfaceColumn(x, z).WaterMaterialId;
             ResolveAxis(localX, out var offsetX, out var blendX);
             ResolveAxis(localZ, out var offsetZ, out var blendZ);
 
-            var current = ResolveWaterAppearance(catalog, currentId);
+            var currentColumn = world.GetSurfaceColumn(x, z);
+            var current = ResolveWaterAppearance(catalog, currentColumn.Water);
             var xAppearance = ResolveWaterNeighbor(world, catalog, x + offsetX, z, current);
             var zAppearance = ResolveWaterNeighbor(world, catalog, x, z + offsetZ, current);
             var diagonalAppearance = ResolveWaterNeighbor(world, catalog, x + offsetX, z + offsetZ, current);
+
+            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
+            var row1 = SurfaceAppearance.Lerp(zAppearance, diagonalAppearance, blendX);
+            return SurfaceAppearance.Lerp(row0, row1, blendZ);
+        }
+
+        internal static SurfaceAppearance ResolveTerrainAppearance(
+            WorldSurfaceCatalog catalog,
+            BiomeType biome,
+            SurfaceType surface)
+        {
+            return catalog != null
+                ? catalog.ResolveTerrain(biome, surface)
+                : DefaultSurfacePalette.ResolveTerrain(biome, surface);
+        }
+
+        internal static SurfaceAppearance ResolveWaterAppearance(
+            WorldSurfaceCatalog catalog,
+            WaterType water)
+        {
+            return catalog != null
+                ? catalog.ResolveWater(water)
+                : DefaultSurfacePalette.ResolveWater(water);
+        }
+
+        private static SurfaceAppearance ResolveTerrain(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int z,
+            float localX,
+            float localZ,
+            SurfaceType? surfaceOverride)
+        {
+            ResolveAxis(localX, out var offsetX, out var blendX);
+            ResolveAxis(localZ, out var offsetZ, out var blendZ);
+
+            var currentColumn = world.GetSurfaceColumn(x, z);
+            var currentSurface = surfaceOverride ?? currentColumn.Surface;
+            var current = ResolveTerrainAppearance(catalog, currentColumn.Biome, currentSurface);
+            var xAppearance = ResolveTerrainNeighbor(
+                world, catalog, x + offsetX, z, surfaceOverride, current);
+            var zAppearance = ResolveTerrainNeighbor(
+                world, catalog, x, z + offsetZ, surfaceOverride, current);
+            var diagonalAppearance = ResolveTerrainNeighbor(
+                world, catalog, x + offsetX, z + offsetZ, surfaceOverride, current);
 
             var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
             var row1 = SurfaceAppearance.Lerp(zAppearance, diagonalAppearance, blendX);
@@ -76,6 +123,7 @@ namespace MiniCivilization.World.Meshing
             WorldSurfaceCatalog catalog,
             int x,
             int z,
+            SurfaceType? surfaceOverride,
             in SurfaceAppearance fallback)
         {
             if (!world.ContainsColumn(x, z))
@@ -84,7 +132,15 @@ namespace MiniCivilization.World.Meshing
             }
 
             var column = world.GetSurfaceColumn(x, z);
-            return column.HasSurface ? ResolveTerrainAppearance(catalog, column.SurfaceMaterialId) : fallback;
+            if (!column.HasSurface)
+            {
+                return fallback;
+            }
+
+            return ResolveTerrainAppearance(
+                catalog,
+                column.Biome,
+                surfaceOverride ?? column.Surface);
         }
 
         private static SurfaceAppearance ResolveWaterNeighbor(
@@ -100,13 +156,9 @@ namespace MiniCivilization.World.Meshing
             }
 
             var column = world.GetSurfaceColumn(x, z);
-            return column.HasWater ? ResolveWaterAppearance(catalog, column.WaterMaterialId) : fallback;
+            return column.HasWater
+                ? ResolveWaterAppearance(catalog, column.Water)
+                : fallback;
         }
-
-        internal static SurfaceAppearance ResolveTerrainAppearance(WorldSurfaceCatalog catalog, ushort id)
-            => catalog != null ? catalog.ResolveTerrain(id) : DefaultSurfacePalette.ResolveTerrain(id);
-
-        internal static SurfaceAppearance ResolveWaterAppearance(WorldSurfaceCatalog catalog, ushort id)
-            => catalog != null ? catalog.ResolveWater(id) : DefaultSurfacePalette.ResolveWater(id);
     }
 }

@@ -374,8 +374,10 @@ namespace MiniCivilization.World.Meshing
                 world, catalog, x, z, u0, v0);
             var surface1 = MaterialBlendResolver.ResolveTerrain(
                 world, catalog, x, z, u1, v1);
-            var rock = MaterialBlendResolver.ResolveTerrainAppearance(
-                catalog, WorldMaterialIds.Rock);
+            var cliff0 = MaterialBlendResolver.ResolveTerrain(
+                world, catalog, x, z, u0, v0, SurfaceType.Cliff);
+            var cliff1 = MaterialBlendResolver.ResolveTerrain(
+                world, catalog, x, z, u1, v1, SurfaceType.Cliff);
             var blendBottom0 = Math.Max(bottom0, top0 - 1);
             var blendBottom1 = Math.Max(bottom1, top1 - 1);
 
@@ -384,7 +386,7 @@ namespace MiniCivilization.World.Meshing
                 directionX, directionZ,
                 u0, v0, u1, v1,
                 top0, top1, blendBottom0, blendBottom1,
-                surface0, surface1, rock, rock);
+                surface0, surface1, cliff0, cliff1);
 
             if (blendBottom0 > bottom0 || blendBottom1 > bottom1)
             {
@@ -393,7 +395,7 @@ namespace MiniCivilization.World.Meshing
                     directionX, directionZ,
                     u0, v0, u1, v1,
                     blendBottom0, blendBottom1, bottom0, bottom1,
-                    rock, rock, rock, rock);
+                    cliff0, cliff1, cliff0, cliff1);
             }
         }
 

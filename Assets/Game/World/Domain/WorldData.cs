@@ -208,7 +208,7 @@ namespace MiniCivilization.World.Domain
             {
                 SurfaceCellY = -1,
                 WaterCellY = -1,
-                BiomeId = previous.BiomeId,
+                Biome = previous.Biome,
                 Temperature = previous.Temperature,
                 Moisture = previous.Moisture,
                 Fertility = previous.Fertility
@@ -224,7 +224,7 @@ namespace MiniCivilization.World.Domain
                 {
                     column.WaterCellY = (short)y;
                     column.WaterLevel = (byte)(cell.SolidFill + cell.WaterFill);
-                    column.WaterMaterialId = cell.WaterMaterialId;
+                    column.Water = cell.Water;
                     waterTopUnits = y * WorldGrid.HeightStepsPerCell + column.WaterLevel;
                 }
 
@@ -232,9 +232,9 @@ namespace MiniCivilization.World.Domain
                 {
                     column.SurfaceCellY = (short)y;
                     column.SurfaceLevel = cell.SolidFill;
-                    column.SurfaceMaterialId = cell.SurfaceMaterialId != WorldMaterialIds.None
-                        ? cell.SurfaceMaterialId
-                        : cell.MaterialId;
+                    column.Surface = cell.Surface != SurfaceType.None
+                        ? cell.Surface
+                        : SurfaceType.Ground;
                     solidTopUnits = y * WorldGrid.HeightStepsPerCell + cell.SolidFill;
                 }
 
@@ -250,13 +250,17 @@ namespace MiniCivilization.World.Domain
             {
                 column.WaterCellY = -1;
                 column.WaterLevel = 0;
-                column.WaterMaterialId = WorldMaterialIds.None;
+                column.Water = WaterType.None;
             }
 
             SetSurfaceColumn(x, z, column);
         }
 
-        internal void SetColumnSolidHeightUnits(int x, int z, int heightUnits, ushort surfaceMaterialId)
+        internal void SetColumnSolidHeightUnits(
+            int x,
+            int z,
+            int heightUnits,
+            SurfaceType surface = SurfaceType.Ground)
         {
             heightUnits = Math.Clamp(heightUnits, 0, Height * WorldGrid.HeightStepsPerCell);
             for (var y = 0; y < Height; y++)
@@ -269,20 +273,20 @@ namespace MiniCivilization.World.Domain
 
                 if (fill > 0)
                 {
-                    cell.MaterialId = y < Math.Max(0, heightUnits / WorldGrid.HeightStepsPerCell - 2)
-                        ? WorldMaterialIds.Rock
-                        : WorldMaterialIds.Soil;
-                    cell.GeologyId = WorldMaterialIds.Rock;
-                    cell.SurfaceMaterialId = fill < WorldGrid.HeightStepsPerCell || baseUnits + fill == heightUnits
-                        ? surfaceMaterialId
-                        : cell.MaterialId;
+                    cell.Material = y < Math.Max(0, heightUnits / WorldGrid.HeightStepsPerCell - 2)
+                        ? CellMaterialType.Rock
+                        : CellMaterialType.Soil;
+                    cell.Geology = CellMaterialType.Rock;
+                    cell.Surface = fill < WorldGrid.HeightStepsPerCell || baseUnits + fill == heightUnits
+                        ? surface
+                        : SurfaceType.None;
                     cell.Flags |= CellFlags.Generated;
                 }
                 else
                 {
-                    cell.MaterialId = WorldMaterialIds.None;
-                    cell.SurfaceMaterialId = WorldMaterialIds.None;
-                    cell.GeologyId = WorldMaterialIds.None;
+                    cell.Material = CellMaterialType.None;
+                    cell.Surface = SurfaceType.None;
+                    cell.Geology = CellMaterialType.None;
                 }
 
                 SetCellWithoutSurfaceRebuild(x, y, z, cell);
@@ -291,7 +295,12 @@ namespace MiniCivilization.World.Domain
             RebuildSurfaceColumn(x, z);
         }
 
-        internal void SetColumnWaterSurfaceUnits(int x, int z, int waterSurfaceUnits, ushort waterMaterialId, CellFlags flags = CellFlags.None)
+        internal void SetColumnWaterSurfaceUnits(
+            int x,
+            int z,
+            int waterSurfaceUnits,
+            WaterType water,
+            CellFlags flags = CellFlags.None)
         {
             waterSurfaceUnits = Math.Clamp(waterSurfaceUnits, 0, Height * WorldGrid.HeightStepsPerCell);
             for (var y = 0; y < Height; y++)
@@ -301,7 +310,7 @@ namespace MiniCivilization.World.Domain
                 var available = WorldGrid.HeightStepsPerCell - cell.SolidFill;
                 var desiredTop = Math.Clamp(waterSurfaceUnits - baseUnits, 0, WorldGrid.HeightStepsPerCell);
                 cell.WaterFill = (byte)Math.Clamp(desiredTop - cell.SolidFill, 0, available);
-                cell.WaterMaterialId = cell.WaterFill > 0 ? waterMaterialId : WorldMaterialIds.None;
+                cell.Water = cell.WaterFill > 0 ? water : WaterType.None;
                 cell.Flags = cell.WaterFill > 0
                     ? cell.Flags | flags | CellFlags.Generated
                     : cell.Flags & ~(CellFlags.River | CellFlags.Waterfall);

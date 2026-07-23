@@ -64,6 +64,35 @@ namespace MiniCivilization.World.Generation
             return weight > 0f ? total / weight : 0f;
         }
 
+        public static float RidgedFractalNoise(
+            float x,
+            float z,
+            int seed,
+            int octaves,
+            float lacunarity,
+            float persistence)
+        {
+            var amplitude = 1f;
+            var frequency = 1f;
+            var total = 0f;
+            var weight = 0f;
+
+            for (var octave = 0; octave < octaves; octave++)
+            {
+                var sample = ValueNoise(
+                    x * frequency,
+                    z * frequency,
+                    seed + octave * 1013) * 2f - 1f;
+                var ridge = 1f - MathF.Abs(sample);
+                total += ridge * ridge * amplitude;
+                weight += amplitude;
+                amplitude *= persistence;
+                frequency *= lacunarity;
+            }
+
+            return weight > 0f ? total / weight : 0f;
+        }
+
         private static float Smooth(float value) => value * value * (3f - 2f * value);
         private static float Lerp(float a, float b, float t) => a + (b - a) * t;
     }

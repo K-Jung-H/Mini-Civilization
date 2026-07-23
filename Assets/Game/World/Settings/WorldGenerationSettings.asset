@@ -12,18 +12,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97d524c8ea6b0e145a34679a81fd4244, type: 3}
   m_Name: WorldGenerationSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.WorldGenerationSettings
-  worldSize: 128
-  worldHeight: 32
+  worldSize: 256
+  worldHeight: 64
   chunkSizeXZ: 8
   chunkHeight: 4
-  seed: -1115092422
+  seed: 1177230571
   terrainNoiseScale: 0.035
   terrainOctaves: 4
   terrainLacunarity: 2
   terrainPersistence: 0.5
   baseTerrainHeightCells: 3
-  terrainAmplitudeCells: 3
-  islandFalloff: 0.85
+  terrainAmplitudeCells: 32
+  islandFalloff: 0.14
+  mountainNoiseScale: 0.025
+  mountainStrengthCells: 5
+  mountainThreshold: 0.42
+  mountainSharpness: 2.2
   seaLevelCell: 3
   seaLevelStep: 0
   riverCount: 4

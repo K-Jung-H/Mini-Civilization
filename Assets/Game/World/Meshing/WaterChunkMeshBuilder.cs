@@ -263,7 +263,7 @@ namespace MiniCivilization.World.Meshing
                 return false;
             }
 
-            var materialId = world.GetSurfaceColumn(x, z).WaterMaterialId;
+            var waterType = world.GetSurfaceColumn(x, z).Water;
             var xApronEnd = CreateApronVertex(
                 catalog,
                 x,
@@ -273,7 +273,7 @@ namespace MiniCivilization.World.Meshing
                 cornerX + directionX * Shoulder,
                 shoulderZ,
                 heightUnits,
-                materialId);
+                waterType);
             var recessedShoulder = CreateApronVertex(
                 catalog,
                 x,
@@ -283,7 +283,7 @@ namespace MiniCivilization.World.Meshing
                 shoulderX,
                 shoulderZ,
                 heightUnits,
-                materialId);
+                waterType);
             var zApronEnd = CreateApronVertex(
                 catalog,
                 x,
@@ -293,7 +293,7 @@ namespace MiniCivilization.World.Meshing
                 shoulderX,
                 cornerZ + directionZ * Shoulder,
                 heightUnits,
-                materialId);
+                waterType);
 
             // One owning water tile fills one V-shaped notch. The opposite
             // diagonal water tile produces the second triangle with the same
@@ -457,7 +457,7 @@ namespace MiniCivilization.World.Meshing
             var neighbor = world.GetSurfaceColumn(x + directionX, z + directionZ);
             var bottomAppearance = MaterialBlendResolver.ResolveWaterAppearance(
                 catalog,
-                neighbor.WaterMaterialId);
+                neighbor.Water);
 
             TerrainChunkMeshBuilder.AddVerticalQuad(
                 buffers,
@@ -526,12 +526,12 @@ namespace MiniCivilization.World.Meshing
                 sourceZ,
                 -neighborDirectionX,
                 -neighborDirectionZ);
-            var materialId = world.GetSurfaceColumn(sourceX, sourceZ).WaterMaterialId;
+            var waterType = world.GetSurfaceColumn(sourceX, sourceZ).Water;
 
             if (neighborDirectionX < 0)
             {
                 AddApronQuad(
-                    catalog, buffers, x, z, startX, startZ, materialId,
+                    catalog, buffers, x, z, startX, startZ, waterType,
                     0f, CoreMin, height,
                     0f, CoreMax, height,
                     CoreMin, CoreMax, height,
@@ -542,7 +542,7 @@ namespace MiniCivilization.World.Meshing
             if (neighborDirectionX > 0)
             {
                 AddApronQuad(
-                    catalog, buffers, x, z, startX, startZ, materialId,
+                    catalog, buffers, x, z, startX, startZ, waterType,
                     CoreMax, CoreMin, height,
                     CoreMax, CoreMax, height,
                     1f, CoreMax, height,
@@ -553,7 +553,7 @@ namespace MiniCivilization.World.Meshing
             if (neighborDirectionZ < 0)
             {
                 AddApronQuad(
-                    catalog, buffers, x, z, startX, startZ, materialId,
+                    catalog, buffers, x, z, startX, startZ, waterType,
                     CoreMin, 0f, height,
                     CoreMin, CoreMin, height,
                     CoreMax, CoreMin, height,
@@ -562,7 +562,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             AddApronQuad(
-                catalog, buffers, x, z, startX, startZ, materialId,
+                catalog, buffers, x, z, startX, startZ, waterType,
                 CoreMin, CoreMax, height,
                 CoreMin, 1f, height,
                 CoreMax, 1f, height,
@@ -628,12 +628,12 @@ namespace MiniCivilization.World.Meshing
             // The apron only extends its owning edge. It must not inherit the
             // actual water tile's raised corner or connect across a height step.
             var cornerHeight = edgeHeight;
-            var materialId = world.GetSurfaceColumn(sourceX, sourceZ).WaterMaterialId;
+            var waterType = world.GetSurfaceColumn(sourceX, sourceZ).Water;
 
             if (hasX)
             {
                 AddApronQuad(
-                    catalog, buffers.Surface, x, z, startX, startZ, materialId,
+                    catalog, buffers.Surface, x, z, startX, startZ, waterType,
                     cornerX, cornerZ, cornerHeight,
                     cornerX, shoulderZ, edgeHeight,
                     shoulderX, shoulderZ, edgeHeight,
@@ -642,7 +642,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             AddApronQuad(
-                catalog, buffers.Surface, x, z, startX, startZ, materialId,
+                catalog, buffers.Surface, x, z, startX, startZ, waterType,
                 cornerX, cornerZ, cornerHeight,
                 cornerX, shoulderZ, cornerHeight,
                 shoulderX, shoulderZ, edgeHeight,
@@ -674,29 +674,29 @@ namespace MiniCivilization.World.Meshing
             // polygons belong exclusively to actual water tiles.
             var xCornerHeight = xEdgeHeight;
             var zCornerHeight = zEdgeHeight;
-            var xMaterial = world.GetSurfaceColumn(sourceXX, sourceXZ).WaterMaterialId;
-            var zMaterial = world.GetSurfaceColumn(sourceZX, sourceZZ).WaterMaterialId;
+            var xWater = world.GetSurfaceColumn(sourceXX, sourceXZ).Water;
+            var zWater = world.GetSurfaceColumn(sourceZX, sourceZZ).Water;
 
             var xCorner = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                cornerX, cornerZ, xCornerHeight, xMaterial);
+                cornerX, cornerZ, xCornerHeight, xWater);
             var xInner = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                shoulderX, shoulderZ, xEdgeHeight, xMaterial);
+                shoulderX, shoulderZ, xEdgeHeight, xWater);
             var xAlongZ = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                cornerX, shoulderZ, xEdgeHeight, xMaterial);
+                cornerX, shoulderZ, xEdgeHeight, xWater);
             buffers.AddTriangleFacing(xCorner, xInner, xAlongZ, Vector3.up);
 
             var zCorner = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                cornerX, cornerZ, zCornerHeight, zMaterial);
+                cornerX, cornerZ, zCornerHeight, zWater);
             var zAlongX = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                shoulderX, cornerZ, zEdgeHeight, zMaterial);
+                shoulderX, cornerZ, zEdgeHeight, zWater);
             var zInner = CreateApronVertex(
                 catalog, x, z, startX, startZ,
-                shoulderX, shoulderZ, zEdgeHeight, zMaterial);
+                shoulderX, shoulderZ, zEdgeHeight, zWater);
             buffers.AddTriangleFacing(zCorner, zAlongX, zInner, Vector3.up);
         }
 
@@ -707,7 +707,7 @@ namespace MiniCivilization.World.Meshing
             int z,
             int startX,
             int startZ,
-            ushort materialId,
+            WaterType waterType,
             float ax,
             float az,
             int ah,
@@ -723,10 +723,10 @@ namespace MiniCivilization.World.Meshing
         {
             AddSurfaceQuad(
                 buffers,
-                CreateApronVertex(catalog, x, z, startX, startZ, ax, az, ah, materialId),
-                CreateApronVertex(catalog, x, z, startX, startZ, bx, bz, bh, materialId),
-                CreateApronVertex(catalog, x, z, startX, startZ, cx, cz, ch, materialId),
-                CreateApronVertex(catalog, x, z, startX, startZ, dx, dz, dh, materialId));
+                CreateApronVertex(catalog, x, z, startX, startZ, ax, az, ah, waterType),
+                CreateApronVertex(catalog, x, z, startX, startZ, bx, bz, bh, waterType),
+                CreateApronVertex(catalog, x, z, startX, startZ, cx, cz, ch, waterType),
+                CreateApronVertex(catalog, x, z, startX, startZ, dx, dz, dh, waterType));
         }
 
         private static SurfaceVertex CreateApronVertex(
@@ -738,7 +738,7 @@ namespace MiniCivilization.World.Meshing
             float localX,
             float localZ,
             int heightUnits,
-            ushort materialId)
+            WaterType waterType)
         {
             return new SurfaceVertex(
                 new Vector3(
@@ -746,7 +746,7 @@ namespace MiniCivilization.World.Meshing
                     WorldGrid.ToWorldHeight(heightUnits) + SurfaceOffset,
                     z - startZ + localZ),
                 new Vector2(x + localX, z + localZ),
-                MaterialBlendResolver.ResolveWaterAppearance(catalog, materialId));
+                MaterialBlendResolver.ResolveWaterAppearance(catalog, waterType));
         }
 
         private static int ResolveSourceEdgeHeight(

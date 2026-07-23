@@ -14,7 +14,7 @@ namespace MiniCivilization.World.Tests
             var floatingWater = new CellData
             {
                 WaterFill = 1,
-                WaterMaterialId = WorldMaterialIds.FreshWater
+                Water = WaterType.Fresh
             };
 
             Assert.Throws<InvalidOperationException>(() => world.SetCell(1, 2, 1, floatingWater));
@@ -28,13 +28,13 @@ namespace MiniCivilization.World.Tests
             world.SetCell(1, 0, 1, new CellData
             {
                 WaterFill = WorldGrid.HeightStepsPerCell,
-                WaterMaterialId = WorldMaterialIds.FreshWater
+                Water = WaterType.Fresh
             });
             world.SetCell(1, 1, 1, new CellData
             {
                 SolidFill = WorldGrid.HeightStepsPerCell,
-                MaterialId = WorldMaterialIds.Rock,
-                SurfaceMaterialId = WorldMaterialIds.Rock
+                Material = CellMaterialType.Rock,
+                Surface = SurfaceType.Ground
             });
 
             Assert.That(world.GetSurfaceColumn(1, 1).HasWater, Is.False);
@@ -44,10 +44,10 @@ namespace MiniCivilization.World.Tests
         public void WaterfallColumns_AreOneConnectedWaterBody()
         {
             var world = new WorldData(4, 4, 2, 2, 2, 1);
-            world.SetColumnSolidHeightUnits(1, 1, 2, WorldMaterialIds.Rock);
-            world.SetColumnSolidHeightUnits(2, 1, 2, WorldMaterialIds.Rock);
-            world.SetColumnWaterSurfaceUnits(1, 1, 8, WorldMaterialIds.FreshWater, CellFlags.River | CellFlags.Waterfall);
-            world.SetColumnWaterSurfaceUnits(2, 1, 4, WorldMaterialIds.FreshWater, CellFlags.River);
+            world.SetColumnSolidHeightUnits(1, 1, 2);
+            world.SetColumnSolidHeightUnits(2, 1, 2);
+            world.SetColumnWaterSurfaceUnits(1, 1, 8, WaterType.Fresh, CellFlags.River | CellFlags.Waterfall);
+            world.SetColumnWaterSurfaceUnits(2, 1, 4, WaterType.Fresh, CellFlags.River);
 
             var bodies = WaterBodyResolver.Resolve(world);
 

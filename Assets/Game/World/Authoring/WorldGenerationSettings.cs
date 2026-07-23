@@ -34,6 +34,14 @@ namespace MiniCivilization.World.Authoring
         [SerializeField, Min(1)] private int terrainAmplitudeCells = 5;
         [Tooltip("월드 가장자리의 지형을 낮추는 강도입니다. 값이 클수록 가장자리가 더 많이 잠겨 섬 형태가 강해집니다.")]
         [SerializeField, Range(0f, 1.5f)] private float islandFalloff = 0.85f;
+        [Tooltip("산맥 능선을 만드는 Ridged Noise의 좌표 배율입니다. 값이 클수록 산맥 간격이 좁아집니다.")]
+        [SerializeField, Min(0.001f)] private float mountainNoiseScale = 0.025f;
+        [Tooltip("산맥이 기본 지형 위로 추가되는 최대 높이입니다. 단위는 수직 Cell입니다.")]
+        [SerializeField, Min(0)] private int mountainStrengthCells = 5;
+        [Tooltip("산맥이 생성되기 시작하는 저주파 마스크 기준입니다. 값이 클수록 산악 지역이 드물어집니다.")]
+        [SerializeField, Range(0f, 0.95f)] private float mountainThreshold = 0.42f;
+        [Tooltip("산맥 능선의 날카로움입니다. 값이 클수록 좁고 뚜렷한 능선이 생성됩니다.")]
+        [SerializeField, Range(1f, 6f)] private float mountainSharpness = 2.2f;
 
         [Header("Water")]
         [Tooltip("해수면의 기본 수직 Cell 위치입니다. Sea Level Step과 합쳐 최종 해수면 높이를 결정합니다.")]
@@ -71,6 +79,10 @@ namespace MiniCivilization.World.Authoring
         public int BaseTerrainHeightUnits => baseTerrainHeightCells * WorldGrid.HeightStepsPerCell;
         public int TerrainAmplitudeUnits => terrainAmplitudeCells * WorldGrid.HeightStepsPerCell;
         public float IslandFalloff => islandFalloff;
+        public float MountainNoiseScale => mountainNoiseScale;
+        public int MountainStrengthUnits => mountainStrengthCells * WorldGrid.HeightStepsPerCell;
+        public float MountainThreshold => mountainThreshold;
+        public float MountainSharpness => mountainSharpness;
         public int SeaLevelUnits => seaLevelCell * WorldGrid.HeightStepsPerCell + seaLevelStep;
         public int RiverCount => riverCount;
         public int RiverDepthSteps => riverDepthSteps;
@@ -131,6 +143,7 @@ namespace MiniCivilization.World.Authoring
             chunkHeight = Math.Clamp(chunkHeight, 1, worldHeight);
             baseTerrainHeightCells = Math.Clamp(baseTerrainHeightCells, 1, worldHeight - 1);
             terrainAmplitudeCells = Math.Clamp(terrainAmplitudeCells, 1, worldHeight - 1);
+            mountainStrengthCells = Math.Clamp(mountainStrengthCells, 0, worldHeight - 1);
             seaLevelCell = Math.Clamp(seaLevelCell, 0, worldHeight - 1);
         }
     }

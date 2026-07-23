@@ -32,42 +32,51 @@ namespace MiniCivilization.World.Domain
         All = Cells | Surface | TerrainMesh | Hydrology | WaterMesh | Materials
     }
 
-    public static class WorldMaterialIds
+    public enum CellMaterialType : ushort
     {
-        public const ushort None = 0;
-        public const ushort Soil = 1;
-        public const ushort Rock = 2;
-        public const ushort Grass = 3;
-        public const ushort Sand = 4;
-        public const ushort Snow = 5;
-        public const ushort Mud = 6;
-
-        public const ushort FreshWater = 100;
-        public const ushort SeaWater = 101;
-        public const ushort MarshWater = 102;
+        None = 0,
+        Soil = 1,
+        Rock = 2
     }
 
-    public static class WorldBiomeIds
+    public enum BiomeType : ushort
     {
-        public const ushort None = 0;
-        public const ushort Grassland = 1;
-        public const ushort Desert = 2;
-        public const ushort Tundra = 3;
-        public const ushort Wetland = 4;
-        public const ushort Coast = 5;
-        public const ushort Mountain = 6;
-        public const ushort Seabed = 7;
-        public const ushort Lakebed = 8;
-        public const ushort Riverbed = 9;
+        None = 0,
+        Grassland = 1,
+        Forest = 2,
+        Desert = 3,
+        Snow = 4,
+        Wetland = 5,
+        Mountain = 6
+    }
+
+    public enum SurfaceType : ushort
+    {
+        None = 0,
+        Ground = 1,
+        Cliff = 2,
+        Road = 3,
+        Riverbed = 4,
+        Lakebed = 5,
+        Seabed = 6,
+        Shore = 7
+    }
+
+    public enum WaterType : ushort
+    {
+        None = 0,
+        Fresh = 1,
+        Sea = 2,
+        Marsh = 3
     }
 
     [Serializable]
     public struct CellData : IEquatable<CellData>
     {
-        public ushort MaterialId;
-        public ushort SurfaceMaterialId;
-        public ushort WaterMaterialId;
-        public ushort GeologyId;
+        public CellMaterialType Material;
+        public SurfaceType Surface;
+        public WaterType Water;
+        public CellMaterialType Geology;
         public ushort DepositIndex;
         public byte SolidFill;
         public byte WaterFill;
@@ -83,23 +92,23 @@ namespace MiniCivilization.World.Domain
 
             if (SolidFill == 0)
             {
-                MaterialId = WorldMaterialIds.None;
-                SurfaceMaterialId = WorldMaterialIds.None;
+                Material = CellMaterialType.None;
+                Surface = SurfaceType.None;
             }
 
             if (WaterFill == 0)
             {
-                WaterMaterialId = WorldMaterialIds.None;
+                Water = WaterType.None;
                 Flags &= ~(CellFlags.River | CellFlags.Waterfall);
             }
         }
 
         public readonly bool Equals(CellData other)
         {
-            return MaterialId == other.MaterialId
-                && SurfaceMaterialId == other.SurfaceMaterialId
-                && WaterMaterialId == other.WaterMaterialId
-                && GeologyId == other.GeologyId
+            return Material == other.Material
+                && Surface == other.Surface
+                && Water == other.Water
+                && Geology == other.Geology
                 && DepositIndex == other.DepositIndex
                 && SolidFill == other.SolidFill
                 && WaterFill == other.WaterFill
@@ -107,7 +116,7 @@ namespace MiniCivilization.World.Domain
         }
 
         public override readonly bool Equals(object obj) => obj is CellData other && Equals(other);
-        public override readonly int GetHashCode() => HashCode.Combine(MaterialId, SurfaceMaterialId, WaterMaterialId, GeologyId, DepositIndex, SolidFill, WaterFill, Flags);
+        public override readonly int GetHashCode() => HashCode.Combine(Material, Surface, Water, Geology, DepositIndex, SolidFill, WaterFill, Flags);
     }
 
     [Serializable]
@@ -117,9 +126,9 @@ namespace MiniCivilization.World.Domain
         public byte SurfaceLevel;
         public short WaterCellY;
         public byte WaterLevel;
-        public ushort SurfaceMaterialId;
-        public ushort WaterMaterialId;
-        public ushort BiomeId;
+        public SurfaceType Surface;
+        public WaterType Water;
+        public BiomeType Biome;
         public byte Temperature;
         public byte Moisture;
         public byte Fertility;

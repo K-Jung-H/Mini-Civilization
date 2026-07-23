@@ -12,5 +12,199 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7a973b194bace8a44a6008d536e5b3a0, type: 3}
   m_Name: WorldSurfaceCatalog
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.WorldSurfaceCatalog
-  terrain: []
-  water: []
+  textureResolution: 256
+  commonTerrain:
+  - Type: 2
+    Appearance:
+      AlbedoTexture: {fileID: 2800000, guid: b1becfeaaf298b14f90d469ae4685c81, type: 3}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.34, g: 0.35, b: 0.37, a: 1}
+      Tiling: 1
+      Metallic: 0.02
+      Smoothness: 0.25
+      Occlusion: 1
+  - Type: 3
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.34, g: 0.24, b: 0.14, a: 1}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.15
+      Occlusion: 1
+  - Type: 4
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.25, g: 0.27, b: 0.25, a: 1}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.16
+      Occlusion: 1
+  - Type: 5
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.25, g: 0.19, b: 0.12, a: 1}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.12
+      Occlusion: 1
+  - Type: 6
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.76, g: 0.64, b: 0.38, a: 1}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.18
+      Occlusion: 1
+  - Type: 7
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.76, g: 0.64, b: 0.38, a: 1}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.18
+      Occlusion: 1
+  biomes:
+  - Biome: 1
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.25, g: 0.5, b: 0.18, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+  - Biome: 2
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.16, g: 0.38, b: 0.12, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+    - Type: 4
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.19, g: 0.24, b: 0.18, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.12
+        Occlusion: 1
+  - Biome: 3
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.76, g: 0.64, b: 0.38, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+    - Type: 3
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.46, g: 0.34, b: 0.19, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.14
+        Occlusion: 1
+  - Biome: 4
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.9, g: 0.94, b: 0.98, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+    - Type: 2
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.62, g: 0.67, b: 0.72, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.3
+        Occlusion: 1
+  - Biome: 5
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.25, g: 0.19, b: 0.12, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+  - Biome: 6
+    Surfaces:
+    - Type: 1
+      Appearance:
+        AlbedoTexture: {fileID: 0}
+        NormalTexture: {fileID: 0}
+        MaskTexture: {fileID: 0}
+        Tint: {r: 0.34, g: 0.35, b: 0.37, a: 1}
+        Tiling: 1
+        Metallic: 0
+        Smoothness: 0.16
+        Occlusion: 1
+  water:
+  - Type: 1
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.08, g: 0.42, b: 0.68, a: 0.72}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.9
+      Occlusion: 0.9
+  - Type: 2
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.05, g: 0.25, b: 0.52, a: 0.78}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.88
+      Occlusion: 0.9
+  - Type: 3
+    Appearance:
+      AlbedoTexture: {fileID: 0}
+      NormalTexture: {fileID: 0}
+      MaskTexture: {fileID: 0}
+      Tint: {r: 0.18, g: 0.31, b: 0.17, a: 0.8}
+      Tiling: 1
+      Metallic: 0
+      Smoothness: 0.72
+      Occlusion: 0.9

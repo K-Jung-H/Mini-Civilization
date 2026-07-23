@@ -36,6 +36,11 @@ namespace MiniCivilization.World.Presentation
             transform.localScale = Vector3.one;
 
             EnsureChildren(buildCollider);
+            if (catalog != null)
+            {
+                catalog.ApplyToMaterials(terrainMaterial, waterMaterial);
+            }
+
             ReplaceMesh(terrainFilter, TerrainChunkMeshBuilder.Build(world, patchX, patchZ, catalog).CreateMesh($"Terrain [{patchX}, {patchZ}]"));
             terrainRenderer.sharedMaterial = terrainMaterial;
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;

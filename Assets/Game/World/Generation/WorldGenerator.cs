@@ -53,14 +53,14 @@ namespace MiniCivilization.World.Generation
             var columnCount = settings.WorldSize * settings.WorldSize;
             var solidHeights = new int[columnCount];
             var waterSurfaces = new int[columnCount];
-            var waterMaterials = new ushort[columnCount];
+            var waterTypes = new WaterType[columnCount];
             var waterFlags = new CellFlags[columnCount];
 
             GenerateBaseTerrain(world, settings, solidHeights);
-            InitializeSea(world, settings, solidHeights, waterSurfaces, waterMaterials);
-            GenerateLakes(world, settings, solidHeights, waterSurfaces, waterMaterials);
-            GenerateRivers(world, settings, solidHeights, waterSurfaces, waterMaterials, waterFlags);
-            ApplyColumns(world, solidHeights, waterSurfaces, waterMaterials, waterFlags);
+            InitializeSea(world, settings, solidHeights, waterSurfaces, waterTypes);
+            GenerateLakes(world, settings, solidHeights, waterSurfaces, waterTypes);
+            GenerateRivers(world, settings, solidHeights, waterSurfaces, waterTypes, waterFlags);
+            ApplyColumns(world, solidHeights, waterSurfaces, waterTypes, waterFlags);
             ApplyBiomes(world, settings);
 
             var waterBodies = WaterBodyResolver.Resolve(world);
@@ -79,10 +79,10 @@ namespace MiniCivilization.World.Generation
             {
                 foreach (var cell in chunk.AsSpan())
                 {
-                    hash = Mix(hash, cell.MaterialId, prime);
-                    hash = Mix(hash, cell.SurfaceMaterialId, prime);
-                    hash = Mix(hash, cell.WaterMaterialId, prime);
-                    hash = Mix(hash, cell.GeologyId, prime);
+                    hash = Mix(hash, (ushort)cell.Material, prime);
+                    hash = Mix(hash, (ushort)cell.Surface, prime);
+                    hash = Mix(hash, (ushort)cell.Water, prime);
+                    hash = Mix(hash, (ushort)cell.Geology, prime);
                     hash = Mix(hash, cell.DepositIndex, prime);
                     hash = Mix(hash, cell.SolidFill, prime);
                     hash = Mix(hash, cell.WaterFill, prime);
@@ -98,9 +98,9 @@ namespace MiniCivilization.World.Generation
                 hash = Mix(hash, column.SurfaceLevel, prime);
                 hash = Mix(hash, column.WaterCellY, prime);
                 hash = Mix(hash, column.WaterLevel, prime);
-                hash = Mix(hash, column.SurfaceMaterialId, prime);
-                hash = Mix(hash, column.WaterMaterialId, prime);
-                hash = Mix(hash, column.BiomeId, prime);
+                hash = Mix(hash, (ushort)column.Surface, prime);
+                hash = Mix(hash, (ushort)column.Water, prime);
+                hash = Mix(hash, (ushort)column.Biome, prime);
                 hash = Mix(hash, column.Temperature, prime);
                 hash = Mix(hash, column.Moisture, prime);
                 hash = Mix(hash, column.Fertility, prime);
@@ -140,7 +140,12 @@ namespace MiniCivilization.World.Generation
         private static void GenerateBaseTerrain(WorldData world, WorldGenerationSettings settings, int[] heights)
         {
             var terrainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "terrain");
+            var mountainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountains");
+            var mountainMaskSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountain-mask");
             var maximumUnits = world.Height * WorldGrid.HeightStepsPerCell - 1;
+            var edgeFalloffUnits = world.Height
+                * WorldGrid.HeightStepsPerCell
+                * 0.35f;
 
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
@@ -152,15 +157,49 @@ namespace MiniCivilization.World.Generation
                     settings.TerrainOctaves,
                     settings.TerrainLacunarity,
                     settings.TerrainPersistence);
+                var mountainRidge = DeterministicNoise.RidgedFractalNoise(
+                    x * settings.MountainNoiseScale,
+                    z * settings.MountainNoiseScale,
+                    mountainSeed,
+                    settings.TerrainOctaves,
+                    settings.TerrainLacunarity,
+                    settings.TerrainPersistence);
+                var mountainMaskNoise = DeterministicNoise.FractalNoise(
+                    x * settings.MountainNoiseScale * 0.4f,
+                    z * settings.MountainNoiseScale * 0.4f,
+                    mountainMaskSeed,
+                    3,
+                    2f,
+                    0.5f);
 
                 var normalizedX = world.Size > 1 ? x / (float)(world.Size - 1) * 2f - 1f : 0f;
                 var normalizedZ = world.Size > 1 ? z / (float)(world.Size - 1) * 2f - 1f : 0f;
                 var edgeDistance = MathF.Max(MathF.Abs(normalizedX), MathF.Abs(normalizedZ));
-                var edgePenalty = MathF.Pow(edgeDistance, 3f) * settings.TerrainAmplitudeUnits * settings.IslandFalloff * 1.75f;
+                var edgePenalty = MathF.Pow(edgeDistance, 3f)
+                    * edgeFalloffUnits
+                    * settings.IslandFalloff;
                 var centeredNoise = noise * 2f - 1f;
-                var height = settings.BaseTerrainHeightUnits + (int)MathF.Round(centeredNoise * settings.TerrainAmplitudeUnits - edgePenalty);
+                var mountainMask = SmoothStep01(
+                    (mountainMaskNoise - settings.MountainThreshold) / 0.2f);
+                var inlandMask = 1f - SmoothStep01(
+                    (edgeDistance - 0.62f) / 0.38f);
+                var mountainHeight = MathF.Pow(
+                        mountainRidge,
+                        settings.MountainSharpness)
+                    * mountainMask
+                    * inlandMask
+                    * settings.MountainStrengthUnits;
+                var height = settings.BaseTerrainHeightUnits
+                    + (int)MathF.Round(
+                        centeredNoise * settings.TerrainAmplitudeUnits
+                        + mountainHeight
+                        - edgePenalty);
 
-                if (x == 0 || z == 0 || x == world.Size - 1 || z == world.Size - 1)
+                if (settings.IslandFalloff > 0f
+                    && (x == 0
+                        || z == 0
+                        || x == world.Size - 1
+                        || z == world.Size - 1))
                 {
                     height = Math.Min(height, settings.SeaLevelUnits - 2);
                 }
@@ -170,7 +209,12 @@ namespace MiniCivilization.World.Generation
             }
         }
 
-        private static void InitializeSea(WorldData world, WorldGenerationSettings settings, int[] solidHeights, int[] waterSurfaces, ushort[] waterMaterials)
+        private static void InitializeSea(
+            WorldData world,
+            WorldGenerationSettings settings,
+            int[] solidHeights,
+            int[] waterSurfaces,
+            WaterType[] waterTypes)
         {
             var visited = new bool[solidHeights.Length];
             var queue = new Queue<(int x, int z)>();
@@ -192,7 +236,7 @@ namespace MiniCivilization.World.Generation
                 var current = queue.Dequeue();
                 var currentIndex = ToColumnIndex(world.Size, current.x, current.z);
                 waterSurfaces[currentIndex] = settings.SeaLevelUnits;
-                waterMaterials[currentIndex] = WorldMaterialIds.SeaWater;
+                waterTypes[currentIndex] = WaterType.Sea;
 
                 for (var i = 0; i < CardinalDirections.Length; i++)
                 {
@@ -223,7 +267,7 @@ namespace MiniCivilization.World.Generation
             WorldGenerationSettings settings,
             int[] solidHeights,
             int[] waterSurfaces,
-            ushort[] waterMaterials)
+            WaterType[] waterTypes)
         {
             if (settings.LakeCount <= 0)
             {
@@ -283,7 +327,7 @@ namespace MiniCivilization.World.Generation
                 chosen.Add((bestX, bestZ));
                 var centerIndex = ToColumnIndex(world.Size, bestX, bestZ);
                 var waterLevel = Math.Max(settings.SeaLevelUnits + 2, solidHeights[centerIndex] - 1);
-                CarveLake(world.Size, bestX, bestZ, settings.LakeRadius, waterLevel, solidHeights, waterSurfaces, waterMaterials);
+                CarveLake(world.Size, bestX, bestZ, settings.LakeRadius, waterLevel, solidHeights, waterSurfaces, waterTypes);
             }
         }
 
@@ -295,7 +339,7 @@ namespace MiniCivilization.World.Generation
             int waterLevel,
             int[] solidHeights,
             int[] waterSurfaces,
-            ushort[] waterMaterials)
+            WaterType[] waterTypes)
         {
             var outerRadius = radius + 1;
             for (var z = centerZ - outerRadius; z <= centerZ + outerRadius; z++)
@@ -317,7 +361,7 @@ namespace MiniCivilization.World.Generation
                     var depth = 1 + (int)MathF.Round(centerFactor * 2f);
                     solidHeights[index] = Math.Min(solidHeights[index], waterLevel - depth);
                     waterSurfaces[index] = Math.Max(waterSurfaces[index], waterLevel);
-                    waterMaterials[index] = WorldMaterialIds.FreshWater;
+                    waterTypes[index] = WaterType.Fresh;
                 }
                 else if (distanceSquared <= outerRadius * outerRadius && waterSurfaces[index] == 0)
                 {
@@ -331,7 +375,7 @@ namespace MiniCivilization.World.Generation
             WorldGenerationSettings settings,
             int[] solidHeights,
             int[] waterSurfaces,
-            ushort[] waterMaterials,
+            WaterType[] waterTypes,
             CellFlags[] waterFlags)
         {
             if (settings.RiverCount <= 0)
@@ -357,7 +401,7 @@ namespace MiniCivilization.World.Generation
                     continue;
                 }
 
-                CarveRiver(world, settings, path, solidHeights, waterSurfaces, waterMaterials, waterFlags);
+                CarveRiver(world, settings, path, solidHeights, waterSurfaces, waterTypes, waterFlags);
             }
         }
 
@@ -467,7 +511,7 @@ namespace MiniCivilization.World.Generation
             List<(int x, int z)> path,
             int[] solidHeights,
             int[] waterSurfaces,
-            ushort[] waterMaterials,
+            WaterType[] waterTypes,
             CellFlags[] waterFlags)
         {
             var pathIndices = new HashSet<int>();
@@ -479,17 +523,34 @@ namespace MiniCivilization.World.Generation
             var levels = new int[path.Count];
             var end = path[^1];
             var endIndex = ToColumnIndex(world.Size, end.x, end.z);
-            levels[^1] = waterSurfaces[endIndex] > 0 ? waterSurfaces[endIndex] : settings.SeaLevelUnits;
+            var outletLevel = waterSurfaces[endIndex] > 0
+                ? waterSurfaces[endIndex]
+                : settings.SeaLevelUnits;
+            var start = path[0];
+            var startIndex = ToColumnIndex(world.Size, start.x, start.z);
+            var sourceLevel = Math.Max(
+                outletLevel,
+                solidHeights[startIndex] - 1);
+            levels[0] = sourceLevel;
 
-            for (var i = path.Count - 2; i >= 0; i--)
+            for (var i = 1; i < path.Count - 1; i++)
             {
                 var point = path[i];
                 var index = ToColumnIndex(world.Size, point.x, point.z);
-                var naturalLevel = Math.Max(levels[i + 1], solidHeights[index] - 1);
-                var difference = naturalLevel - levels[i + 1];
-                var rise = difference >= 4 ? Math.Min(3, difference) : Math.Min(1, Math.Max(0, difference));
-                levels[i] = levels[i + 1] + rise;
+                var progress = i / (float)(path.Count - 1);
+                var profileLevel = (int)MathF.Round(
+                    sourceLevel
+                    + (outletLevel - sourceLevel) * progress);
+                var terrainLevel = Math.Max(
+                    outletLevel,
+                    solidHeights[index] - 1);
+                var desiredLevel = Math.Max(
+                    profileLevel,
+                    Math.Min(terrainLevel, levels[i - 1]));
+                levels[i] = Math.Min(levels[i - 1], desiredLevel);
             }
+
+            levels[^1] = outletLevel;
 
             for (var i = 0; i < path.Count; i++)
             {
@@ -498,7 +559,7 @@ namespace MiniCivilization.World.Generation
                 var waterLevel = levels[i];
                 solidHeights[index] = Math.Min(solidHeights[index], waterLevel - settings.RiverDepthSteps);
                 waterSurfaces[index] = Math.Max(waterSurfaces[index], waterLevel);
-                waterMaterials[index] = WorldMaterialIds.FreshWater;
+                waterTypes[index] = WaterType.Fresh;
                 waterFlags[index] |= CellFlags.River;
 
                 if (i + 1 < path.Count && levels[i] - levels[i + 1] >= 2)
@@ -529,21 +590,18 @@ namespace MiniCivilization.World.Generation
             WorldData world,
             int[] solidHeights,
             int[] waterSurfaces,
-            ushort[] waterMaterials,
+            WaterType[] waterTypes,
             CellFlags[] waterFlags)
         {
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
                 var index = ToColumnIndex(world.Size, x, z);
-                var preliminarySurface = waterMaterials[index] == WorldMaterialIds.SeaWater
-                    ? WorldMaterialIds.Sand
-                    : WorldMaterialIds.Grass;
-                world.SetColumnSolidHeightUnits(x, z, solidHeights[index], preliminarySurface);
+                world.SetColumnSolidHeightUnits(x, z, solidHeights[index], SurfaceType.Ground);
 
                 if (waterSurfaces[index] > solidHeights[index])
                 {
-                    world.SetColumnWaterSurfaceUnits(x, z, waterSurfaces[index], waterMaterials[index], waterFlags[index]);
+                    world.SetColumnWaterSurfaceUnits(x, z, waterSurfaces[index], waterTypes[index], waterFlags[index]);
                 }
             }
 
@@ -569,70 +627,63 @@ namespace MiniCivilization.World.Generation
                 var waterInfluence = FindWaterInfluence(world, x, z, settings.WaterMoistureRadius);
                 var moisture = Math.Clamp(moistureNoise * 0.65f + waterInfluence * 0.55f, 0f, 1f);
 
-                ushort biome;
-                ushort surfaceMaterial;
+                BiomeType biome;
+                SurfaceType surface;
+                if (temperature <= settings.SnowTemperatureThreshold)
+                {
+                    biome = BiomeType.Snow;
+                }
+                else if (altitude >= 0.72f)
+                {
+                    biome = BiomeType.Mountain;
+                }
+                else if (moisture <= settings.DesertMoistureThreshold)
+                {
+                    biome = BiomeType.Desert;
+                }
+                else if (moisture >= settings.WetlandMoistureThreshold && waterInfluence > 0f)
+                {
+                    biome = BiomeType.Wetland;
+                }
+                else
+                {
+                    biome = BiomeType.Grassland;
+                }
+
                 if (column.HasWater)
                 {
                     var waterCell = world.GetCell(x, column.WaterCellY, z);
-                    var depthUnits = column.WaterTopUnits - column.SolidTopUnits;
-                    if (column.WaterMaterialId == WorldMaterialIds.SeaWater)
+                    if (column.Water == WaterType.Sea)
                     {
-                        biome = WorldBiomeIds.Seabed;
-                        surfaceMaterial = depthUnits >= WorldGrid.HeightStepsPerCell * 2
-                            ? WorldMaterialIds.Rock
-                            : WorldMaterialIds.Sand;
+                        surface = SurfaceType.Seabed;
                     }
                     else if ((waterCell.Flags & CellFlags.River) != 0)
                     {
-                        biome = WorldBiomeIds.Riverbed;
-                        surfaceMaterial = WorldMaterialIds.Rock;
+                        surface = SurfaceType.Riverbed;
                     }
                     else
                     {
-                        biome = WorldBiomeIds.Lakebed;
-                        surfaceMaterial = WorldMaterialIds.Mud;
+                        surface = SurfaceType.Lakebed;
                     }
                 }
                 else if (IsAdjacentToWater(world, x, z) && Math.Abs(column.SolidTopUnits - settings.SeaLevelUnits) <= 2)
                 {
-                    biome = WorldBiomeIds.Coast;
-                    surfaceMaterial = WorldMaterialIds.Sand;
-                }
-                else if (temperature <= settings.SnowTemperatureThreshold)
-                {
-                    biome = WorldBiomeIds.Tundra;
-                    surfaceMaterial = WorldMaterialIds.Snow;
-                }
-                else if (altitude >= 0.72f)
-                {
-                    biome = WorldBiomeIds.Mountain;
-                    surfaceMaterial = WorldMaterialIds.Rock;
-                }
-                else if (moisture <= settings.DesertMoistureThreshold)
-                {
-                    biome = WorldBiomeIds.Desert;
-                    surfaceMaterial = WorldMaterialIds.Sand;
-                }
-                else if (moisture >= settings.WetlandMoistureThreshold && waterInfluence > 0f)
-                {
-                    biome = WorldBiomeIds.Wetland;
-                    surfaceMaterial = WorldMaterialIds.Mud;
+                    surface = SurfaceType.Shore;
                 }
                 else
                 {
-                    biome = WorldBiomeIds.Grassland;
-                    surfaceMaterial = WorldMaterialIds.Grass;
+                    surface = SurfaceType.Ground;
                 }
 
-                column.BiomeId = biome;
+                column.Biome = biome;
                 column.Temperature = (byte)MathF.Round(temperature * byte.MaxValue);
                 column.Moisture = (byte)MathF.Round(moisture * byte.MaxValue);
                 column.Fertility = (byte)MathF.Round(Math.Clamp(moisture * (1f - MathF.Abs(temperature - 0.58f)), 0f, 1f) * byte.MaxValue);
-                column.SurfaceMaterialId = surfaceMaterial;
+                column.Surface = surface;
                 world.SetSurfaceColumn(x, z, column);
 
                 var topCell = world.GetCell(x, column.SurfaceCellY, z);
-                topCell.SurfaceMaterialId = surfaceMaterial;
+                topCell.Surface = surface;
                 world.SetCell(x, column.SurfaceCellY, z, topCell);
             }
         }
@@ -668,6 +719,12 @@ namespace MiniCivilization.World.Generation
             }
 
             return false;
+        }
+
+        private static float SmoothStep01(float value)
+        {
+            value = Math.Clamp(value, 0f, 1f);
+            return value * value * (3f - 2f * value);
         }
 
         private static int ToColumnIndex(int size, int x, int z) => x + size * z;
