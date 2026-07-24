@@ -1,6 +1,7 @@
 using System;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Interaction;
 using UnityEngine;
 
 namespace MiniCivilization.World.Meshing
@@ -27,12 +28,22 @@ namespace MiniCivilization.World.Meshing
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)
             {
-                if (!world.GetSurfaceColumn(x, z).HasSurface)
+                var column = world.GetSurfaceColumn(x, z);
+                if (!column.HasSurface)
                 {
                     continue;
                 }
 
+                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
+                    WorldCellIndex.Encode(world, x, column.SurfaceCellY, z),
+                    SurfaceTriangleRole.Core,
+                    true);
                 AddTop(world, catalog, buffers, x, z, startX, startZ);
+
+                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
+                    WorldCellIndex.Encode(world, x, column.SurfaceCellY, z),
+                    SurfaceTriangleRole.Cliff,
+                    true);
                 AddCliffs(world, catalog, buffers, x, z, startX, startZ);
             }
 

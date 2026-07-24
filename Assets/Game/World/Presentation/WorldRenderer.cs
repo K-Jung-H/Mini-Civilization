@@ -18,8 +18,10 @@ namespace MiniCivilization.World.Presentation
         [Header("Mesh")]
         [SerializeField, Min(1)] private int renderPatchSizeXZ = 32;
         [SerializeField] private bool generateColliders;
+        [SerializeField, Range(0, 31)] private int interactionLayer = 8;
 
-        private readonly HashSet<Vector2Int> dirtyRenderPatches = new();
+        private readonly HashSet<Vector2Int> dirtyGeometryPatches = new();
+        private readonly HashSet<Vector2Int> dirtyMaterialPatches = new();
         private readonly HashSet<ChunkCoordinate> dirtyLogicalChunks = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
@@ -64,12 +66,15 @@ namespace MiniCivilization.World.Presentation
 
         public void RefreshDirtyChunks()
         {
-            if (boundWorld == null || chunkViews == null || dirtyRenderPatches.Count == 0)
+            if (boundWorld == null
+                || chunkViews == null
+                || (dirtyGeometryPatches.Count == 0
+                    && dirtyMaterialPatches.Count == 0))
             {
                 return;
             }
 
-            foreach (var patch in dirtyRenderPatches)
+            foreach (var patch in dirtyGeometryPatches)
             {
                 if ((uint)patch.x >= chunkViews.GetLength(0)
                     || (uint)patch.y >= chunkViews.GetLength(1))
@@ -77,16 +82,41 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                BuildPatch(chunkViews[patch.x, patch.y], patch.x, patch.y);
+                BuildPatch(
+                    chunkViews[patch.x, patch.y],
+                    patch.x,
+                    patch.y,
+                    true);
             }
 
+            foreach (var patch in dirtyMaterialPatches)
+            {
+                if (dirtyGeometryPatches.Contains(patch)
+                    || (uint)patch.x >= chunkViews.GetLength(0)
+                    || (uint)patch.y >= chunkViews.GetLength(1))
+                {
+                    continue;
+                }
+
+                BuildPatch(
+                    chunkViews[patch.x, patch.y],
+                    patch.x,
+                    patch.y,
+                    false);
+            }
+
+            const ChunkDirtyFlags handledFlags = ChunkDirtyFlags.Surface
+                | ChunkDirtyFlags.TerrainMesh
+                | ChunkDirtyFlags.WaterMesh
+                | ChunkDirtyFlags.Materials;
             foreach (var coordinate in dirtyLogicalChunks)
             {
                 boundWorld.GetChunk(coordinate.X, coordinate.Y, coordinate.Z)
-                    .ClearDirty(ChunkDirtyFlags.All);
+                    .ClearDirty(handledFlags);
             }
 
-            dirtyRenderPatches.Clear();
+            dirtyGeometryPatches.Clear();
+            dirtyMaterialPatches.Clear();
             dirtyLogicalChunks.Clear();
         }
 
@@ -99,7 +129,8 @@ namespace MiniCivilization.World.Presentation
 
             boundWorld = null;
             activeRenderPatchSize = 0;
-            dirtyRenderPatches.Clear();
+            dirtyGeometryPatches.Clear();
+            dirtyMaterialPatches.Clear();
             dirtyLogicalChunks.Clear();
             ClearViews();
         }
@@ -111,7 +142,8 @@ namespace MiniCivilization.World.Presentation
             Material waterfall,
             Transform root,
             int patchSize,
-            bool buildColliders)
+            bool buildColliders,
+            int colliderLayer = 8)
         {
             surfaceCatalog = catalog;
             terrainMaterial = terrain;
@@ -120,6 +152,7 @@ namespace MiniCivilization.World.Presentation
             renderRoot = root;
             renderPatchSizeXZ = Math.Max(1, patchSize);
             generateColliders = buildColliders;
+            interactionLayer = Math.Clamp(colliderLayer, 0, 31);
         }
 
         private void BuildAllPatches()
@@ -136,13 +169,17 @@ namespace MiniCivilization.World.Presentation
                 chunkObject.transform.SetParent(renderRoot, false);
                 var view = chunkObject.AddComponent<WorldChunkView>();
                 chunkViews[patchX, patchZ] = view;
-                BuildPatch(view, patchX, patchZ);
+                BuildPatch(view, patchX, patchZ, true);
             }
 
             ClearAllDirtyFlags(boundWorld);
         }
 
-        private void BuildPatch(WorldChunkView view, int patchX, int patchZ)
+        private void BuildPatch(
+            WorldChunkView view,
+            int patchX,
+            int patchZ,
+            bool rebuildInteraction)
         {
             view.Build(
                 boundWorld,
@@ -153,16 +190,19 @@ namespace MiniCivilization.World.Presentation
                 terrainMaterial,
                 waterMaterial,
                 waterfallMaterial,
-                generateColliders);
+                generateColliders,
+                interactionLayer,
+                rebuildInteraction);
         }
 
         private void OnChunkMarkedDirty(
             ChunkCoordinate coordinate,
             ChunkDirtyFlags flags)
         {
-            const ChunkDirtyFlags renderFlags = ChunkDirtyFlags.Surface
+            const ChunkDirtyFlags geometryFlags = ChunkDirtyFlags.Surface
                 | ChunkDirtyFlags.TerrainMesh
-                | ChunkDirtyFlags.WaterMesh
+                | ChunkDirtyFlags.WaterMesh;
+            const ChunkDirtyFlags renderFlags = geometryFlags
                 | ChunkDirtyFlags.Materials;
             if ((flags & renderFlags) == 0 || activeRenderPatchSize <= 0)
             {
@@ -172,9 +212,17 @@ namespace MiniCivilization.World.Presentation
             dirtyLogicalChunks.Add(coordinate);
             var startX = coordinate.X * boundWorld.ChunkSizeX;
             var startZ = coordinate.Z * boundWorld.ChunkSizeZ;
-            dirtyRenderPatches.Add(new Vector2Int(
+            var patch = new Vector2Int(
                 startX / activeRenderPatchSize,
-                startZ / activeRenderPatchSize));
+                startZ / activeRenderPatchSize);
+            if ((flags & geometryFlags) != 0)
+            {
+                dirtyGeometryPatches.Add(patch);
+            }
+            else if ((flags & ChunkDirtyFlags.Materials) != 0)
+            {
+                dirtyMaterialPatches.Add(patch);
+            }
         }
 
         private int ResolveRenderPatchSize(WorldData world)

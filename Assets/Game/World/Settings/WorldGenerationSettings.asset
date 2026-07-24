@@ -12,11 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97d524c8ea6b0e145a34679a81fd4244, type: 3}
   m_Name: WorldGenerationSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationSettings
-  worldSize: 256
+  worldSize: 64
   worldHeight: 64
   chunkSizeXZ: 8
   chunkHeight: 4
-  renderPatchSizeXZ: 16
+  renderPatchSizeXZ: 8
   terrainNoiseScale: 0.035
   terrainOctaves: 4
   terrainLacunarity: 2

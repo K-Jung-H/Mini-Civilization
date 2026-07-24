@@ -1,7 +1,9 @@
 {
   "name": "MiniCivilization.World",
   "rootNamespace": "MiniCivilization.World",
-  "references": [],
+  "references": [
+    "Unity.InputSystem"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

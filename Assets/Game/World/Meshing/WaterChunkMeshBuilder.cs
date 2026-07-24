@@ -1,6 +1,7 @@
 using System;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Interaction;
 using UnityEngine;
 
 namespace MiniCivilization.World.Meshing
@@ -37,11 +38,26 @@ namespace MiniCivilization.World.Meshing
                 var column = world.GetSurfaceColumn(x, z);
                 if (column.HasWater)
                 {
+                    var ownerCellIndex = WorldCellIndex.Encode(
+                        world, x, column.WaterCellY, z);
+                    buffers.Surface.CurrentTriangleMetadata =
+                        new SurfaceTriangleMetadata(
+                            ownerCellIndex,
+                            SurfaceTriangleRole.Core,
+                            true);
                     AddTop(world, catalog, buffers, x, z, startX, startZ);
+
+                    buffers.Waterfalls.CurrentTriangleMetadata =
+                        new SurfaceTriangleMetadata(
+                            ownerCellIndex,
+                            SurfaceTriangleRole.Waterfall,
+                            true);
                     AddWaterfalls(world, catalog, buffers.Waterfalls, x, z, startX, startZ);
                 }
                 else if (column.HasSurface)
                 {
+                    buffers.Surface.CurrentTriangleMetadata =
+                        SurfaceTriangleMetadata.NotInteractive;
                     AddRenderApron(world, catalog, buffers, x, z, startX, startZ);
                 }
             }
@@ -296,6 +312,11 @@ namespace MiniCivilization.World.Meshing
                 heightUnits,
                 waterType);
 
+            var previousMetadata = buffers.CurrentTriangleMetadata;
+            buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
+                -1,
+                SurfaceTriangleRole.ApronBridge,
+                false);
             // One owning water tile fills one V-shaped notch. The opposite
             // diagonal water tile produces the second triangle with the same
             // outer base and its own recessed Shoulder vertex.
@@ -304,6 +325,7 @@ namespace MiniCivilization.World.Meshing
                 recessedShoulder,
                 zApronEnd,
                 Vector3.up);
+            buffers.CurrentTriangleMetadata = previousMetadata;
             return true;
         }
 
