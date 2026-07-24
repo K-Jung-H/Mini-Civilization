@@ -1,4 +1,4 @@
-using MiniCivilization.World.Authoring;
+using MiniCivilization.World.Generation;
 using UnityEditor;
 using UnityEngine;
 

@@ -7,12 +7,11 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: WorldTerrain
-  m_Shader: {fileID: 4800000, guid: 974c285f5c772194bb3d4dd3d02fee43, type: 3}
+  m_Name: WorldWaterfall
+  m_Shader: {fileID: 4800000, guid: 27da0ffe6311c5643bd2d18d358ed2b5, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _WORLD_ALBEDO_ARRAY
+  m_ValidKeywords: []
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -25,7 +24,7 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _SurfaceAlbedoArray:
-        m_Texture: {fileID: -3487440850667078700, guid: b6f6b194b8934c81a7e9b7e0ca000002, type: 2}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _SurfaceMaskArray:
@@ -39,6 +38,9 @@ Material:
     m_Ints: []
     m_Floats:
     - _Cull: 2
+    - _DepthBiasFactor: -1
+    - _DepthBiasUnits: -1
+    - _Opacity: 1
     m_Colors:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []

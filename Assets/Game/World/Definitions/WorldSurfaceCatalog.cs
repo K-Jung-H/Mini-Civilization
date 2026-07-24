@@ -55,15 +55,34 @@ namespace MiniCivilization.World.Definitions
         public SurfaceTextureProfile Appearance = new();
     }
 
+    [Serializable]
+    public struct SurfaceTextureArrayAvailability
+    {
+        [SerializeField] private bool albedo;
+        [SerializeField] private bool normal;
+        [SerializeField] private bool mask;
+
+        public readonly bool Albedo => albedo;
+        public readonly bool Normal => normal;
+        public readonly bool Mask => mask;
+
+        internal SurfaceTextureArrayAvailability(bool albedo, bool normal, bool mask)
+        {
+            this.albedo = albedo;
+            this.normal = normal;
+            this.mask = mask;
+        }
+    }
+
     public readonly struct SurfaceAppearance
     {
         public readonly Color Albedo;
         public readonly float Metallic;
         public readonly float Smoothness;
         public readonly float Occlusion;
-        public readonly Vector4 TextureLayers;
-        public readonly Vector4 TextureWeights;
-        public readonly Vector4 TextureScales;
+        public readonly Vector2 TextureLayers;
+        public readonly Vector2 TextureWeights;
+        public readonly Vector2 TextureScales;
 
         public SurfaceAppearance(
             Color albedo,
@@ -77,9 +96,9 @@ namespace MiniCivilization.World.Definitions
             Metallic = metallic;
             Smoothness = smoothness;
             Occlusion = occlusion;
-            TextureLayers = new Vector4(textureLayer, 0f, 0f, 0f);
-            TextureWeights = new Vector4(1f, 0f, 0f, 0f);
-            TextureScales = new Vector4(textureScale, 1f, 1f, 1f);
+            TextureLayers = new Vector2(textureLayer, 0f);
+            TextureWeights = new Vector2(1f, 0f);
+            TextureScales = new Vector2(textureScale, 1f);
         }
 
         private SurfaceAppearance(
@@ -87,9 +106,9 @@ namespace MiniCivilization.World.Definitions
             float metallic,
             float smoothness,
             float occlusion,
-            Vector4 textureLayers,
-            Vector4 textureWeights,
-            Vector4 textureScales)
+            Vector2 textureLayers,
+            Vector2 textureWeights,
+            Vector2 textureScales)
         {
             Albedo = albedo;
             Metallic = metallic;
@@ -103,9 +122,9 @@ namespace MiniCivilization.World.Definitions
         public static SurfaceAppearance Lerp(in SurfaceAppearance a, in SurfaceAppearance b, float t)
         {
             t = Mathf.Clamp01(t);
-            var layers = Vector4.zero;
-            var weights = Vector4.zero;
-            var scales = Vector4.one;
+            var layers = Vector2.zero;
+            var weights = Vector2.zero;
+            var scales = Vector2.one;
             var count = 0;
             AddLayers(in a, 1f - t, ref layers, ref weights, ref scales, ref count);
             AddLayers(in b, t, ref layers, ref weights, ref scales, ref count);
@@ -128,9 +147,9 @@ namespace MiniCivilization.World.Definitions
         private static void AddLayers(
             in SurfaceAppearance source,
             float multiplier,
-            ref Vector4 layers,
-            ref Vector4 weights,
-            ref Vector4 scales,
+            ref Vector2 layers,
+            ref Vector2 weights,
+            ref Vector2 scales,
             ref int count)
         {
             if (multiplier <= 0f)
@@ -138,7 +157,7 @@ namespace MiniCivilization.World.Definitions
                 return;
             }
 
-            for (var sourceIndex = 0; sourceIndex < 4; sourceIndex++)
+            for (var sourceIndex = 0; sourceIndex < 2; sourceIndex++)
             {
                 var weight = source.GetWeight(sourceIndex) * multiplier;
                 if (weight <= 0.00001f)
@@ -154,7 +173,7 @@ namespace MiniCivilization.World.Definitions
                     continue;
                 }
 
-                if (count < 4)
+                if (count < 2)
                 {
                     layers[count] = layer;
                     weights[count] = weight;
@@ -173,7 +192,7 @@ namespace MiniCivilization.World.Definitions
             }
         }
 
-        private static int FindLayer(Vector4 layers, int count, float layer)
+        private static int FindLayer(Vector2 layers, int count, float layer)
         {
             for (var i = 0; i < count; i++)
             {
@@ -186,26 +205,17 @@ namespace MiniCivilization.World.Definitions
             return -1;
         }
 
-        private static int FindSmallestWeight(Vector4 weights)
+        private static int FindSmallestWeight(Vector2 weights)
         {
-            var result = 0;
-            for (var i = 1; i < 4; i++)
-            {
-                if (weights[i] < weights[result])
-                {
-                    result = i;
-                }
-            }
-
-            return result;
+            return weights.x <= weights.y ? 0 : 1;
         }
 
-        private static void NormalizeWeights(ref Vector4 weights)
+        private static void NormalizeWeights(ref Vector2 weights)
         {
-            var sum = weights.x + weights.y + weights.z + weights.w;
+            var sum = weights.x + weights.y;
             if (sum <= 0.00001f)
             {
-                weights = new Vector4(1f, 0f, 0f, 0f);
+                weights = new Vector2(1f, 0f);
                 return;
             }
 
@@ -219,10 +229,21 @@ namespace MiniCivilization.World.Definitions
         private static readonly int AlbedoArrayProperty = Shader.PropertyToID("_SurfaceAlbedoArray");
         private static readonly int NormalArrayProperty = Shader.PropertyToID("_SurfaceNormalArray");
         private static readonly int MaskArrayProperty = Shader.PropertyToID("_SurfaceMaskArray");
+        private const string AlbedoArrayKeyword = "_WORLD_ALBEDO_ARRAY";
+        private const string NormalArrayKeyword = "_WORLD_NORMAL_ARRAY";
+        private const string MaskArrayKeyword = "_WORLD_MASK_ARRAY";
 
         [SerializeField, Min(1)]
         [Tooltip("카탈로그의 모든 텍스처를 통일할 Texture2DArray 한 레이어의 해상도입니다.")]
         private int textureResolution = 256;
+
+        [SerializeField]
+        [Tooltip("모든 Albedo/Normal/Mask Texture2DArray가 공통으로 사용하는 픽셀 포맷입니다.")]
+        private TextureFormat textureArrayFormat = TextureFormat.RGBA32;
+
+        [SerializeField]
+        [Tooltip("모든 Texture2DArray에 MipMap을 동일하게 생성합니다.")]
+        private bool textureArrayMipMaps = true;
 
         [SerializeField]
         [Tooltip("특정 바이옴 프로필이 없을 때 사용하는 SurfaceType별 공통 표현입니다.")]
@@ -239,13 +260,59 @@ namespace MiniCivilization.World.Definitions
         private readonly Dictionary<SurfaceType, SurfaceAppearance> commonCache = new();
         private readonly Dictionary<TerrainSurfaceKey, SurfaceAppearance> biomeCache = new();
         private readonly Dictionary<WaterType, SurfaceAppearance> waterCache = new();
-        private Texture2DArray terrainAlbedoArray;
-        private Texture2DArray terrainNormalArray;
-        private Texture2DArray terrainMaskArray;
-        private Texture2DArray waterAlbedoArray;
-        private Texture2DArray waterNormalArray;
-        private Texture2DArray waterMaskArray;
+        [SerializeField, HideInInspector] private Texture2DArray terrainAlbedoArray;
+        [SerializeField, HideInInspector] private Texture2DArray terrainNormalArray;
+        [SerializeField, HideInInspector] private Texture2DArray terrainMaskArray;
+        [SerializeField, HideInInspector] private Texture2DArray waterAlbedoArray;
+        [SerializeField, HideInInspector] private Texture2DArray waterNormalArray;
+        [SerializeField, HideInInspector] private Texture2DArray waterMaskArray;
+        [SerializeField, HideInInspector] private SurfaceTextureArrayAvailability terrainArrayAvailability;
+        [SerializeField, HideInInspector] private SurfaceTextureArrayAvailability waterArrayAvailability;
+        [SerializeField, HideInInspector] private string bakedTextureArraySignature;
         private bool cacheValid;
+
+        public SurfaceTextureArrayAvailability TerrainArrayAvailability => terrainArrayAvailability;
+        public SurfaceTextureArrayAvailability WaterArrayAvailability => waterArrayAvailability;
+
+        internal int TextureResolution => textureResolution;
+        internal TextureFormat TextureArrayFormat => textureArrayFormat;
+        internal bool TextureArrayMipMaps => textureArrayMipMaps;
+        internal IReadOnlyList<TerrainSurfaceDefinition> CommonTerrainDefinitions => commonTerrain;
+        internal IReadOnlyList<BiomeSurfaceSet> BiomeSurfaceSets => biomes;
+        internal IReadOnlyList<WaterSurfaceDefinition> WaterSurfaceDefinitions => water;
+        internal string BakedTextureArraySignature => bakedTextureArraySignature;
+        internal Texture2DArray TerrainAlbedoArray => terrainAlbedoArray;
+        internal Texture2DArray TerrainNormalArray => terrainNormalArray;
+        internal Texture2DArray TerrainMaskArray => terrainMaskArray;
+        internal Texture2DArray WaterAlbedoArray => waterAlbedoArray;
+        internal Texture2DArray WaterNormalArray => waterNormalArray;
+        internal Texture2DArray WaterMaskArray => waterMaskArray;
+
+        internal void AssignBakedTextureArrays(
+            Texture2DArray bakedTerrainAlbedo,
+            Texture2DArray bakedTerrainNormal,
+            Texture2DArray bakedTerrainMask,
+            Texture2DArray bakedWaterAlbedo,
+            Texture2DArray bakedWaterNormal,
+            Texture2DArray bakedWaterMask,
+            string signature)
+        {
+            terrainAlbedoArray = bakedTerrainAlbedo;
+            terrainNormalArray = bakedTerrainNormal;
+            terrainMaskArray = bakedTerrainMask;
+            waterAlbedoArray = bakedWaterAlbedo;
+            waterNormalArray = bakedWaterNormal;
+            waterMaskArray = bakedWaterMask;
+            terrainArrayAvailability = new SurfaceTextureArrayAvailability(
+                bakedTerrainAlbedo != null,
+                bakedTerrainNormal != null,
+                bakedTerrainMask != null);
+            waterArrayAvailability = new SurfaceTextureArrayAvailability(
+                bakedWaterAlbedo != null,
+                bakedWaterNormal != null,
+                bakedWaterMask != null);
+            bakedTextureArraySignature = signature;
+        }
 
         public SurfaceAppearance ResolveTerrain(BiomeType biome, SurfaceType type)
         {
@@ -282,11 +349,30 @@ namespace MiniCivilization.World.Definitions
                 : DefaultSurfacePalette.ResolveWater(type);
         }
 
-        public void ApplyToMaterials(Material terrainMaterial, Material waterMaterial)
+        public void ApplyToMaterials(
+            Material terrainMaterial,
+            Material waterMaterial,
+            Material waterfallMaterial = null)
         {
             EnsureRuntimeCache();
-            ApplyArrays(terrainMaterial, terrainAlbedoArray, terrainNormalArray, terrainMaskArray);
-            ApplyArrays(waterMaterial, waterAlbedoArray, waterNormalArray, waterMaskArray);
+            ApplyArrays(
+                terrainMaterial,
+                terrainAlbedoArray,
+                terrainNormalArray,
+                terrainMaskArray,
+                terrainArrayAvailability);
+            ApplyArrays(
+                waterMaterial,
+                waterAlbedoArray,
+                waterNormalArray,
+                waterMaskArray,
+                waterArrayAvailability);
+            ApplyArrays(
+                waterfallMaterial,
+                waterAlbedoArray,
+                waterNormalArray,
+                waterMaskArray,
+                waterArrayAvailability);
         }
 
         private void OnEnable()
@@ -315,6 +401,11 @@ namespace MiniCivilization.World.Definitions
         private void OnValidate()
         {
             textureResolution = Mathf.Max(1, textureResolution);
+            if (textureArrayFormat is not TextureFormat.RGBA32 and not TextureFormat.RGBAHalf)
+            {
+                textureArrayFormat = TextureFormat.RGBA32;
+            }
+
             InvalidateRuntimeCache();
         }
 
@@ -338,12 +429,6 @@ namespace MiniCivilization.World.Definitions
             var waterProfiles = new List<SurfaceTextureProfile> { null };
             AddWaterProfiles(waterProfiles);
 
-            terrainAlbedoArray = BuildTextureArray(terrainProfiles, TextureChannel.Albedo);
-            terrainNormalArray = BuildTextureArray(terrainProfiles, TextureChannel.Normal);
-            terrainMaskArray = BuildTextureArray(terrainProfiles, TextureChannel.Mask);
-            waterAlbedoArray = BuildTextureArray(waterProfiles, TextureChannel.Albedo);
-            waterNormalArray = BuildTextureArray(waterProfiles, TextureChannel.Normal);
-            waterMaskArray = BuildTextureArray(waterProfiles, TextureChannel.Mask);
             cacheValid = true;
         }
 
@@ -378,9 +463,9 @@ namespace MiniCivilization.World.Definitions
 
             water = new List<WaterSurfaceDefinition>
             {
-                CreateWaterDefinition(WaterType.Fresh, new Color(0.08f, 0.42f, 0.68f, 0.72f), 0.9f),
-                CreateWaterDefinition(WaterType.Sea, new Color(0.05f, 0.25f, 0.52f, 0.78f), 0.88f),
-                CreateWaterDefinition(WaterType.Marsh, new Color(0.18f, 0.31f, 0.17f, 0.8f), 0.72f)
+                CreateWaterDefinition(WaterType.Fresh, new Color(0.08f, 0.42f, 0.68f, 0.72f), 0.72f),
+                CreateWaterDefinition(WaterType.Sea, new Color(0.05f, 0.25f, 0.52f, 0.78f), 0.72f),
+                CreateWaterDefinition(WaterType.Marsh, new Color(0.18f, 0.31f, 0.17f, 0.8f), 0.65f)
             };
         }
 
@@ -502,104 +587,12 @@ namespace MiniCivilization.World.Definitions
                 profile.Tiling);
         }
 
-        private Texture2DArray BuildTextureArray(
-            IReadOnlyList<SurfaceTextureProfile> profiles,
-            TextureChannel channel)
-        {
-            var linear = channel != TextureChannel.Albedo;
-            var array = new Texture2DArray(
-                textureResolution,
-                textureResolution,
-                Mathf.Max(1, profiles.Count),
-                TextureFormat.RGBA32,
-                false,
-                linear)
-            {
-                name = $"{name} {channel} Array",
-                wrapMode = TextureWrapMode.Repeat,
-                filterMode = FilterMode.Bilinear,
-                anisoLevel = 2,
-                hideFlags = HideFlags.DontSave
-            };
-
-            var defaultColor = channel switch
-            {
-                TextureChannel.Normal => new Color(0.5f, 0.5f, 1f, 1f),
-                _ => Color.white
-            };
-            var defaultPixels = CreateSolidPixels(defaultColor);
-
-            for (var layer = 0; layer < array.depth; layer++)
-            {
-                var profile = layer < profiles.Count ? profiles[layer] : null;
-                var texture = GetTexture(profile, channel);
-                array.SetPixels(texture != null ? ReadTexturePixels(texture, linear) : defaultPixels, layer);
-            }
-
-            array.Apply(false, true);
-            return array;
-        }
-
-        private Color[] CreateSolidPixels(Color color)
-        {
-            var pixels = new Color[textureResolution * textureResolution];
-            Array.Fill(pixels, color);
-            return pixels;
-        }
-
-        private Color[] ReadTexturePixels(Texture2D source, bool linear)
-        {
-            var readWrite = linear ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB;
-            var temporary = RenderTexture.GetTemporary(
-                textureResolution,
-                textureResolution,
-                0,
-                RenderTextureFormat.ARGB32,
-                readWrite);
-            var previous = RenderTexture.active;
-            var readable = new Texture2D(
-                textureResolution,
-                textureResolution,
-                TextureFormat.RGBA32,
-                false,
-                linear);
-
-            try
-            {
-                Graphics.Blit(source, temporary);
-                RenderTexture.active = temporary;
-                readable.ReadPixels(new Rect(0f, 0f, textureResolution, textureResolution), 0, 0, false);
-                readable.Apply(false, false);
-                return readable.GetPixels();
-            }
-            finally
-            {
-                RenderTexture.active = previous;
-                RenderTexture.ReleaseTemporary(temporary);
-                ReleaseObject(readable);
-            }
-        }
-
-        private static Texture2D GetTexture(SurfaceTextureProfile profile, TextureChannel channel)
-        {
-            if (profile == null)
-            {
-                return null;
-            }
-
-            return channel switch
-            {
-                TextureChannel.Normal => profile.NormalTexture,
-                TextureChannel.Mask => profile.MaskTexture,
-                _ => profile.AlbedoTexture
-            };
-        }
-
         private static void ApplyArrays(
             Material material,
             Texture2DArray albedo,
             Texture2DArray normal,
-            Texture2DArray mask)
+            Texture2DArray mask,
+            SurfaceTextureArrayAvailability availability)
         {
             if (material == null)
             {
@@ -609,34 +602,20 @@ namespace MiniCivilization.World.Definitions
             material.SetTexture(AlbedoArrayProperty, albedo);
             material.SetTexture(NormalArrayProperty, normal);
             material.SetTexture(MaskArrayProperty, mask);
+            SetKeyword(material, AlbedoArrayKeyword, availability.Albedo && albedo != null);
+            SetKeyword(material, NormalArrayKeyword, availability.Normal && normal != null);
+            SetKeyword(material, MaskArrayKeyword, availability.Mask && mask != null);
+        }
+
+        private static void SetKeyword(Material material, string keyword, bool enabled)
+        {
+            if (enabled) material.EnableKeyword(keyword);
+            else material.DisableKeyword(keyword);
         }
 
         private void InvalidateRuntimeCache()
         {
             cacheValid = false;
-            ReleaseObject(terrainAlbedoArray);
-            ReleaseObject(terrainNormalArray);
-            ReleaseObject(terrainMaskArray);
-            ReleaseObject(waterAlbedoArray);
-            ReleaseObject(waterNormalArray);
-            ReleaseObject(waterMaskArray);
-            terrainAlbedoArray = null;
-            terrainNormalArray = null;
-            terrainMaskArray = null;
-            waterAlbedoArray = null;
-            waterNormalArray = null;
-            waterMaskArray = null;
-        }
-
-        private static void ReleaseObject(UnityEngine.Object target)
-        {
-            if (target == null)
-            {
-                return;
-            }
-
-            if (Application.isPlaying) Destroy(target);
-            else DestroyImmediate(target);
         }
 
         private readonly struct TerrainSurfaceKey : IEquatable<TerrainSurfaceKey>
@@ -655,12 +634,6 @@ namespace MiniCivilization.World.Definitions
             public override int GetHashCode() => HashCode.Combine((ushort)biome, (ushort)surface);
         }
 
-        private enum TextureChannel : byte
-        {
-            Albedo,
-            Normal,
-            Mask
-        }
     }
 
     public static class DefaultSurfacePalette
@@ -711,9 +684,9 @@ namespace MiniCivilization.World.Definitions
         {
             return type switch
             {
-                WaterType.Sea => new SurfaceAppearance(new Color(0.05f, 0.25f, 0.52f, 0.78f), 0f, 0.88f, 0.9f),
-                WaterType.Marsh => new SurfaceAppearance(new Color(0.18f, 0.31f, 0.17f, 0.8f), 0f, 0.72f, 0.82f),
-                _ => new SurfaceAppearance(new Color(0.08f, 0.42f, 0.68f, 0.72f), 0f, 0.9f, 0.92f)
+                WaterType.Sea => new SurfaceAppearance(new Color(0.05f, 0.25f, 0.52f, 0.78f), 0f, 0.72f, 0.9f),
+                WaterType.Marsh => new SurfaceAppearance(new Color(0.18f, 0.31f, 0.17f, 0.8f), 0f, 0.65f, 0.82f),
+                _ => new SurfaceAppearance(new Color(0.08f, 0.42f, 0.68f, 0.72f), 0f, 0.72f, 0.92f)
             };
         }
     }

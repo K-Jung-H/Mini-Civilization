@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: World Water Material
+  m_Name: WorldWater
   m_Shader: {fileID: 4800000, guid: 27da0ffe6311c5643bd2d18d358ed2b5, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -38,6 +38,8 @@ Material:
     m_Ints: []
     m_Floats:
     - _Cull: 2
+    - _DepthBiasFactor: 0
+    - _DepthBiasUnits: 0
     - _Opacity: 1
     m_Colors:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}

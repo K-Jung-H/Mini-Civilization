@@ -128,15 +128,20 @@ namespace MiniCivilization.World.Domain
         public byte WaterLevel;
         public SurfaceType Surface;
         public WaterType Water;
-        public BiomeType Biome;
-        public byte Temperature;
-        public byte Moisture;
-        public byte Fertility;
 
         public readonly bool HasSurface => SurfaceCellY >= 0 && SurfaceLevel > 0;
         public readonly bool HasWater => WaterCellY >= 0 && WaterLevel > 0;
         public readonly int SolidTopUnits => HasSurface ? SurfaceCellY * WorldGrid.HeightStepsPerCell + SurfaceLevel : 0;
         public readonly int WaterTopUnits => HasWater ? WaterCellY * WorldGrid.HeightStepsPerCell + WaterLevel : 0;
+    }
+
+    [Serializable]
+    public struct ColumnEnvironmentData
+    {
+        public BiomeType Biome;
+        public byte Temperature;
+        public byte Moisture;
+        public byte Fertility;
     }
 
     public readonly struct CellCoordinate : IEquatable<CellCoordinate>

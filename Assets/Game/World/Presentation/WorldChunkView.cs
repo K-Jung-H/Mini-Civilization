@@ -23,40 +23,58 @@ namespace MiniCivilization.World.Presentation
             WorldData world,
             int patchX,
             int patchZ,
+            int patchSize,
             WorldSurfaceCatalog catalog,
             Material terrainMaterial,
             Material waterMaterial,
+            Material waterfallMaterial,
             bool buildCollider)
         {
             PatchX = patchX;
             PatchZ = patchZ;
             name = $"World Chunk [{patchX}, {patchZ}]";
-            transform.localPosition = new Vector3(patchX * world.ChunkSizeX, 0f, patchZ * world.ChunkSizeZ);
+            transform.localPosition = new Vector3(patchX * patchSize, 0f, patchZ * patchSize);
             transform.localRotation = Quaternion.identity;
             transform.localScale = Vector3.one;
 
             EnsureChildren(buildCollider);
             if (catalog != null)
             {
-                catalog.ApplyToMaterials(terrainMaterial, waterMaterial);
+                catalog.ApplyToMaterials(
+                    terrainMaterial,
+                    waterMaterial,
+                    waterfallMaterial);
             }
 
-            ReplaceMesh(terrainFilter, TerrainChunkMeshBuilder.Build(world, patchX, patchZ, catalog).CreateMesh($"Terrain [{patchX}, {patchZ}]"));
+            if (terrainCollider != null)
+            {
+                terrainCollider.sharedMesh = null;
+            }
+
+            var terrainBuffers = TerrainChunkMeshBuilder.Build(
+                world, patchX, patchZ, patchSize, catalog);
+            terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
+                $"Terrain [{patchX}, {patchZ}]",
+                terrainFilter.sharedMesh);
             terrainRenderer.sharedMaterial = terrainMaterial;
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
 
             if (terrainCollider != null)
             {
-                terrainCollider.sharedMesh = null;
                 terrainCollider.sharedMesh = terrainFilter.sharedMesh;
             }
 
-            var waterBuffers = WaterChunkMeshBuilder.Build(world, patchX, patchZ, catalog);
-            ReplaceMesh(waterFilter, waterBuffers.Surface.CreateMesh($"Water [{patchX}, {patchZ}]"));
-            ReplaceMesh(waterfallFilter, waterBuffers.Waterfalls.CreateMesh($"Waterfalls [{patchX}, {patchZ}]"));
+            var waterBuffers = WaterChunkMeshBuilder.Build(
+                world, patchX, patchZ, patchSize, catalog);
+            waterFilter.sharedMesh = waterBuffers.Surface.CreateMesh(
+                $"Water [{patchX}, {patchZ}]",
+                waterFilter.sharedMesh);
+            waterfallFilter.sharedMesh = waterBuffers.Waterfalls.CreateMesh(
+                $"Waterfalls [{patchX}, {patchZ}]",
+                waterfallFilter.sharedMesh);
             waterRenderer.sharedMaterial = waterMaterial;
-            waterfallRenderer.sharedMaterial = waterMaterial;
+            waterfallRenderer.sharedMaterial = waterfallMaterial;
             waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
             waterfallRenderer.shadowCastingMode = ShadowCastingMode.Off;
             waterRenderer.receiveShadows = true;
@@ -111,12 +129,6 @@ namespace MiniCivilization.World.Presentation
             if (filter == null) filter = child.gameObject.AddComponent<MeshFilter>();
             renderer = child.GetComponent<MeshRenderer>();
             if (renderer == null) renderer = child.gameObject.AddComponent<MeshRenderer>();
-        }
-
-        private static void ReplaceMesh(MeshFilter filter, Mesh replacement)
-        {
-            ReleaseObject(filter.sharedMesh);
-            filter.sharedMesh = replacement;
         }
 
         private static void DestroyMesh(MeshFilter filter)

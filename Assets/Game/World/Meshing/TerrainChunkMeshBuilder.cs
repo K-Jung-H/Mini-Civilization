@@ -15,13 +15,14 @@ namespace MiniCivilization.World.Meshing
             WorldData world,
             int patchX,
             int patchZ,
+            int patchSize,
             WorldSurfaceCatalog catalog)
         {
             var buffers = new MeshBuffers();
-            var startX = patchX * world.ChunkSizeX;
-            var startZ = patchZ * world.ChunkSizeZ;
-            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
-            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            var startX = patchX * patchSize;
+            var startZ = patchZ * patchSize;
+            var endX = Math.Min(startX + patchSize, world.Size);
+            var endZ = Math.Min(startZ + patchSize, world.Size);
 
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)

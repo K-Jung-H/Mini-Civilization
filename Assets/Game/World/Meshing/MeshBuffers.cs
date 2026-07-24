@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System;
 using MiniCivilization.World.Definitions;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -26,11 +27,12 @@ namespace MiniCivilization.World.Meshing
         private readonly List<Vector4> tangents = new();
         private readonly List<Vector2> uv0 = new();
         private readonly List<Vector4> materialParameters = new();
-        private readonly List<Vector4> textureLayers = new();
-        private readonly List<Vector4> textureWeights = new();
-        private readonly List<Vector4> textureScales = new();
-        private readonly List<Color> colors = new();
+        private readonly List<Vector2> textureLayers = new();
+        private readonly List<Vector2> textureWeights = new();
+        private readonly List<Vector2> textureScales = new();
+        private readonly List<Color32> colors = new();
         private readonly List<int> indices = new();
+        private readonly Dictionary<MeshVertexKey, int> vertexLookup = new();
 
         public int VertexCount => positions.Count;
         public int TriangleCount => indices.Count / 3;
@@ -62,13 +64,9 @@ namespace MiniCivilization.World.Meshing
                 out var weightsA,
                 out var weightsB,
                 out var weightsC);
-            AddVertex(a, normal, tangent, layers, weightsA, scales);
-            AddVertex(b, normal, tangent, layers, weightsB, scales);
-            AddVertex(c, normal, tangent, layers, weightsC, scales);
-            var start = positions.Count - 3;
-            indices.Add(start);
-            indices.Add(start + 1);
-            indices.Add(start + 2);
+            indices.Add(AddVertex(a, normal, tangent, layers, weightsA, scales));
+            indices.Add(AddVertex(b, normal, tangent, layers, weightsB, scales));
+            indices.Add(AddVertex(c, normal, tangent, layers, weightsC, scales));
         }
 
         internal void AddTriangleFacing(
@@ -88,25 +86,12 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        internal void AddQuadFacing(
-            in SurfaceVertex topA,
-            in SurfaceVertex topB,
-            in SurfaceVertex bottomA,
-            in SurfaceVertex bottomB,
-            Vector3 expectedNormal)
+        public Mesh CreateMesh(string name, Mesh reusableMesh = null)
         {
-            AddTriangleFacing(bottomA, topA, topB, expectedNormal);
-            AddTriangleFacing(bottomA, topB, bottomB, expectedNormal);
-        }
-
-        public Mesh CreateMesh(string name)
-        {
-            var mesh = new Mesh
-            {
-                name = name,
-                indexFormat = positions.Count > ushort.MaxValue ? IndexFormat.UInt32 : IndexFormat.UInt16
-            };
-            mesh.MarkDynamic();
+            var mesh = reusableMesh != null ? reusableMesh : new Mesh();
+            mesh.Clear();
+            mesh.name = name;
+            mesh.indexFormat = positions.Count > ushort.MaxValue ? IndexFormat.UInt32 : IndexFormat.UInt16;
             mesh.SetVertices(positions);
             mesh.SetNormals(normals);
             mesh.SetTangents(tangents);
@@ -121,82 +106,174 @@ namespace MiniCivilization.World.Meshing
             return mesh;
         }
 
-        private void AddVertex(
+        private int AddVertex(
             in SurfaceVertex vertex,
             Vector3 normal,
             Vector4 tangent,
-            Vector4 layers,
-            Vector4 weights,
-            Vector4 scales)
+            Vector2 layers,
+            Vector2 weights,
+            Vector2 scales)
         {
+            var material = new Vector4(
+                vertex.Appearance.Metallic,
+                vertex.Appearance.Smoothness,
+                vertex.Appearance.Occlusion,
+                0f);
+            var color = (Color32)vertex.Appearance.Albedo;
+            var key = new MeshVertexKey(
+                vertex.Position,
+                normal,
+                tangent,
+                vertex.Uv,
+                material,
+                layers,
+                weights,
+                scales,
+                color);
+            if (vertexLookup.TryGetValue(key, out var existingIndex))
+            {
+                return existingIndex;
+            }
+
+            var index = positions.Count;
+            vertexLookup.Add(key, index);
             positions.Add(vertex.Position);
             normals.Add(normal);
             tangents.Add(tangent);
             uv0.Add(vertex.Uv);
-            materialParameters.Add(new Vector4(
-                vertex.Appearance.Metallic,
-                vertex.Appearance.Smoothness,
-                vertex.Appearance.Occlusion,
-                0f));
+            materialParameters.Add(material);
             textureLayers.Add(layers);
             textureWeights.Add(weights);
             textureScales.Add(scales);
-            colors.Add(vertex.Appearance.Albedo);
+            colors.Add(color);
+            return index;
         }
 
         private static void BuildTriangleTextureLayout(
             in SurfaceAppearance a,
             in SurfaceAppearance b,
             in SurfaceAppearance c,
-            out Vector4 layers,
-            out Vector4 scales,
-            out Vector4 weightsA,
-            out Vector4 weightsB,
-            out Vector4 weightsC)
+            out Vector2 layers,
+            out Vector2 scales,
+            out Vector2 weightsA,
+            out Vector2 weightsB,
+            out Vector2 weightsC)
         {
-            layers = Vector4.zero;
-            scales = Vector4.one;
-            var count = 0;
-            AddLayoutLayers(in a, ref layers, ref scales, ref count);
-            AddLayoutLayers(in b, ref layers, ref scales, ref count);
-            AddLayoutLayers(in c, ref layers, ref scales, ref count);
+            var count = 1;
+            if (!TryFindStrongestLayer(in a, in b, in c, false, 0f, out var firstLayer, out var firstScale))
+            {
+                firstLayer = 0f;
+                firstScale = 1f;
+            }
+
+            var secondLayer = firstLayer;
+            var secondScale = firstScale;
+            if (TryFindStrongestLayer(
+                    in a,
+                    in b,
+                    in c,
+                    true,
+                    firstLayer,
+                    out var resolvedSecondLayer,
+                    out var resolvedSecondScale))
+            {
+                count = 2;
+                secondLayer = resolvedSecondLayer;
+                secondScale = resolvedSecondScale;
+            }
+
+            layers = new Vector2(firstLayer, secondLayer);
+            scales = new Vector2(firstScale, secondScale);
             weightsA = RemapWeights(in a, layers, count);
             weightsB = RemapWeights(in b, layers, count);
             weightsC = RemapWeights(in c, layers, count);
         }
 
-        private static void AddLayoutLayers(
-            in SurfaceAppearance appearance,
-            ref Vector4 layers,
-            ref Vector4 scales,
-            ref int count)
+        private static bool TryFindStrongestLayer(
+            in SurfaceAppearance a,
+            in SurfaceAppearance b,
+            in SurfaceAppearance c,
+            bool hasExcludedLayer,
+            float excludedLayer,
+            out float strongestLayer,
+            out float strongestScale)
         {
-            for (var sourceIndex = 0; sourceIndex < 4 && count < 4; sourceIndex++)
+            strongestLayer = 0f;
+            strongestScale = 1f;
+            var strongestWeight = -1f;
+            ConsiderAppearanceLayers(
+                in a, in a, in b, in c, hasExcludedLayer, excludedLayer,
+                ref strongestLayer, ref strongestScale, ref strongestWeight);
+            ConsiderAppearanceLayers(
+                in b, in a, in b, in c, hasExcludedLayer, excludedLayer,
+                ref strongestLayer, ref strongestScale, ref strongestWeight);
+            ConsiderAppearanceLayers(
+                in c, in a, in b, in c, hasExcludedLayer, excludedLayer,
+                ref strongestLayer, ref strongestScale, ref strongestWeight);
+            return strongestWeight >= 0f;
+        }
+
+        private static void ConsiderAppearanceLayers(
+            in SurfaceAppearance appearance,
+            in SurfaceAppearance a,
+            in SurfaceAppearance b,
+            in SurfaceAppearance c,
+            bool hasExcludedLayer,
+            float excludedLayer,
+            ref float strongestLayer,
+            ref float strongestScale,
+            ref float strongestWeight)
+        {
+            for (var sourceIndex = 0; sourceIndex < 2; sourceIndex++)
             {
-                if (appearance.GetWeight(sourceIndex) <= 0.00001f)
+                var sourceWeight = appearance.GetWeight(sourceIndex);
+                if (sourceWeight <= 0.00001f)
                 {
                     continue;
                 }
 
                 var layer = appearance.GetLayer(sourceIndex);
-                if (FindLayer(layers, count, layer) >= 0)
+                if (hasExcludedLayer && Mathf.Abs(layer - excludedLayer) < 0.001f)
                 {
                     continue;
                 }
 
-                layers[count] = layer;
-                scales[count] = appearance.GetScale(sourceIndex);
-                count++;
+                var aggregateWeight =
+                    GetLayerWeight(in a, layer) +
+                    GetLayerWeight(in b, layer) +
+                    GetLayerWeight(in c, layer);
+                if (aggregateWeight <= strongestWeight)
+                {
+                    continue;
+                }
+
+                strongestLayer = layer;
+                strongestScale = appearance.GetScale(sourceIndex);
+                strongestWeight = aggregateWeight;
             }
         }
 
-        private static Vector4 RemapWeights(
+        private static float GetLayerWeight(in SurfaceAppearance appearance, float layer)
+        {
+            var result = 0f;
+            for (var sourceIndex = 0; sourceIndex < 2; sourceIndex++)
+            {
+                if (Mathf.Abs(appearance.GetLayer(sourceIndex) - layer) < 0.001f)
+                {
+                    result += appearance.GetWeight(sourceIndex);
+                }
+            }
+
+            return result;
+        }
+
+        private static Vector2 RemapWeights(
             in SurfaceAppearance appearance,
-            Vector4 targetLayers,
+            Vector2 targetLayers,
             int targetCount)
         {
-            var result = Vector4.zero;
-            for (var sourceIndex = 0; sourceIndex < 4; sourceIndex++)
+            var result = Vector2.zero;
+            for (var sourceIndex = 0; sourceIndex < 2; sourceIndex++)
             {
                 var sourceWeight = appearance.GetWeight(sourceIndex);
                 if (sourceWeight <= 0.00001f)
@@ -214,7 +291,7 @@ namespace MiniCivilization.World.Meshing
                 }
             }
 
-            var sum = result.x + result.y + result.z + result.w;
+            var sum = result.x + result.y;
             if (sum <= 0.00001f)
             {
                 result.x = 1f;
@@ -227,7 +304,7 @@ namespace MiniCivilization.World.Meshing
             return result;
         }
 
-        private static int FindLayer(Vector4 layers, int count, float layer)
+        private static int FindLayer(Vector2 layers, int count, float layer)
         {
             for (var i = 0; i < count; i++)
             {
@@ -238,6 +315,63 @@ namespace MiniCivilization.World.Meshing
             }
 
             return -1;
+        }
+
+        private readonly struct MeshVertexKey : IEquatable<MeshVertexKey>
+        {
+            private readonly Vector3 position;
+            private readonly Vector3 normal;
+            private readonly Vector4 tangent;
+            private readonly Vector2 uv;
+            private readonly Vector4 material;
+            private readonly Vector2 layers;
+            private readonly Vector2 weights;
+            private readonly Vector2 scales;
+            private readonly Color32 color;
+
+            public MeshVertexKey(
+                Vector3 position,
+                Vector3 normal,
+                Vector4 tangent,
+                Vector2 uv,
+                Vector4 material,
+                Vector2 layers,
+                Vector2 weights,
+                Vector2 scales,
+                Color32 color)
+            {
+                this.position = position;
+                this.normal = normal;
+                this.tangent = tangent;
+                this.uv = uv;
+                this.material = material;
+                this.layers = layers;
+                this.weights = weights;
+                this.scales = scales;
+                this.color = color;
+            }
+
+            public bool Equals(MeshVertexKey other)
+            {
+                return position.Equals(other.position)
+                    && normal.Equals(other.normal)
+                    && tangent.Equals(other.tangent)
+                    && uv.Equals(other.uv)
+                    && material.Equals(other.material)
+                    && layers.Equals(other.layers)
+                    && weights.Equals(other.weights)
+                    && scales.Equals(other.scales)
+                    && color.Equals(other.color);
+            }
+
+            public override bool Equals(object obj) => obj is MeshVertexKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                var geometryHash = HashCode.Combine(position, normal, tangent, uv);
+                var surfaceHash = HashCode.Combine(material, layers, weights, scales);
+                return HashCode.Combine(geometryHash, surfaceHash, color);
+            }
         }
     }
 }

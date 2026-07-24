@@ -1,28 +1,11 @@
 using System;
 using System.Collections.Generic;
-using MiniCivilization.World.Authoring;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Hydrology;
+using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Generation
 {
-    public sealed class WorldGenerationResult
-    {
-        public WorldData World { get; }
-        public IReadOnlyList<WaterBody> WaterBodies { get; private set; }
-
-        public WorldGenerationResult(WorldData world, IReadOnlyList<WaterBody> waterBodies)
-        {
-            World = world;
-            WaterBodies = waterBodies;
-        }
-
-        public void RefreshWaterBodies()
-        {
-            WaterBodies = WaterBodyResolver.Resolve(World);
-        }
-    }
-
     public static class WorldGenerator
     {
         private static readonly (int x, int z)[] CardinalDirections =
@@ -30,7 +13,9 @@ namespace MiniCivilization.World.Generation
             (1, 0), (0, 1), (-1, 0), (0, -1)
         };
 
-        public static WorldGenerationResult Generate(WorldGenerationSettings settings)
+        public static WorldState Generate(
+            WorldGenerationSettings settings,
+            int seed)
         {
             if (settings == null)
             {
@@ -48,7 +33,7 @@ namespace MiniCivilization.World.Generation
                 settings.ChunkSizeXZ,
                 settings.ChunkHeight,
                 settings.ChunkSizeXZ,
-                settings.Seed);
+                seed);
 
             var columnCount = settings.WorldSize * settings.WorldSize;
             var solidHeights = new int[columnCount];
@@ -56,15 +41,15 @@ namespace MiniCivilization.World.Generation
             var waterTypes = new WaterType[columnCount];
             var waterFlags = new CellFlags[columnCount];
 
-            GenerateBaseTerrain(world, settings, solidHeights);
+            GenerateBaseTerrain(world, settings, seed, solidHeights);
             InitializeSea(world, settings, solidHeights, waterSurfaces, waterTypes);
-            GenerateLakes(world, settings, solidHeights, waterSurfaces, waterTypes);
-            GenerateRivers(world, settings, solidHeights, waterSurfaces, waterTypes, waterFlags);
+            GenerateLakes(world, settings, seed, solidHeights, waterSurfaces, waterTypes);
+            GenerateRivers(world, settings, seed, solidHeights, waterSurfaces, waterTypes, waterFlags);
             ApplyColumns(world, solidHeights, waterSurfaces, waterTypes, waterFlags);
-            ApplyBiomes(world, settings);
+            ApplyBiomes(world, settings, seed);
 
             var waterBodies = WaterBodyResolver.Resolve(world);
-            return new WorldGenerationResult(world, waterBodies);
+            return new WorldState(world, waterBodies);
         }
 
         public static ulong ComputeStableHash(WorldData world)
@@ -100,10 +85,11 @@ namespace MiniCivilization.World.Generation
                 hash = Mix(hash, column.WaterLevel, prime);
                 hash = Mix(hash, (ushort)column.Surface, prime);
                 hash = Mix(hash, (ushort)column.Water, prime);
-                hash = Mix(hash, (ushort)column.Biome, prime);
-                hash = Mix(hash, column.Temperature, prime);
-                hash = Mix(hash, column.Moisture, prime);
-                hash = Mix(hash, column.Fertility, prime);
+                var environment = world.GetColumnEnvironment(x, z);
+                hash = Mix(hash, (ushort)environment.Biome, prime);
+                hash = Mix(hash, environment.Temperature, prime);
+                hash = Mix(hash, environment.Moisture, prime);
+                hash = Mix(hash, environment.Fertility, prime);
             }
 
             return hash;
@@ -137,11 +123,15 @@ namespace MiniCivilization.World.Generation
             return hash;
         }
 
-        private static void GenerateBaseTerrain(WorldData world, WorldGenerationSettings settings, int[] heights)
+        private static void GenerateBaseTerrain(
+            WorldData world,
+            WorldGenerationSettings settings,
+            int worldSeed,
+            int[] heights)
         {
-            var terrainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "terrain");
-            var mountainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountains");
-            var mountainMaskSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountain-mask");
+            var terrainSeed = DeterministicNoise.DeriveSeed(worldSeed, "terrain");
+            var mountainSeed = DeterministicNoise.DeriveSeed(worldSeed, "mountains");
+            var mountainMaskSeed = DeterministicNoise.DeriveSeed(worldSeed, "mountain-mask");
             var maximumUnits = world.Height * WorldGrid.HeightStepsPerCell - 1;
             var edgeFalloffUnits = world.Height
                 * WorldGrid.HeightStepsPerCell
@@ -194,15 +184,6 @@ namespace MiniCivilization.World.Generation
                         centeredNoise * settings.TerrainAmplitudeUnits
                         + mountainHeight
                         - edgePenalty);
-
-                if (settings.IslandFalloff > 0f
-                    && (x == 0
-                        || z == 0
-                        || x == world.Size - 1
-                        || z == world.Size - 1))
-                {
-                    height = Math.Min(height, settings.SeaLevelUnits - 2);
-                }
 
                 height = Math.Clamp(height, 1, maximumUnits);
                 heights[ToColumnIndex(world.Size, x, z)] = height;
@@ -265,6 +246,7 @@ namespace MiniCivilization.World.Generation
         private static void GenerateLakes(
             WorldData world,
             WorldGenerationSettings settings,
+            int worldSeed,
             int[] solidHeights,
             int[] waterSurfaces,
             WaterType[] waterTypes)
@@ -274,7 +256,7 @@ namespace MiniCivilization.World.Generation
                 return;
             }
 
-            var seed = DeterministicNoise.DeriveSeed(settings.Seed, "lakes");
+            var seed = DeterministicNoise.DeriveSeed(worldSeed, "lakes");
             var chosen = new List<(int x, int z)>();
             var margin = settings.LakeRadius + 2;
 
@@ -373,6 +355,7 @@ namespace MiniCivilization.World.Generation
         private static void GenerateRivers(
             WorldData world,
             WorldGenerationSettings settings,
+            int worldSeed,
             int[] solidHeights,
             int[] waterSurfaces,
             WaterType[] waterTypes,
@@ -383,7 +366,7 @@ namespace MiniCivilization.World.Generation
                 return;
             }
 
-            var seed = DeterministicNoise.DeriveSeed(settings.Seed, "rivers");
+            var seed = DeterministicNoise.DeriveSeed(worldSeed, "rivers");
             var reservedStarts = new HashSet<int>();
 
             for (var riverIndex = 0; riverIndex < settings.RiverCount; riverIndex++)
@@ -593,24 +576,36 @@ namespace MiniCivilization.World.Generation
             WaterType[] waterTypes,
             CellFlags[] waterFlags)
         {
+            var writer = new WorldBulkWriter(world);
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
                 var index = ToColumnIndex(world.Size, x, z);
-                world.SetColumnSolidHeightUnits(x, z, solidHeights[index], SurfaceType.Ground);
-
-                if (waterSurfaces[index] > solidHeights[index])
-                {
-                    world.SetColumnWaterSurfaceUnits(x, z, waterSurfaces[index], waterTypes[index], waterFlags[index]);
-                }
+                var waterSurface = waterSurfaces[index] > solidHeights[index]
+                    ? waterSurfaces[index]
+                    : 0;
+                writer.WriteColumn(
+                    x,
+                    z,
+                    solidHeights[index],
+                    SurfaceType.Ground,
+                    waterSurface,
+                    waterTypes[index],
+                    waterFlags[index]);
             }
 
-            world.RebuildAllSurfaceColumns();
+            writer.Complete();
         }
 
-        private static void ApplyBiomes(WorldData world, WorldGenerationSettings settings)
+        private static void ApplyBiomes(
+            WorldData world,
+            WorldGenerationSettings settings,
+            int worldSeed)
         {
-            var climateSeed = DeterministicNoise.DeriveSeed(settings.Seed, "climate");
+            var climateSeed = DeterministicNoise.DeriveSeed(worldSeed, "climate");
+            var waterDistances = BuildWaterDistanceField(
+                world,
+                settings.WaterMoistureRadius);
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
@@ -624,7 +619,10 @@ namespace MiniCivilization.World.Generation
                 var altitude = column.SolidTopUnits / (float)(world.Height * WorldGrid.HeightStepsPerCell);
                 var temperature = Math.Clamp(1f - latitude * 0.7f - altitude * 0.45f, 0f, 1f);
                 var moistureNoise = DeterministicNoise.FractalNoise(x * 0.025f, z * 0.025f, climateSeed, 3, 2f, 0.5f);
-                var waterInfluence = FindWaterInfluence(world, x, z, settings.WaterMoistureRadius);
+                var waterDistance = waterDistances[ToColumnIndex(world.Size, x, z)];
+                var waterInfluence = waterDistance > settings.WaterMoistureRadius
+                    ? 0f
+                    : 1f - waterDistance / (float)(settings.WaterMoistureRadius + 1);
                 var moisture = Math.Clamp(moistureNoise * 0.65f + waterInfluence * 0.55f, 0f, 1f);
 
                 BiomeType biome;
@@ -675,35 +673,76 @@ namespace MiniCivilization.World.Generation
                     surface = SurfaceType.Ground;
                 }
 
-                column.Biome = biome;
-                column.Temperature = (byte)MathF.Round(temperature * byte.MaxValue);
-                column.Moisture = (byte)MathF.Round(moisture * byte.MaxValue);
-                column.Fertility = (byte)MathF.Round(Math.Clamp(moisture * (1f - MathF.Abs(temperature - 0.58f)), 0f, 1f) * byte.MaxValue);
                 column.Surface = surface;
                 world.SetSurfaceColumn(x, z, column);
+                world.SetColumnEnvironment(x, z, new ColumnEnvironmentData
+                {
+                    Biome = biome,
+                    Temperature = (byte)MathF.Round(temperature * byte.MaxValue),
+                    Moisture = (byte)MathF.Round(moisture * byte.MaxValue),
+                    Fertility = (byte)MathF.Round(
+                        Math.Clamp(
+                            moisture * (1f - MathF.Abs(temperature - 0.58f)),
+                            0f,
+                            1f) * byte.MaxValue)
+                });
 
                 var topCell = world.GetCell(x, column.SurfaceCellY, z);
                 topCell.Surface = surface;
-                world.SetCell(x, column.SurfaceCellY, z, topCell);
+                world.SetCellBulk(x, column.SurfaceCellY, z, topCell);
             }
         }
 
-        private static float FindWaterInfluence(WorldData world, int centerX, int centerZ, int radius)
+        private static int[] BuildWaterDistanceField(WorldData world, int radius)
         {
-            var bestDistance = radius + 1;
-            for (var z = Math.Max(0, centerZ - radius); z <= Math.Min(world.Size - 1, centerZ + radius); z++)
-            for (var x = Math.Max(0, centerX - radius); x <= Math.Min(world.Size - 1, centerX + radius); x++)
+            var distances = new int[world.Size * world.Size];
+            Array.Fill(distances, radius + 1);
+            var queue = new Queue<int>();
+
+            for (var z = 0; z < world.Size; z++)
+            for (var x = 0; x < world.Size; x++)
             {
-                if (!world.GetSurfaceColumn(x, z).HasWater)
+                if (world.GetSurfaceColumn(x, z).HasWater)
+                {
+                    var index = ToColumnIndex(world.Size, x, z);
+                    distances[index] = 0;
+                    queue.Enqueue(index);
+                }
+            }
+
+            while (queue.Count > 0)
+            {
+                var index = queue.Dequeue();
+                var distance = distances[index];
+                if (distance >= radius)
                 {
                     continue;
                 }
 
-                var distance = Math.Abs(x - centerX) + Math.Abs(z - centerZ);
-                bestDistance = Math.Min(bestDistance, distance);
+                var x = index % world.Size;
+                var z = index / world.Size;
+                for (var directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
+                {
+                    var direction = CardinalDirections[directionIndex];
+                    var nextX = x + direction.x;
+                    var nextZ = z + direction.z;
+                    if (!world.ContainsColumn(nextX, nextZ))
+                    {
+                        continue;
+                    }
+
+                    var nextIndex = ToColumnIndex(world.Size, nextX, nextZ);
+                    if (distances[nextIndex] <= distance + 1)
+                    {
+                        continue;
+                    }
+
+                    distances[nextIndex] = distance + 1;
+                    queue.Enqueue(nextIndex);
+                }
             }
 
-            return bestDistance > radius ? 0f : 1f - bestDistance / (float)(radius + 1);
+            return distances;
         }
 
         private static bool IsAdjacentToWater(WorldData world, int x, int z)
@@ -728,5 +767,97 @@ namespace MiniCivilization.World.Generation
         }
 
         private static int ToColumnIndex(int size, int x, int z) => x + size * z;
+    }
+
+    internal sealed class WorldBulkWriter
+    {
+        private readonly WorldData world;
+        private bool completed;
+
+        public WorldBulkWriter(WorldData world)
+        {
+            this.world = world ?? throw new ArgumentNullException(nameof(world));
+        }
+
+        public void WriteColumn(
+            int x,
+            int z,
+            int solidHeightUnits,
+            SurfaceType surface,
+            int waterSurfaceUnits,
+            WaterType water,
+            CellFlags waterFlags)
+        {
+            if (completed)
+            {
+                throw new InvalidOperationException("Bulk writing has already completed.");
+            }
+
+            solidHeightUnits = Math.Clamp(
+                solidHeightUnits,
+                0,
+                world.Height * WorldGrid.HeightStepsPerCell);
+            waterSurfaceUnits = Math.Clamp(
+                waterSurfaceUnits,
+                0,
+                world.Height * WorldGrid.HeightStepsPerCell);
+
+            for (var y = 0; y < world.Height; y++)
+            {
+                var baseUnits = y * WorldGrid.HeightStepsPerCell;
+                var solidFill = (byte)Math.Clamp(
+                    solidHeightUnits - baseUnits,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                var cell = new CellData
+                {
+                    SolidFill = solidFill
+                };
+
+                if (solidFill > 0)
+                {
+                    cell.Material = y < Math.Max(
+                            0,
+                            solidHeightUnits / WorldGrid.HeightStepsPerCell - 2)
+                        ? CellMaterialType.Rock
+                        : CellMaterialType.Soil;
+                    cell.Geology = CellMaterialType.Rock;
+                    cell.Surface =
+                        solidFill < WorldGrid.HeightStepsPerCell
+                        || baseUnits + solidFill == solidHeightUnits
+                            ? surface
+                            : SurfaceType.None;
+                    cell.Flags = CellFlags.Generated;
+                }
+
+                var available = WorldGrid.HeightStepsPerCell - solidFill;
+                var desiredTop = Math.Clamp(
+                    waterSurfaceUnits - baseUnits,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                cell.WaterFill = (byte)Math.Clamp(
+                    desiredTop - solidFill,
+                    0,
+                    available);
+                if (cell.WaterFill > 0)
+                {
+                    cell.Water = water;
+                    cell.Flags |= waterFlags | CellFlags.Generated;
+                }
+
+                world.SetCellBulk(x, y, z, cell);
+            }
+        }
+
+        public void Complete()
+        {
+            if (completed)
+            {
+                return;
+            }
+
+            completed = true;
+            world.RebuildAllSurfaceColumns();
+        }
     }
 }

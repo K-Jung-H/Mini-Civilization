@@ -86,7 +86,10 @@ namespace MiniCivilization.World.Meshing
 
             var currentColumn = world.GetSurfaceColumn(x, z);
             var currentSurface = surfaceOverride ?? currentColumn.Surface;
-            var current = ResolveTerrainAppearance(catalog, currentColumn.Biome, currentSurface);
+            var current = ResolveTerrainAppearance(
+                catalog,
+                world.GetColumnEnvironment(x, z).Biome,
+                currentSurface);
             var xAppearance = ResolveTerrainNeighbor(
                 world, catalog, x + offsetX, z, surfaceOverride, current);
             var zAppearance = ResolveTerrainNeighbor(
@@ -139,7 +142,7 @@ namespace MiniCivilization.World.Meshing
 
             return ResolveTerrainAppearance(
                 catalog,
-                column.Biome,
+                world.GetColumnEnvironment(x, z).Biome,
                 surfaceOverride ?? column.Surface);
         }
 
