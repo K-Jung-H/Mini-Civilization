@@ -42,20 +42,25 @@ namespace MiniCivilization.World.Interaction
         }
     }
 
-    public readonly struct InteractionTriangleMetadata
+    [Serializable]
+    public struct InteractionTriangleMetadata
     {
-        public readonly int OwnerCellIndex;
-        public readonly SurfaceInteractionType SurfaceType;
-        public readonly SurfaceTriangleRole Role;
+        [SerializeField] private int ownerCellIndex;
+        [SerializeField] private SurfaceInteractionType surfaceType;
+        [SerializeField] private SurfaceTriangleRole role;
+
+        public readonly int OwnerCellIndex => ownerCellIndex;
+        public readonly SurfaceInteractionType SurfaceType => surfaceType;
+        public readonly SurfaceTriangleRole Role => role;
 
         public InteractionTriangleMetadata(
             int ownerCellIndex,
             SurfaceInteractionType surfaceType,
             SurfaceTriangleRole role)
         {
-            OwnerCellIndex = ownerCellIndex;
-            SurfaceType = surfaceType;
-            Role = role;
+            this.ownerCellIndex = ownerCellIndex;
+            this.surfaceType = surfaceType;
+            this.role = role;
         }
     }
 

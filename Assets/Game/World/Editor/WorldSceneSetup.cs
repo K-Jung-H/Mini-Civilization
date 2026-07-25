@@ -8,7 +8,10 @@ using MiniCivilization.World.Runtime;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace MiniCivilization.World.Editor
 {
@@ -23,6 +26,29 @@ namespace MiniCivilization.World.Editor
         private const string WaterfallMaterialPath = SettingsDirectory + "/WorldWaterfall.mat";
         private const string HighlightMaterialPath = SettingsDirectory + "/WorldTileHighlight.mat";
         private const int InteractionLayer = 8;
+
+        [InitializeOnLoadMethod]
+        private static void QueueRequiredSceneMigration()
+        {
+            EditorApplication.delayCall += () =>
+            {
+                if (EditorApplication.isPlayingOrWillChangePlaymode
+                    || SceneManager.GetActiveScene().path != ScenePath)
+                {
+                    return;
+                }
+
+                var root = GameObject.Find("World System");
+                if (root == null
+                    || (root.transform.Find("World Management") != null
+                        && root.transform.Find("World UI/Canvas") != null))
+                {
+                    return;
+                }
+
+                Setup();
+            };
+        }
 
         [MenuItem("Mini Civilization/Setup World Scene")]
         public static void Setup()
@@ -56,33 +82,58 @@ namespace MiniCivilization.World.Editor
                 ?? new GameObject("World System");
             worldObject.name = "World System";
 
-            var manager = GetOrAdd<WorldManager>(worldObject, out _);
-            var generator = GetOrAdd<WorldGenerationController>(
+            var managementObject = EnsureRoleObject(worldObject, "World Management");
+            var generationObject = EnsureRoleObject(worldObject, "World Generation");
+            var renderingObject = EnsureRoleObject(worldObject, "World Rendering");
+            var persistenceObject = EnsureRoleObject(worldObject, "World Persistence");
+            var interactionObject = EnsureRoleObject(worldObject, "World Interaction");
+            var uiObject = EnsureRoleObject(worldObject, "World UI");
+
+            var manager = MoveOrAdd<WorldManager>(
                 worldObject,
+                managementObject,
+                out _);
+            var generator = MoveOrAdd<WorldGenerationController>(
+                worldObject,
+                generationObject,
                 out var generatorCreated);
-            var renderer = GetOrAdd<WorldRenderer>(worldObject, out _);
-            var persistence = GetOrAdd<WorldPersistence>(worldObject, out _);
-            var selectionState = GetOrAdd<WorldTileSelectionState>(worldObject, out _);
-            var interactionController = GetOrAdd<WorldInteractionController>(
-                worldObject, out _);
-            var highlighter = GetOrAdd<WorldTileHighlighter>(worldObject, out _);
-            var infoPresenter = GetOrAdd<WorldTileInfoPresenter>(worldObject, out _);
+            var renderer = MoveOrAdd<WorldRenderer>(
+                worldObject,
+                renderingObject,
+                out _);
+            var persistence = MoveOrAdd<WorldPersistence>(
+                worldObject,
+                persistenceObject,
+                out _);
+            var selectionState = MoveOrAdd<WorldTileSelectionState>(
+                worldObject,
+                interactionObject,
+                out _);
+            var interactionController = MoveOrAdd<WorldInteractionController>(
+                worldObject,
+                interactionObject,
+                out _);
+            var highlighter = MoveOrAdd<WorldTileHighlighter>(
+                worldObject,
+                interactionObject,
+                out _);
+            var infoProvider = MoveOrAdd<WorldCellInfoProvider>(
+                worldObject,
+                interactionObject,
+                out _);
+            var infoPresenter = MoveOrAdd<WorldTileInfoPresenter>(
+                worldObject,
+                uiObject,
+                out _);
 
-            var renderRoot = worldObject.transform.Find("Render Root");
-            if (renderRoot == null)
-            {
-                var renderRootObject = new GameObject("Render Root");
-                renderRoot = renderRootObject.transform;
-                renderRoot.SetParent(worldObject.transform, false);
-            }
-
-            var highlightRoot = worldObject.transform.Find("Highlight Root");
-            if (highlightRoot == null)
-            {
-                var highlightRootObject = new GameObject("Highlight Root");
-                highlightRoot = highlightRootObject.transform;
-                highlightRoot.SetParent(worldObject.transform, false);
-            }
+            var renderRoot = EnsureChildTransform(
+                renderingObject.transform,
+                worldObject.transform,
+                "Render Root");
+            var highlightRoot = EnsureChildTransform(
+                interactionObject.transform,
+                worldObject.transform,
+                "Highlight Root");
 
             var hoverHighlight = EnsureHighlightChild(highlightRoot, "Hover Highlight");
             var selectedHighlight = EnsureHighlightChild(highlightRoot, "Selected Highlight");
@@ -103,11 +154,7 @@ namespace MiniCivilization.World.Editor
                 true,
                 InteractionLayer);
             persistence.Configure("Worlds", "default.mcw", true);
-            manager.Configure(
-                generator,
-                renderer,
-                persistence,
-                WorldStartupMode.LoadIfExistsOrGenerate);
+            manager.Configure(generator, renderer, persistence);
 
             var camera = ConfigureCamera(settings.WorldSize);
             interactionController.Configure(
@@ -124,7 +171,13 @@ namespace MiniCivilization.World.Editor
                 selectedHighlight.Filter,
                 selectedHighlight.Renderer,
                 highlightMaterial);
-            infoPresenter.Configure(manager, selectionState);
+            var infoPanel = EnsureTileInfoCanvas(uiObject.transform);
+            infoPresenter.Configure(
+                manager,
+                selectionState,
+                infoProvider,
+                infoPanel);
+            EnsureEventSystem();
             ConfigureInteractionLayer();
             ConfigureDirectionalLight();
             EnsureSceneInBuildSettings();
@@ -137,7 +190,9 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(selectionState);
             EditorUtility.SetDirty(interactionController);
             EditorUtility.SetDirty(highlighter);
+            EditorUtility.SetDirty(infoProvider);
             EditorUtility.SetDirty(infoPresenter);
+            EditorUtility.SetDirty(infoPanel);
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
             AssetDatabase.SaveAssets();
@@ -199,6 +254,280 @@ namespace MiniCivilization.World.Editor
             var component = target.GetComponent<T>();
             created = component == null;
             return component != null ? component : target.AddComponent<T>();
+        }
+
+        private static GameObject EnsureRoleObject(
+            GameObject worldRoot,
+            string roleName)
+        {
+            var child = worldRoot.transform.Find(roleName);
+            if (child != null)
+            {
+                return child.gameObject;
+            }
+
+            var roleObject = new GameObject(roleName);
+            roleObject.transform.SetParent(worldRoot.transform, false);
+            return roleObject;
+        }
+
+        private static T MoveOrAdd<T>(
+            GameObject legacyOwner,
+            GameObject target,
+            out bool created)
+            where T : Component
+        {
+            var component = target.GetComponent<T>();
+            if (component != null)
+            {
+                created = false;
+                return component;
+            }
+
+            var legacy = legacyOwner.GetComponent<T>();
+            if (legacy != null)
+            {
+                UnityEditorInternal.ComponentUtility.CopyComponent(legacy);
+                UnityEditorInternal.ComponentUtility.PasteComponentAsNew(target);
+                Object.DestroyImmediate(legacy);
+                created = false;
+                return target.GetComponent<T>();
+            }
+
+            created = true;
+            return target.AddComponent<T>();
+        }
+
+        private static Transform EnsureChildTransform(
+            Transform expectedParent,
+            Transform legacyParent,
+            string childName)
+        {
+            var child = expectedParent.Find(childName)
+                ?? legacyParent.Find(childName);
+            if (child == null)
+            {
+                var childObject = new GameObject(childName);
+                child = childObject.transform;
+            }
+
+            child.SetParent(expectedParent, false);
+            return child;
+        }
+
+        private static WorldTileInfoPanel EnsureTileInfoCanvas(
+            Transform uiRoot)
+        {
+            var canvasTransform = uiRoot.Find("Canvas") as RectTransform;
+            if (canvasTransform == null)
+            {
+                var canvasObject = new GameObject(
+                    "Canvas",
+                    typeof(RectTransform),
+                    typeof(Canvas),
+                    typeof(CanvasScaler),
+                    typeof(GraphicRaycaster));
+                canvasTransform = (RectTransform)canvasObject.transform;
+                canvasTransform.SetParent(uiRoot, false);
+            }
+
+            var canvas = canvasTransform.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 100;
+            var scaler = canvasTransform.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = 0.5f;
+
+            var panelTransform = canvasTransform.Find("Tile Info Panel")
+                as RectTransform;
+            if (panelTransform == null)
+            {
+                var panelObject = new GameObject(
+                    "Tile Info Panel",
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(Image),
+                    typeof(WorldTileInfoPanel));
+                panelTransform = (RectTransform)panelObject.transform;
+                panelTransform.SetParent(canvasTransform, false);
+            }
+
+            panelTransform.anchorMin = new Vector2(1f, 1f);
+            panelTransform.anchorMax = new Vector2(1f, 1f);
+            panelTransform.pivot = new Vector2(1f, 1f);
+            panelTransform.anchoredPosition = new Vector2(-24f, -24f);
+            panelTransform.sizeDelta = new Vector2(390f, 680f);
+            var panelImage = panelTransform.GetComponent<Image>();
+            panelImage.color = new Color(0.045f, 0.06f, 0.08f, 0.94f);
+
+            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var title = EnsureText(
+                panelTransform,
+                "Title",
+                font,
+                22,
+                FontStyle.Bold,
+                new Vector2(18f, -14f),
+                new Vector2(310f, 34f));
+            var coordinate = EnsureText(
+                panelTransform,
+                "Coordinate",
+                font,
+                17,
+                FontStyle.Bold,
+                new Vector2(18f, -58f),
+                new Vector2(354f, 30f));
+            var terrain = EnsureText(
+                panelTransform,
+                "Terrain",
+                font,
+                15,
+                FontStyle.Normal,
+                new Vector2(18f, -102f),
+                new Vector2(354f, 176f));
+            var water = EnsureText(
+                panelTransform,
+                "Water",
+                font,
+                15,
+                FontStyle.Normal,
+                new Vector2(18f, -286f),
+                new Vector2(354f, 144f));
+            var surface = EnsureText(
+                panelTransform,
+                "Surface",
+                font,
+                15,
+                FontStyle.Normal,
+                new Vector2(18f, -438f),
+                new Vector2(354f, 92f));
+            var debug = EnsureText(
+                panelTransform,
+                "Debug",
+                font,
+                13,
+                FontStyle.Normal,
+                new Vector2(18f, -538f),
+                new Vector2(354f, 118f));
+            debug.color = new Color(0.68f, 0.75f, 0.82f, 1f);
+
+            var closeButton = EnsureCloseButton(
+                panelTransform,
+                font);
+            var panel = panelTransform.GetComponent<WorldTileInfoPanel>();
+            panel.Configure(
+                panelTransform.gameObject,
+                title,
+                coordinate,
+                terrain,
+                water,
+                surface,
+                debug,
+                closeButton);
+            panelTransform.gameObject.SetActive(false);
+            return panel;
+        }
+
+        private static Text EnsureText(
+            RectTransform parent,
+            string objectName,
+            Font font,
+            int fontSize,
+            FontStyle fontStyle,
+            Vector2 anchoredPosition,
+            Vector2 size)
+        {
+            var child = parent.Find(objectName) as RectTransform;
+            if (child == null)
+            {
+                var textObject = new GameObject(
+                    objectName,
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(Text));
+                child = (RectTransform)textObject.transform;
+                child.SetParent(parent, false);
+            }
+
+            child.anchorMin = new Vector2(0f, 1f);
+            child.anchorMax = new Vector2(0f, 1f);
+            child.pivot = new Vector2(0f, 1f);
+            child.anchoredPosition = anchoredPosition;
+            child.sizeDelta = size;
+            var text = child.GetComponent<Text>();
+            text.font = font;
+            text.fontSize = fontSize;
+            text.fontStyle = fontStyle;
+            text.color = Color.white;
+            text.alignment = TextAnchor.UpperLeft;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.raycastTarget = false;
+            return text;
+        }
+
+        private static Button EnsureCloseButton(
+            RectTransform parent,
+            Font font)
+        {
+            var child = parent.Find("Close Button") as RectTransform;
+            if (child == null)
+            {
+                var buttonObject = new GameObject(
+                    "Close Button",
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(Image),
+                    typeof(Button));
+                child = (RectTransform)buttonObject.transform;
+                child.SetParent(parent, false);
+            }
+
+            child.anchorMin = new Vector2(1f, 1f);
+            child.anchorMax = new Vector2(1f, 1f);
+            child.pivot = new Vector2(1f, 1f);
+            child.anchoredPosition = new Vector2(-12f, -12f);
+            child.sizeDelta = new Vector2(36f, 32f);
+            child.GetComponent<Image>().color =
+                new Color(0.18f, 0.22f, 0.27f, 1f);
+            var label = EnsureText(
+                child,
+                "Label",
+                font,
+                20,
+                FontStyle.Bold,
+                Vector2.zero,
+                child.sizeDelta);
+            var labelTransform = (RectTransform)label.transform;
+            labelTransform.anchorMin = Vector2.zero;
+            labelTransform.anchorMax = Vector2.one;
+            labelTransform.pivot = new Vector2(0.5f, 0.5f);
+            labelTransform.anchoredPosition = Vector2.zero;
+            labelTransform.sizeDelta = Vector2.zero;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.text = "\u00D7";
+            return child.GetComponent<Button>();
+        }
+
+        private static void EnsureEventSystem()
+        {
+            var eventSystem = Object.FindFirstObjectByType<EventSystem>();
+            if (eventSystem != null)
+            {
+                if (eventSystem.GetComponent<InputSystemUIInputModule>() == null)
+                {
+                    eventSystem.gameObject.AddComponent<InputSystemUIInputModule>();
+                }
+
+                return;
+            }
+
+            var eventObject = new GameObject(
+                "EventSystem",
+                typeof(EventSystem),
+                typeof(InputSystemUIInputModule));
+            EditorUtility.SetDirty(eventObject);
         }
 
         private static Camera ConfigureCamera(int worldSize)

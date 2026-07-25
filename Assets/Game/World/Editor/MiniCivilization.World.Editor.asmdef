@@ -2,7 +2,9 @@
   "name": "MiniCivilization.World.Editor",
   "rootNamespace": "MiniCivilization.World.Editor",
   "references": [
-    "MiniCivilization.World"
+    "MiniCivilization.World",
+    "Unity.InputSystem",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [
     "Editor"

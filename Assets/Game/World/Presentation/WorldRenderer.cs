@@ -6,6 +6,13 @@ using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
 {
+    public enum WorldRenderBindingMode : byte
+    {
+        None,
+        PreparedScene,
+        RuntimeGenerated
+    }
+
     public sealed class WorldRenderer : MonoBehaviour
     {
         [Header("Rendering")]
@@ -28,6 +35,8 @@ namespace MiniCivilization.World.Presentation
         private int activeRenderPatchSize;
 
         public WorldData BoundWorld => boundWorld;
+        public WorldRenderBindingMode BindingMode { get; private set; }
+        public int ActiveRenderPatchSize => activeRenderPatchSize;
         public int RenderedPatchCount => chunkViews == null
             ? 0
             : chunkViews.GetLength(0) * chunkViews.GetLength(1);
@@ -39,6 +48,11 @@ namespace MiniCivilization.World.Presentation
 
         public void Bind(WorldData world)
         {
+            BuildRuntimeWorld(world);
+        }
+
+        public void BuildRuntimeWorld(WorldData world)
+        {
             if (world == null)
             {
                 throw new ArgumentNullException(nameof(world));
@@ -49,8 +63,78 @@ namespace MiniCivilization.World.Presentation
 
             boundWorld = world;
             activeRenderPatchSize = ResolveRenderPatchSize(world);
+            BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
-            BuildAllPatches();
+            BuildAllPatches(persistentSceneObjects: false);
+        }
+
+        public void PrepareWorldInScene(WorldData world)
+        {
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
+
+            ValidateReferences();
+            Unbind();
+            boundWorld = world;
+            activeRenderPatchSize = ResolveRenderPatchSize(world);
+            BindingMode = WorldRenderBindingMode.PreparedScene;
+            boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
+            BuildAllPatches(persistentSceneObjects: true);
+        }
+
+        public bool TryAdoptPreparedWorld(
+            WorldData world,
+            int preparedPatchSize,
+            int preparedPatchCount)
+        {
+            if (world == null
+                || preparedPatchSize <= 0
+                || preparedPatchCount <= 0)
+            {
+                return false;
+            }
+
+            ValidateReferences();
+            DetachBoundWorld(clearViews: false);
+            var countPerAxis = world.Size / preparedPatchSize;
+            if (world.Size % preparedPatchSize != 0
+                || checked(countPerAxis * countPerAxis) != preparedPatchCount)
+            {
+                return false;
+            }
+
+            var preparedViews = renderRoot.GetComponentsInChildren<WorldChunkView>(
+                includeInactive: true);
+            if (preparedViews.Length != preparedPatchCount)
+            {
+                return false;
+            }
+
+            var adoptedViews = new WorldChunkView[countPerAxis, countPerAxis];
+            for (var index = 0; index < preparedViews.Length; index++)
+            {
+                var view = preparedViews[index];
+                if (view.PatchSize != preparedPatchSize
+                    || (uint)view.PatchX >= countPerAxis
+                    || (uint)view.PatchZ >= countPerAxis
+                    || adoptedViews[view.PatchX, view.PatchZ] != null
+                    || !view.AdoptPrepared(interactionLayer))
+                {
+                    return false;
+                }
+
+                adoptedViews[view.PatchX, view.PatchZ] = view;
+            }
+
+            boundWorld = world;
+            activeRenderPatchSize = preparedPatchSize;
+            chunkViews = adoptedViews;
+            BindingMode = WorldRenderBindingMode.PreparedScene;
+            boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
+            ClearAllDirtyFlags(boundWorld);
+            return true;
         }
 
         public void RebuildAll()
@@ -61,7 +145,8 @@ namespace MiniCivilization.World.Presentation
             }
 
             ClearViews();
-            BuildAllPatches();
+            BindingMode = WorldRenderBindingMode.RuntimeGenerated;
+            BuildAllPatches(persistentSceneObjects: false);
         }
 
         public void RefreshDirtyChunks()
@@ -122,6 +207,28 @@ namespace MiniCivilization.World.Presentation
 
         public void Unbind()
         {
+            DetachBoundWorld(clearViews: true);
+        }
+
+        public IEnumerable<WorldChunkView> EnumerateChunkViews()
+        {
+            if (chunkViews == null)
+            {
+                yield break;
+            }
+
+            for (var z = 0; z < chunkViews.GetLength(1); z++)
+            for (var x = 0; x < chunkViews.GetLength(0); x++)
+            {
+                if (chunkViews[x, z] != null)
+                {
+                    yield return chunkViews[x, z];
+                }
+            }
+        }
+
+        private void DetachBoundWorld(bool clearViews)
+        {
             if (boundWorld != null)
             {
                 boundWorld.ChunkMarkedDirty -= OnChunkMarkedDirty;
@@ -129,10 +236,18 @@ namespace MiniCivilization.World.Presentation
 
             boundWorld = null;
             activeRenderPatchSize = 0;
+            BindingMode = WorldRenderBindingMode.None;
             dirtyGeometryPatches.Clear();
             dirtyMaterialPatches.Clear();
             dirtyLogicalChunks.Clear();
-            ClearViews();
+            if (clearViews)
+            {
+                ClearViews();
+            }
+            else
+            {
+                chunkViews = null;
+            }
         }
 
         public void Configure(
@@ -155,7 +270,7 @@ namespace MiniCivilization.World.Presentation
             interactionLayer = Math.Clamp(colliderLayer, 0, 31);
         }
 
-        private void BuildAllPatches()
+        private void BuildAllPatches(bool persistentSceneObjects)
         {
             var patchCount = boundWorld.Size / activeRenderPatchSize;
             chunkViews = new WorldChunkView[patchCount, patchCount];
@@ -164,7 +279,9 @@ namespace MiniCivilization.World.Presentation
             {
                 var chunkObject = new GameObject
                 {
-                    hideFlags = HideFlags.DontSave
+                    hideFlags = persistentSceneObjects
+                        ? HideFlags.None
+                        : HideFlags.DontSave
                 };
                 chunkObject.transform.SetParent(renderRoot, false);
                 var view = chunkObject.AddComponent<WorldChunkView>();

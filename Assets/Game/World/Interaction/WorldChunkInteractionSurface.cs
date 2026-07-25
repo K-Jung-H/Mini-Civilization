@@ -7,31 +7,36 @@ namespace MiniCivilization.World.Interaction
     public sealed class WorldChunkInteractionSurface : MonoBehaviour
     {
         private MeshCollider meshCollider;
-        private InteractionTriangleMetadata[] triangleMetadata =
+        [SerializeField] private Mesh interactionMesh;
+        [SerializeField] private InteractionTriangleMetadata[] triangleMetadata =
             System.Array.Empty<InteractionTriangleMetadata>();
+        [SerializeField, HideInInspector] private bool ownsInteractionMesh = true;
 
-        public Mesh InteractionMesh { get; private set; }
+        public Mesh InteractionMesh => interactionMesh;
+        public InteractionTriangleMetadata[] TriangleMetadata => triangleMetadata;
         public uint GeometryVersion { get; private set; }
 
         public Mesh ReusableMesh => InteractionMesh;
 
         public void Bind(
             Mesh interactionMesh,
-            InteractionTriangleMetadata[] metadata)
+            InteractionTriangleMetadata[] metadata,
+            bool ownsMesh = true)
         {
             if (meshCollider == null)
             {
                 meshCollider = GetComponent<MeshCollider>();
             }
 
-            InteractionMesh = interactionMesh;
+            this.interactionMesh = interactionMesh;
+            ownsInteractionMesh = ownsMesh;
             triangleMetadata = metadata
                 ?? System.Array.Empty<InteractionTriangleMetadata>();
 
             meshCollider.sharedMesh = null;
-            if (InteractionMesh != null && triangleMetadata.Length > 0)
+            if (interactionMesh != null && triangleMetadata.Length > 0)
             {
-                meshCollider.sharedMesh = InteractionMesh;
+                meshCollider.sharedMesh = interactionMesh;
             }
 
             GeometryVersion++;
@@ -63,10 +68,38 @@ namespace MiniCivilization.World.Interaction
                 meshCollider.sharedMesh = null;
             }
 
-            ReleaseObject(InteractionMesh);
-            InteractionMesh = null;
+            if (ownsInteractionMesh)
+            {
+                ReleaseObject(interactionMesh);
+            }
+
+            interactionMesh = null;
             triangleMetadata =
                 System.Array.Empty<InteractionTriangleMetadata>();
+            ownsInteractionMesh = true;
+            GeometryVersion++;
+        }
+
+        public void MarkPrepared()
+        {
+            ownsInteractionMesh = false;
+        }
+
+        public void RestorePreparedBinding()
+        {
+            if (meshCollider == null)
+            {
+                meshCollider = GetComponent<MeshCollider>();
+            }
+
+            if (meshCollider != null)
+            {
+                meshCollider.sharedMesh = interactionMesh != null
+                    && triangleMetadata.Length > 0
+                        ? interactionMesh
+                        : null;
+            }
+
             GeometryVersion++;
         }
 

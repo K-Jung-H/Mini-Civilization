@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Interaction;
@@ -9,6 +10,11 @@ namespace MiniCivilization.World.Presentation
 {
     public sealed class WorldChunkView : MonoBehaviour
     {
+        [SerializeField, HideInInspector] private int patchX;
+        [SerializeField, HideInInspector] private int patchZ;
+        [SerializeField, HideInInspector] private int patchSize;
+        [SerializeField, HideInInspector] private bool preparedReadOnly;
+
         private MeshFilter terrainFilter;
         private MeshRenderer terrainRenderer;
         private MeshFilter waterFilter;
@@ -17,8 +23,10 @@ namespace MiniCivilization.World.Presentation
         private MeshRenderer waterfallRenderer;
         private WorldChunkInteractionSurface interactionSurface;
 
-        public int PatchX { get; private set; }
-        public int PatchZ { get; private set; }
+        public int PatchX => patchX;
+        public int PatchZ => patchZ;
+        public int PatchSize => patchSize;
+        public bool IsPrepared => preparedReadOnly;
 
         public void Build(
             WorldData world,
@@ -33,8 +41,9 @@ namespace MiniCivilization.World.Presentation
             int interactionLayer,
             bool rebuildInteraction)
         {
-            PatchX = patchX;
-            PatchZ = patchZ;
+            this.patchX = patchX;
+            this.patchZ = patchZ;
+            this.patchSize = patchSize;
             name = $"World Chunk [{patchX}, {patchZ}]";
             transform.localPosition = new Vector3(patchX * patchSize, 0f, patchZ * patchSize);
             transform.localRotation = Quaternion.identity;
@@ -49,11 +58,12 @@ namespace MiniCivilization.World.Presentation
                     waterfallMaterial);
             }
 
+            var replacePreparedMeshes = preparedReadOnly;
             var terrainBuffers = TerrainChunkMeshBuilder.Build(
                 world, patchX, patchZ, patchSize, catalog);
             terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
                 $"Terrain [{patchX}, {patchZ}]",
-                terrainFilter.sharedMesh);
+                replacePreparedMeshes ? null : terrainFilter.sharedMesh);
             terrainRenderer.sharedMaterial = terrainMaterial;
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
@@ -62,10 +72,10 @@ namespace MiniCivilization.World.Presentation
                 world, patchX, patchZ, patchSize, catalog);
             waterFilter.sharedMesh = waterBuffers.Surface.CreateMesh(
                 $"Water [{patchX}, {patchZ}]",
-                waterFilter.sharedMesh);
+                replacePreparedMeshes ? null : waterFilter.sharedMesh);
             waterfallFilter.sharedMesh = waterBuffers.Waterfalls.CreateMesh(
                 $"Waterfalls [{patchX}, {patchZ}]",
-                waterfallFilter.sharedMesh);
+                replacePreparedMeshes ? null : waterfallFilter.sharedMesh);
             waterRenderer.sharedMaterial = waterMaterial;
             waterfallRenderer.sharedMaterial = waterfallMaterial;
             waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
@@ -83,14 +93,23 @@ namespace MiniCivilization.World.Presentation
                 var interactionMesh = interactionData.CreateMesh(
                     $"Interaction [{patchX}, {patchZ}]",
                     out var metadata,
-                    interactionSurface.ReusableMesh);
+                    replacePreparedMeshes
+                        ? null
+                        : interactionSurface.ReusableMesh);
                 interactionSurface.Bind(interactionMesh, metadata);
             }
+
+            preparedReadOnly = false;
         }
 
         public void ReleaseMeshes()
         {
             ReleaseInteraction(interactionSurface);
+
+            if (preparedReadOnly)
+            {
+                return;
+            }
 
             var filters = GetComponentsInChildren<MeshFilter>(true);
             for (var i = 0; i < filters.Length; i++)
@@ -100,6 +119,68 @@ namespace MiniCivilization.World.Presentation
         }
 
         private void OnDestroy() => ReleaseMeshes();
+
+        public bool AdoptPrepared(int interactionLayer)
+        {
+            terrainFilter = FindFilter("Terrain", out terrainRenderer);
+            waterFilter = FindFilter("Water", out waterRenderer);
+            waterfallFilter = FindFilter("Waterfalls", out waterfallRenderer);
+            var interaction = transform.Find("Interaction");
+            interactionSurface = interaction != null
+                ? interaction.GetComponent<WorldChunkInteractionSurface>()
+                : null;
+            if (terrainFilter == null
+                || waterFilter == null
+                || waterfallFilter == null
+                || terrainFilter.sharedMesh == null
+                || waterFilter.sharedMesh == null
+                || waterfallFilter.sharedMesh == null
+                || (interactionSurface != null
+                    && interactionSurface.InteractionMesh == null))
+            {
+                return false;
+            }
+
+            if (interactionSurface != null)
+            {
+                interactionSurface.gameObject.layer = interactionLayer;
+                interactionSurface.RestorePreparedBinding();
+            }
+
+            preparedReadOnly = true;
+            return true;
+        }
+
+        public void MarkPrepared()
+        {
+            preparedReadOnly = true;
+            interactionSurface?.MarkPrepared();
+        }
+
+        public IEnumerable<Mesh> EnumerateMeshes()
+        {
+            CacheExistingChildren();
+            if (terrainFilter != null && terrainFilter.sharedMesh != null)
+            {
+                yield return terrainFilter.sharedMesh;
+            }
+
+            if (waterFilter != null && waterFilter.sharedMesh != null)
+            {
+                yield return waterFilter.sharedMesh;
+            }
+
+            if (waterfallFilter != null && waterfallFilter.sharedMesh != null)
+            {
+                yield return waterfallFilter.sharedMesh;
+            }
+
+            if (interactionSurface != null
+                && interactionSurface.InteractionMesh != null)
+            {
+                yield return interactionSurface.InteractionMesh;
+            }
+        }
 
         private void EnsureChildren(bool buildCollider, int interactionLayer)
         {
@@ -119,6 +200,28 @@ namespace MiniCivilization.World.Presentation
             {
                 RemoveInteraction();
             }
+        }
+
+        private void CacheExistingChildren()
+        {
+            terrainFilter = FindFilter("Terrain", out terrainRenderer);
+            waterFilter = FindFilter("Water", out waterRenderer);
+            waterfallFilter = FindFilter("Waterfalls", out waterfallRenderer);
+            var interaction = transform.Find("Interaction");
+            interactionSurface = interaction != null
+                ? interaction.GetComponent<WorldChunkInteractionSurface>()
+                : null;
+        }
+
+        private MeshFilter FindFilter(
+            string childName,
+            out MeshRenderer renderer)
+        {
+            var child = transform.Find(childName);
+            renderer = child != null
+                ? child.GetComponent<MeshRenderer>()
+                : null;
+            return child != null ? child.GetComponent<MeshFilter>() : null;
         }
 
         private WorldChunkInteractionSurface EnsureInteraction(

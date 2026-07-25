@@ -6,72 +6,82 @@ namespace MiniCivilization.World.Interaction
     [DisallowMultipleComponent]
     public sealed class WorldTileInfoPresenter : MonoBehaviour
     {
+        [Header("Data")]
         [SerializeField] private WorldManager worldManager;
         [SerializeField] private WorldTileSelectionState selectionState;
+        [SerializeField] private WorldCellInfoProvider infoProvider;
 
-        [Header("Runtime Information")]
-        [SerializeField, TextArea(6, 14)] private string hoveredCell;
-        [SerializeField, TextArea(6, 14)] private string selectedCell;
-
-        public string HoveredCell => hoveredCell;
-        public string SelectedCell => selectedCell;
+        [Header("View")]
+        [SerializeField] private WorldTileInfoPanel infoPanel;
 
         private void OnEnable()
         {
-            if (selectionState == null)
+            if (selectionState != null)
             {
-                return;
+                selectionState.SelectionChanged += OnSelectionChanged;
             }
 
-            selectionState.HoverChanged += OnHoverChanged;
-            selectionState.SelectionChanged += OnSelectionChanged;
-            OnHoverChanged(selectionState.Hovered);
-            OnSelectionChanged(selectionState.Selected);
+            if (infoPanel != null)
+            {
+                infoPanel.CloseRequested += OnCloseRequested;
+            }
+
+            Refresh();
         }
 
         private void OnDisable()
         {
-            if (selectionState == null)
+            if (selectionState != null)
             {
-                return;
+                selectionState.SelectionChanged -= OnSelectionChanged;
             }
 
-            selectionState.HoverChanged -= OnHoverChanged;
-            selectionState.SelectionChanged -= OnSelectionChanged;
+            if (infoPanel != null)
+            {
+                infoPanel.CloseRequested -= OnCloseRequested;
+            }
         }
 
         public void Configure(
             WorldManager manager,
-            WorldTileSelectionState state)
+            WorldTileSelectionState state,
+            WorldCellInfoProvider provider,
+            WorldTileInfoPanel panel)
         {
             worldManager = manager;
             selectionState = state;
+            infoProvider = provider;
+            infoPanel = panel;
         }
 
-        private void OnHoverChanged(TilePickResult? pick)
+        private void OnSelectionChanged(TilePickResult? _)
         {
-            hoveredCell = BuildText(pick);
+            Refresh();
         }
 
-        private void OnSelectionChanged(TilePickResult? pick)
+        private void OnCloseRequested()
         {
-            selectedCell = BuildText(pick);
-            if (!string.IsNullOrEmpty(selectedCell))
+            selectionState?.SetSelected(null);
+        }
+
+        private void Refresh()
+        {
+            var selected = selectionState?.Selected;
+            if (!selected.HasValue
+                || worldManager == null
+                || !worldManager.HasWorld
+                || infoProvider == null
+                || infoPanel == null)
             {
-                Debug.Log(selectedCell, this);
-            }
-        }
-
-        private string BuildText(TilePickResult? pick)
-        {
-            if (!pick.HasValue || worldManager == null || !worldManager.HasWorld)
-            {
-                return string.Empty;
+                infoPanel?.Hide();
+                return;
             }
 
-            return WorldCellInfoProvider.Create(
+            var snapshot = infoProvider.Create(
                 worldManager.CurrentWorld,
-                pick.Value).ToString();
+                selected.Value);
+            var model = WorldTileInfoViewModel.FromSnapshot(snapshot);
+            infoPanel.Show(model);
         }
     }
 }

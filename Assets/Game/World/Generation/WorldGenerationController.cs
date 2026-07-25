@@ -23,6 +23,16 @@ namespace MiniCivilization.World.Generation
             return WorldGenerator.Generate(settings, seed);
         }
 
+        public WorldDataAsset GenerateDataAsset()
+        {
+            var state = Generate();
+            var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
+            asset.name = $"World {state.Data.Seed}";
+            asset.hideFlags = HideFlags.DontSave;
+            asset.Initialize(state.Data);
+            return asset;
+        }
+
         public void SetSettings(WorldGenerationSettings value)
         {
             settings = value;

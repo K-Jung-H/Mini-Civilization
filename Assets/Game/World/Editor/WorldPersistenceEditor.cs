@@ -18,7 +18,7 @@ namespace MiniCivilization.World.Editor
             try
             {
                 EditorGUILayout.LabelField(
-                    "Startup Save File",
+                    "Default Save File",
                     persistence.ConfiguredSavePath,
                     EditorStyles.wordWrappedLabel);
                 EditorGUILayout.LabelField(
@@ -26,20 +26,20 @@ namespace MiniCivilization.World.Editor
                     persistence.ActiveSavePath,
                     EditorStyles.wordWrappedLabel);
                 EditorGUILayout.LabelField(
-                    "Startup File Exists",
+                    "Default File Exists",
                     File.Exists(persistence.ConfiguredSavePath) ? "Yes" : "No");
 
-                if (GUILayout.Button("Choose Startup Save File..."))
+                if (GUILayout.Button("Choose Default Save File..."))
                 {
                     var currentPath = persistence.ConfiguredSavePath;
                     var path = EditorUtility.SaveFilePanel(
-                        "Choose Startup World File",
+                        "Choose Default World File",
                         Path.GetDirectoryName(currentPath) ?? Application.persistentDataPath,
                         Path.GetFileNameWithoutExtension(currentPath),
                         "mcw");
                     if (!string.IsNullOrEmpty(path))
                     {
-                        Undo.RecordObject(persistence, "Change Startup World File");
+                        Undo.RecordObject(persistence, "Change Default World File");
                         persistence.SetConfiguredSavePath(path);
                         EditorUtility.SetDirty(persistence);
                     }
@@ -47,7 +47,7 @@ namespace MiniCivilization.World.Editor
 
                 if (GUILayout.Button("Use PersistentData Default"))
                 {
-                    Undo.RecordObject(persistence, "Reset Startup World File");
+                    Undo.RecordObject(persistence, "Reset Default World File");
                     persistence.ClearConfiguredSavePathOverride();
                     EditorUtility.SetDirty(persistence);
                 }

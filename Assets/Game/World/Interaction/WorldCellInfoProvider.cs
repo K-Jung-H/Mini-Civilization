@@ -2,6 +2,7 @@ using System.Text;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Hydrology;
 using MiniCivilization.World.Runtime;
+using UnityEngine;
 
 namespace MiniCivilization.World.Interaction
 {
@@ -58,9 +59,10 @@ namespace MiniCivilization.World.Interaction
         }
     }
 
-    public static class WorldCellInfoProvider
+    [DisallowMultipleComponent]
+    public sealed class WorldCellInfoProvider : MonoBehaviour
     {
-        public static WorldCellInfoSnapshot Create(
+        public WorldCellInfoSnapshot Create(
             WorldState worldState,
             in TilePickResult pick)
         {

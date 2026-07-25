@@ -1,6 +1,7 @@
 using MiniCivilization.World.Runtime;
 using MiniCivilization.World.Domain;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 namespace MiniCivilization.World.Interaction
@@ -36,6 +37,18 @@ namespace MiniCivilization.World.Interaction
             {
                 observedWorld = worldManager.CurrentWorld.Data;
                 selectionState.Clear();
+            }
+
+            if (EventSystem.current != null
+                && EventSystem.current.IsPointerOverGameObject())
+            {
+                selectionState.SetHovered(null);
+                if (Keyboard.current?.escapeKey.wasPressedThisFrame ?? false)
+                {
+                    selectionState.SetSelected(null);
+                }
+
+                return;
             }
 
             var ray = interactionCamera.ScreenPointToRay(
