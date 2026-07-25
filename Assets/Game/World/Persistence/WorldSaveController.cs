@@ -6,7 +6,8 @@ using UnityEngine;
 
 namespace MiniCivilization.World.Persistence
 {
-    public sealed class WorldPersistence : MonoBehaviour
+    [DisallowMultipleComponent]
+    public sealed class WorldSaveController : MonoBehaviour
     {
         [SerializeField] private string directoryName = "Worlds";
         [SerializeField] private string fileName = "default.mcw";

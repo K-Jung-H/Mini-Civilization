@@ -152,7 +152,7 @@ namespace MiniCivilization.World.Interaction
             var triangles = new List<int>();
             var sourceTransform = sourceSurface.transform;
             var targetTransform = targetFilter.transform;
-            var world = worldManager.CurrentWorld.Data;
+            var world = worldManager.CurrentWorldData;
             var clipA = new Vector3[8];
             var clipB = new Vector3[8];
 

@@ -19,19 +19,6 @@ namespace MiniCivilization.World.Domain
         Generated = 1 << 2
     }
 
-    [Flags]
-    public enum ChunkDirtyFlags : byte
-    {
-        None = 0,
-        Cells = 1 << 0,
-        Surface = 1 << 1,
-        TerrainMesh = 1 << 2,
-        Hydrology = 1 << 3,
-        WaterMesh = 1 << 4,
-        Materials = 1 << 5,
-        All = Cells | Surface | TerrainMesh | Hydrology | WaterMesh | Materials
-    }
-
     public enum CellMaterialType : ushort
     {
         None = 0,

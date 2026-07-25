@@ -27,15 +27,15 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private bool generateColliders;
         [SerializeField, Range(0, 31)] private int interactionLayer = 8;
 
-        private readonly HashSet<Vector2Int> dirtyGeometryPatches = new();
-        private readonly HashSet<Vector2Int> dirtyMaterialPatches = new();
-        private readonly HashSet<ChunkCoordinate> dirtyLogicalChunks = new();
+        private readonly HashSet<Vector2Int> pendingGeometryPatches = new();
+        private readonly HashSet<Vector2Int> pendingMaterialPatches = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
         private int activeRenderPatchSize;
 
         public WorldData BoundWorld => boundWorld;
         public WorldRenderBindingMode BindingMode { get; private set; }
+        public WorldChangeId LastAppliedChangeId { get; private set; }
         public int ActiveRenderPatchSize => activeRenderPatchSize;
         public int RenderedPatchCount => chunkViews == null
             ? 0
@@ -43,7 +43,7 @@ namespace MiniCivilization.World.Presentation
 
         private void LateUpdate()
         {
-            RefreshDirtyChunks();
+            RebuildPendingPatches();
         }
 
         public void Bind(WorldData world)
@@ -64,7 +64,7 @@ namespace MiniCivilization.World.Presentation
             boundWorld = world;
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
-            boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
+            LastAppliedChangeId = world.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: false);
         }
 
@@ -80,7 +80,7 @@ namespace MiniCivilization.World.Presentation
             boundWorld = world;
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.PreparedScene;
-            boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
+            LastAppliedChangeId = world.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: true);
         }
 
@@ -132,9 +132,65 @@ namespace MiniCivilization.World.Presentation
             activeRenderPatchSize = preparedPatchSize;
             chunkViews = adoptedViews;
             BindingMode = WorldRenderBindingMode.PreparedScene;
-            boundWorld.ChunkMarkedDirty += OnChunkMarkedDirty;
-            ClearAllDirtyFlags(boundWorld);
+            LastAppliedChangeId = world.CurrentChangeId;
             return true;
+        }
+
+        public void ApplyChanges(WorldChangeSet changeSet)
+        {
+            if (changeSet == null)
+            {
+                throw new ArgumentNullException(nameof(changeSet));
+            }
+
+            if (changeSet.World != boundWorld)
+            {
+                throw new InvalidOperationException(
+                    "The change set belongs to a different world.");
+            }
+
+            if (changeSet.ChangeId <= LastAppliedChangeId)
+            {
+                return;
+            }
+
+            const WorldChangeType geometryChanges =
+                WorldChangeType.CellStructure
+                | WorldChangeType.Surface
+                | WorldChangeType.WaterTopology;
+            const WorldChangeType materialChanges =
+                WorldChangeType.Material
+                | WorldChangeType.Environment;
+            var rebuildGeometry =
+                (changeSet.ChangeTypes & geometryChanges) != 0;
+            var rebuildMaterials =
+                (changeSet.ChangeTypes & materialChanges) != 0;
+
+            if ((rebuildGeometry || rebuildMaterials)
+                && activeRenderPatchSize > 0)
+            {
+                for (var index = 0;
+                     index < changeSet.AffectedChunks.Count;
+                     index++)
+                {
+                    var coordinate = changeSet.AffectedChunks[index];
+                    var startX = coordinate.X * boundWorld.ChunkSizeX;
+                    var startZ = coordinate.Z * boundWorld.ChunkSizeZ;
+                    var patch = new Vector2Int(
+                        startX / activeRenderPatchSize,
+                        startZ / activeRenderPatchSize);
+                    if (rebuildGeometry)
+                    {
+                        pendingGeometryPatches.Add(patch);
+                    }
+                    else
+                    {
+                        pendingMaterialPatches.Add(patch);
+                    }
+                }
+            }
+
+            LastAppliedChangeId = changeSet.ChangeId;
         }
 
         public void RebuildAll()
@@ -149,17 +205,17 @@ namespace MiniCivilization.World.Presentation
             BuildAllPatches(persistentSceneObjects: false);
         }
 
-        public void RefreshDirtyChunks()
+        public void RebuildPendingPatches()
         {
             if (boundWorld == null
                 || chunkViews == null
-                || (dirtyGeometryPatches.Count == 0
-                    && dirtyMaterialPatches.Count == 0))
+                || (pendingGeometryPatches.Count == 0
+                    && pendingMaterialPatches.Count == 0))
             {
                 return;
             }
 
-            foreach (var patch in dirtyGeometryPatches)
+            foreach (var patch in pendingGeometryPatches)
             {
                 if ((uint)patch.x >= chunkViews.GetLength(0)
                     || (uint)patch.y >= chunkViews.GetLength(1))
@@ -174,9 +230,9 @@ namespace MiniCivilization.World.Presentation
                     true);
             }
 
-            foreach (var patch in dirtyMaterialPatches)
+            foreach (var patch in pendingMaterialPatches)
             {
-                if (dirtyGeometryPatches.Contains(patch)
+                if (pendingGeometryPatches.Contains(patch)
                     || (uint)patch.x >= chunkViews.GetLength(0)
                     || (uint)patch.y >= chunkViews.GetLength(1))
                 {
@@ -190,19 +246,8 @@ namespace MiniCivilization.World.Presentation
                     false);
             }
 
-            const ChunkDirtyFlags handledFlags = ChunkDirtyFlags.Surface
-                | ChunkDirtyFlags.TerrainMesh
-                | ChunkDirtyFlags.WaterMesh
-                | ChunkDirtyFlags.Materials;
-            foreach (var coordinate in dirtyLogicalChunks)
-            {
-                boundWorld.GetChunk(coordinate.X, coordinate.Y, coordinate.Z)
-                    .ClearDirty(handledFlags);
-            }
-
-            dirtyGeometryPatches.Clear();
-            dirtyMaterialPatches.Clear();
-            dirtyLogicalChunks.Clear();
+            pendingGeometryPatches.Clear();
+            pendingMaterialPatches.Clear();
         }
 
         public void Unbind()
@@ -229,17 +274,12 @@ namespace MiniCivilization.World.Presentation
 
         private void DetachBoundWorld(bool clearViews)
         {
-            if (boundWorld != null)
-            {
-                boundWorld.ChunkMarkedDirty -= OnChunkMarkedDirty;
-            }
-
             boundWorld = null;
             activeRenderPatchSize = 0;
             BindingMode = WorldRenderBindingMode.None;
-            dirtyGeometryPatches.Clear();
-            dirtyMaterialPatches.Clear();
-            dirtyLogicalChunks.Clear();
+            LastAppliedChangeId = WorldChangeId.None;
+            pendingGeometryPatches.Clear();
+            pendingMaterialPatches.Clear();
             if (clearViews)
             {
                 ClearViews();
@@ -288,8 +328,6 @@ namespace MiniCivilization.World.Presentation
                 chunkViews[patchX, patchZ] = view;
                 BuildPatch(view, patchX, patchZ, true);
             }
-
-            ClearAllDirtyFlags(boundWorld);
         }
 
         private void BuildPatch(
@@ -310,36 +348,6 @@ namespace MiniCivilization.World.Presentation
                 generateColliders,
                 interactionLayer,
                 rebuildInteraction);
-        }
-
-        private void OnChunkMarkedDirty(
-            ChunkCoordinate coordinate,
-            ChunkDirtyFlags flags)
-        {
-            const ChunkDirtyFlags geometryFlags = ChunkDirtyFlags.Surface
-                | ChunkDirtyFlags.TerrainMesh
-                | ChunkDirtyFlags.WaterMesh;
-            const ChunkDirtyFlags renderFlags = geometryFlags
-                | ChunkDirtyFlags.Materials;
-            if ((flags & renderFlags) == 0 || activeRenderPatchSize <= 0)
-            {
-                return;
-            }
-
-            dirtyLogicalChunks.Add(coordinate);
-            var startX = coordinate.X * boundWorld.ChunkSizeX;
-            var startZ = coordinate.Z * boundWorld.ChunkSizeZ;
-            var patch = new Vector2Int(
-                startX / activeRenderPatchSize,
-                startZ / activeRenderPatchSize);
-            if ((flags & geometryFlags) != 0)
-            {
-                dirtyGeometryPatches.Add(patch);
-            }
-            else if ((flags & ChunkDirtyFlags.Materials) != 0)
-            {
-                dirtyMaterialPatches.Add(patch);
-            }
         }
 
         private int ResolveRenderPatchSize(WorldData world)
@@ -392,14 +400,6 @@ namespace MiniCivilization.World.Presentation
             }
 
             chunkViews = null;
-        }
-
-        private static void ClearAllDirtyFlags(WorldData world)
-        {
-            foreach (var chunk in world.EnumerateChunks())
-            {
-                chunk.ClearDirty(ChunkDirtyFlags.All);
-            }
         }
 
         private void OnDestroy()

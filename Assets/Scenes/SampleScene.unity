@@ -1343,6 +1343,8 @@ Transform:
   m_Children:
   - {fileID: 1910000001}
   - {fileID: 1910000011}
+  - {fileID: 1920000011}
+  - {fileID: 1920000021}
   - {fileID: 1910000021}
   - {fileID: 1910000031}
   - {fileID: 1910000041}
@@ -1363,8 +1365,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Runtime.WorldManager
   currentWorldDataAsset: {fileID: 0}
   generator: {fileID: 1900000003}
+  editController: {fileID: 1920000012}
+  hydrologyController: {fileID: 1920000022}
   worldRenderer: {fileID: 1900000004}
-  persistence: {fileID: 1900000005}
+  saveController: {fileID: 1900000005}
 --- !u!114 &1900000003
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1410,7 +1414,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2f340816866c44b7a3d6adbc19747e04, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Persistence.WorldPersistence
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Persistence.WorldSaveController
   directoryName: Worlds
   fileName: default.mcw
   configuredPathOverride: 
@@ -1791,6 +1795,94 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1900000001}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1920000010
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1920000011}
+  - component: {fileID: 1920000012}
+  m_Layer: 0
+  m_Name: World Editing
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1920000011
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1920000010}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1900000001}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1920000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1920000010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d38794d220544432b5aedcbdb6556f8a, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Editing.WorldEditController
+--- !u!1 &1920000020
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1920000021}
+  - component: {fileID: 1920000022}
+  m_Layer: 0
+  m_Name: World Hydrology
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1920000021
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1920000020}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1900000001}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1920000022
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1920000020}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2bf90131140e44f4ad17e714d8d3785b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Hydrology.WorldHydrologyController
 --- !u!1 &1910000020
 GameObject:
   m_ObjectHideFlags: 0
@@ -1835,7 +1927,7 @@ GameObject:
   - component: {fileID: 1910000031}
   - component: {fileID: 1900000005}
   m_Layer: 0
-  m_Name: World Persistence
+  m_Name: World Save
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

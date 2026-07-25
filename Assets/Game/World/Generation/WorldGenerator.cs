@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Hydrology;
-using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Generation
 {
@@ -13,7 +11,7 @@ namespace MiniCivilization.World.Generation
             (1, 0), (0, 1), (-1, 0), (0, -1)
         };
 
-        public static WorldState Generate(
+        public static WorldData Generate(
             WorldGenerationSettings settings,
             int seed)
         {
@@ -48,8 +46,7 @@ namespace MiniCivilization.World.Generation
             ApplyColumns(world, solidHeights, waterSurfaces, waterTypes, waterFlags);
             ApplyBiomes(world, settings, seed);
 
-            var waterBodies = WaterBodyResolver.Resolve(world);
-            return new WorldState(world, waterBodies);
+            return world;
         }
 
         public static ulong ComputeStableHash(WorldData world)

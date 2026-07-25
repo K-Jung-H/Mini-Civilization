@@ -6,63 +6,44 @@ namespace MiniCivilization.World.Domain
     public sealed class ChunkData
     {
         private readonly CellData[] cells;
-        private readonly Action<ChunkCoordinate, ChunkDirtyFlags> dirtyCallback;
 
         public ChunkCoordinate Coordinate { get; }
         public int SizeX { get; }
         public int SizeY { get; }
         public int SizeZ { get; }
-        public ChunkDirtyFlags DirtyFlags { get; private set; } = ChunkDirtyFlags.All;
-        public uint Revision { get; private set; }
+        public WorldChangeId LastChangeId { get; private set; }
 
         public ChunkData(
             ChunkCoordinate coordinate,
             int sizeX,
             int sizeY,
-            int sizeZ,
-            Action<ChunkCoordinate, ChunkDirtyFlags> dirtyCallback)
+            int sizeZ)
         {
             Coordinate = coordinate;
             SizeX = sizeX;
             SizeY = sizeY;
             SizeZ = sizeZ;
-            this.dirtyCallback = dirtyCallback;
             cells = new CellData[sizeX * sizeY * sizeZ];
         }
 
         public CellData GetCell(int x, int y, int z) => cells[ToIndex(x, y, z)];
 
-        public void SetCell(int x, int y, int z, CellData cell)
+        internal bool SetCell(int x, int y, int z, CellData cell)
         {
             cell.Normalize();
             var index = ToIndex(x, y, z);
             if (cells[index].Equals(cell))
             {
-                return;
+                return false;
             }
 
             cells[index] = cell;
-            MarkDirty(ChunkDirtyFlags.Cells
-                | ChunkDirtyFlags.Surface
-                | ChunkDirtyFlags.TerrainMesh
-                | ChunkDirtyFlags.Hydrology
-                | ChunkDirtyFlags.WaterMesh
-                | ChunkDirtyFlags.Materials);
-            Revision++;
+            return true;
         }
 
         public ReadOnlySpan<CellData> AsSpan() => cells;
-        public void MarkDirty(ChunkDirtyFlags flags)
-        {
-            var newlyDirty = flags & ~DirtyFlags;
-            DirtyFlags |= flags;
-            if (newlyDirty != ChunkDirtyFlags.None)
-            {
-                dirtyCallback?.Invoke(Coordinate, newlyDirty);
-            }
-        }
-
-        public void ClearDirty(ChunkDirtyFlags flags) => DirtyFlags &= ~flags;
+        internal void MarkChanged(WorldChangeId changeId) =>
+            LastChangeId = changeId;
 
         internal void SetCellBulk(int x, int y, int z, CellData cell)
         {
@@ -84,8 +65,8 @@ namespace MiniCivilization.World.Domain
     public sealed class WorldData
     {
         private readonly ChunkData[,,] chunks;
-        private readonly SurfaceColumnData[] surfaceColumns;
-        private readonly ColumnEnvironmentData[] columnEnvironments;
+        private readonly SurfaceColumnData[] surfaceColumnMap;
+        private readonly ColumnEnvironmentData[] columnEnvironmentMap;
 
         public int Size { get; }
         public int Height { get; }
@@ -96,7 +77,7 @@ namespace MiniCivilization.World.Domain
         public int ChunkCountY { get; }
         public int ChunkCountZ { get; }
         public int Seed { get; }
-        public event Action<ChunkCoordinate, ChunkDirtyFlags> ChunkMarkedDirty;
+        public WorldChangeId CurrentChangeId { get; private set; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -125,8 +106,8 @@ namespace MiniCivilization.World.Domain
             ChunkCountY = height / chunkSizeY;
             ChunkCountZ = size / chunkSizeZ;
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
-            surfaceColumns = new SurfaceColumnData[size * size];
-            columnEnvironments = new ColumnEnvironmentData[size * size];
+            surfaceColumnMap = new SurfaceColumnData[size * size];
+            columnEnvironmentMap = new ColumnEnvironmentData[size * size];
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
             for (var chunkZ = 0; chunkZ < ChunkCountZ; chunkZ++)
@@ -136,14 +117,13 @@ namespace MiniCivilization.World.Domain
                     new ChunkCoordinate(chunkX, chunkY, chunkZ),
                     chunkSizeX,
                     chunkSizeY,
-                    chunkSizeZ,
-                    OnChunkMarkedDirty);
+                    chunkSizeZ);
             }
 
-            for (var i = 0; i < surfaceColumns.Length; i++)
+            for (var i = 0; i < surfaceColumnMap.Length; i++)
             {
-                surfaceColumns[i].SurfaceCellY = -1;
-                surfaceColumns[i].WaterCellY = -1;
+                surfaceColumnMap[i].SurfaceCellY = -1;
+                surfaceColumnMap[i].WaterCellY = -1;
             }
         }
 
@@ -173,24 +153,7 @@ namespace MiniCivilization.World.Domain
             return true;
         }
 
-        public void SetCell(int x, int y, int z, CellData cell)
-        {
-            var previous = GetCell(x, y, z);
-            SetCellWithoutSurfaceRebuild(x, y, z, cell);
-
-            if (!IsWaterSupported(x, z))
-            {
-                SetCellWithoutSurfaceRebuild(x, y, z, previous);
-                RebuildSurfaceColumn(x, z);
-                throw new InvalidOperationException(
-                    $"Cell edit at ({x}, {y}, {z}) would leave unsupported water. " +
-                    "Water edits must preserve vertical support or be handled by a redistribution command.");
-            }
-
-            RebuildSurfaceColumn(x, z);
-        }
-
-        private void SetCellWithoutSurfaceRebuild(int x, int y, int z, CellData cell)
+        internal bool SetCellForEdit(int x, int y, int z, CellData cell)
         {
             if (!Contains(x, y, z))
             {
@@ -198,8 +161,7 @@ namespace MiniCivilization.World.Domain
             }
 
             GetChunkAndLocal(x, y, z, out var chunk, out var localX, out var localY, out var localZ);
-            chunk.SetCell(localX, localY, localZ, cell);
-            MarkBoundaryNeighborsDirty(x, y, z);
+            return chunk.SetCell(localX, localY, localZ, cell);
         }
 
         public ChunkData GetChunk(int chunkX, int chunkY, int chunkZ) => chunks[chunkX, chunkY, chunkZ];
@@ -221,12 +183,12 @@ namespace MiniCivilization.World.Domain
                 return new SurfaceColumnData { SurfaceCellY = -1, WaterCellY = -1 };
             }
 
-            return surfaceColumns[x + Size * z];
+            return surfaceColumnMap[x + Size * z];
         }
 
         public void SetSurfaceColumn(int x, int z, SurfaceColumnData column)
         {
-            surfaceColumns[x + Size * z] = column;
+            surfaceColumnMap[x + Size * z] = column;
         }
 
         public ColumnEnvironmentData GetColumnEnvironment(int x, int z)
@@ -236,7 +198,7 @@ namespace MiniCivilization.World.Domain
                 return default;
             }
 
-            return columnEnvironments[x + Size * z];
+            return columnEnvironmentMap[x + Size * z];
         }
 
         public void SetColumnEnvironment(int x, int z, ColumnEnvironmentData environment)
@@ -246,7 +208,7 @@ namespace MiniCivilization.World.Domain
                 throw new ArgumentOutOfRangeException($"World column ({x}, {z}) is outside the world.");
             }
 
-            columnEnvironments[x + Size * z] = environment;
+            columnEnvironmentMap[x + Size * z] = environment;
         }
 
         public void RebuildAllSurfaceColumns()
@@ -341,7 +303,7 @@ namespace MiniCivilization.World.Domain
                     cell.Geology = CellMaterialType.None;
                 }
 
-                SetCellWithoutSurfaceRebuild(x, y, z, cell);
+                SetCellBulk(x, y, z, cell);
             }
 
             RebuildSurfaceColumn(x, z);
@@ -366,7 +328,7 @@ namespace MiniCivilization.World.Domain
                 cell.Flags = cell.WaterFill > 0
                     ? cell.Flags | flags | CellFlags.Generated
                     : cell.Flags & ~(CellFlags.River | CellFlags.Waterfall);
-                SetCellWithoutSurfaceRebuild(x, y, z, cell);
+                SetCellBulk(x, y, z, cell);
             }
 
             RebuildSurfaceColumn(x, z);
@@ -394,37 +356,21 @@ namespace MiniCivilization.World.Domain
             chunk.SetCellBulk(localX, localY, localZ, cell);
         }
 
-        private void OnChunkMarkedDirty(ChunkCoordinate coordinate, ChunkDirtyFlags flags)
-            => ChunkMarkedDirty?.Invoke(coordinate, flags);
-
-        private void MarkBoundaryNeighborsDirty(int x, int y, int z)
+        internal WorldChangeId AdvanceChangeId()
         {
-            var chunkX = x / ChunkSizeX;
-            var chunkY = y / ChunkSizeY;
-            var chunkZ = z / ChunkSizeZ;
-            var localX = x % ChunkSizeX;
-            var localY = y % ChunkSizeY;
-            var localZ = z % ChunkSizeZ;
-            const ChunkDirtyFlags flags = ChunkDirtyFlags.TerrainMesh | ChunkDirtyFlags.WaterMesh | ChunkDirtyFlags.Materials;
-
-            if (localX == 0 && chunkX > 0) chunks[chunkX - 1, chunkY, chunkZ].MarkDirty(flags);
-            if (localX == ChunkSizeX - 1 && chunkX + 1 < ChunkCountX) chunks[chunkX + 1, chunkY, chunkZ].MarkDirty(flags);
-            if (localY == 0 && chunkY > 0) chunks[chunkX, chunkY - 1, chunkZ].MarkDirty(flags);
-            if (localY == ChunkSizeY - 1 && chunkY + 1 < ChunkCountY) chunks[chunkX, chunkY + 1, chunkZ].MarkDirty(flags);
-            if (localZ == 0 && chunkZ > 0) chunks[chunkX, chunkY, chunkZ - 1].MarkDirty(flags);
-            if (localZ == ChunkSizeZ - 1 && chunkZ + 1 < ChunkCountZ) chunks[chunkX, chunkY, chunkZ + 1].MarkDirty(flags);
-
-            if (localX == 0 && localZ == 0 && chunkX > 0 && chunkZ > 0)
-                chunks[chunkX - 1, chunkY, chunkZ - 1].MarkDirty(flags);
-            if (localX == 0 && localZ == ChunkSizeZ - 1 && chunkX > 0 && chunkZ + 1 < ChunkCountZ)
-                chunks[chunkX - 1, chunkY, chunkZ + 1].MarkDirty(flags);
-            if (localX == ChunkSizeX - 1 && localZ == 0 && chunkX + 1 < ChunkCountX && chunkZ > 0)
-                chunks[chunkX + 1, chunkY, chunkZ - 1].MarkDirty(flags);
-            if (localX == ChunkSizeX - 1 && localZ == ChunkSizeZ - 1 && chunkX + 1 < ChunkCountX && chunkZ + 1 < ChunkCountZ)
-                chunks[chunkX + 1, chunkY, chunkZ + 1].MarkDirty(flags);
+            CurrentChangeId = new WorldChangeId(checked(CurrentChangeId.Value + 1));
+            return CurrentChangeId;
         }
 
-        private bool IsWaterSupported(int x, int z)
+        internal void MarkChunkChanged(
+            ChunkCoordinate coordinate,
+            WorldChangeId changeId)
+        {
+            chunks[coordinate.X, coordinate.Y, coordinate.Z]
+                .MarkChanged(changeId);
+        }
+
+        internal bool IsWaterSupported(int x, int z)
         {
             for (var y = 0; y < Height; y++)
             {

@@ -1,10 +1,12 @@
 using System;
-using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Editing;
 using MiniCivilization.World.Generation;
+using MiniCivilization.World.Hydrology;
 using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Runtime
 {
@@ -16,18 +18,23 @@ namespace MiniCivilization.World.Runtime
 
         [Header("Services")]
         [SerializeField] private WorldGenerationController generator;
+        [SerializeField] private WorldEditController editController;
+        [SerializeField] private WorldHydrologyController hydrologyController;
         [SerializeField] private WorldRenderer worldRenderer;
-        [SerializeField] private WorldPersistence persistence;
+        [FormerlySerializedAs("persistence")]
+        [SerializeField] private WorldSaveController saveController;
 
-        private bool hydrologyDirty;
-        private readonly HashSet<ChunkCoordinate> hydrologyDirtyChunks = new();
+        private WorldEditController subscribedEditController;
 
         public WorldGenerationController Generator => generator;
+        public WorldEditController EditController => editController;
+        public WorldHydrologyController HydrologyController =>
+            hydrologyController;
         public WorldRenderer Renderer => worldRenderer;
-        public WorldPersistence Persistence => persistence;
+        public WorldSaveController SaveController => saveController;
         public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
-        public WorldState CurrentWorld { get; private set; }
-        public bool HasWorld => CurrentWorld != null;
+        public WorldData CurrentWorldData { get; private set; }
+        public bool HasWorld => CurrentWorldData != null;
         public bool IsDirty { get; private set; }
 
         public event Action<WorldDataAsset> WorldChanged;
@@ -35,30 +42,12 @@ namespace MiniCivilization.World.Runtime
 
         private void Start()
         {
-            if (CurrentWorld != null)
+            if (CurrentWorldData != null)
             {
                 return;
             }
 
             InitializeWorld();
-        }
-
-        private void LateUpdate()
-        {
-            if (!hydrologyDirty || CurrentWorld == null)
-            {
-                return;
-            }
-
-            CurrentWorld.RefreshWaterBodies();
-            foreach (var coordinate in hydrologyDirtyChunks)
-            {
-                CurrentWorld.Data.GetChunk(coordinate.X, coordinate.Y, coordinate.Z)
-                    .ClearDirty(ChunkDirtyFlags.Hydrology);
-            }
-
-            hydrologyDirtyChunks.Clear();
-            hydrologyDirty = false;
         }
 
         public bool InitializeWorld()
@@ -101,7 +90,7 @@ namespace MiniCivilization.World.Runtime
             try
             {
                 var generatedAsset = generator.GenerateDataAsset();
-                persistence.ClearActiveSavePath();
+                saveController.ClearActiveSavePath();
                 ActivateWorldAsset(
                     generatedAsset,
                     preferPreparedScene: false,
@@ -129,7 +118,7 @@ namespace MiniCivilization.World.Runtime
 
         public bool SaveWorld()
         {
-            if (persistence == null || !persistence.HasActiveSavePath)
+            if (saveController == null || !saveController.HasActiveSavePath)
             {
                 Debug.LogError(
                     "The current world has no active save path. Use SaveWorldAs(path) first.",
@@ -137,7 +126,7 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
-            return SaveWorld(persistence.ActiveSavePath);
+            return SaveWorld(saveController.ActiveSavePath);
         }
 
         public bool SaveWorld(string path)
@@ -155,7 +144,7 @@ namespace MiniCivilization.World.Runtime
 
             try
             {
-                persistence.Save(currentWorldDataAsset, path);
+                saveController.Save(currentWorldDataAsset, path);
                 SetDirty(false);
                 return true;
             }
@@ -173,8 +162,8 @@ namespace MiniCivilization.World.Runtime
 
         public bool LoadWorld()
         {
-            return LoadWorld(persistence != null
-                ? persistence.SavePath
+            return LoadWorld(saveController != null
+                ? saveController.SavePath
                 : null);
         }
 
@@ -187,7 +176,7 @@ namespace MiniCivilization.World.Runtime
 
             try
             {
-                var loadedAsset = persistence.LoadDataAsset(path);
+                var loadedAsset = saveController.LoadDataAsset(path);
                 ActivateWorldAsset(
                     loadedAsset,
                     preferPreparedScene: false,
@@ -201,7 +190,7 @@ namespace MiniCivilization.World.Runtime
             }
         }
 
-        public void ReplaceWorld(WorldState nextWorld)
+        public void ReplaceWorld(WorldData nextWorld)
         {
             if (nextWorld == null)
             {
@@ -209,9 +198,9 @@ namespace MiniCivilization.World.Runtime
             }
 
             var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
-            asset.name = $"World {nextWorld.Data.Seed}";
+            asset.name = $"World {nextWorld.Seed}";
             asset.hideFlags = HideFlags.DontSave;
-            asset.Initialize(nextWorld.Data);
+            asset.Initialize(nextWorld);
             ActivateWorldAsset(
                 asset,
                 preferPreparedScene: false,
@@ -240,12 +229,11 @@ namespace MiniCivilization.World.Runtime
         public void UnloadWorld()
         {
             worldRenderer?.Unbind();
-            UnsubscribeFromCurrentWorld();
+            hydrologyController?.Unbind();
+            editController?.Unbind();
             var previousAsset = currentWorldDataAsset;
-            CurrentWorld = null;
+            CurrentWorldData = null;
             currentWorldDataAsset = null;
-            hydrologyDirtyChunks.Clear();
-            hydrologyDirty = false;
             SetDirty(false);
             WorldChanged?.Invoke(null);
             ReleaseRuntimeAsset(previousAsset);
@@ -253,12 +241,17 @@ namespace MiniCivilization.World.Runtime
 
         public void Configure(
             WorldGenerationController generationController,
+            WorldEditController worldEditor,
+            WorldHydrologyController hydrology,
             WorldRenderer renderer,
-            WorldPersistence saveLoad)
+            WorldSaveController saveLoad)
         {
             generator = generationController;
+            editController = worldEditor;
+            hydrologyController = hydrology;
             worldRenderer = renderer;
-            persistence = saveLoad;
+            saveController = saveLoad;
+            SubscribeToEditController();
         }
 
         private void ActivateWorldAsset(
@@ -283,13 +276,12 @@ namespace MiniCivilization.World.Runtime
                     "WorldManager requires an assigned Renderer.");
             }
 
-            UnsubscribeFromCurrentWorld();
             var previousAsset = currentWorldDataAsset;
             currentWorldDataAsset = nextAsset;
-            CurrentWorld = new WorldState(nextAsset.Data);
-            CurrentWorld.Data.ChunkMarkedDirty += OnChunkMarkedDirty;
-            hydrologyDirtyChunks.Clear();
-            hydrologyDirty = false;
+            CurrentWorldData = nextAsset.Data;
+            SubscribeToEditController();
+            editController.Bind(nextAsset.Data);
+            hydrologyController.Bind(nextAsset.Data);
 
             var adoptedPreparedScene = preferPreparedScene
                 && nextAsset.HasPreparedRenderCache
@@ -312,37 +304,52 @@ namespace MiniCivilization.World.Runtime
 
         private bool TryValidateReferences()
         {
-            if (generator != null && worldRenderer != null && persistence != null)
+            if (generator != null
+                && editController != null
+                && hydrologyController != null
+                && worldRenderer != null
+                && saveController != null)
             {
+                SubscribeToEditController();
                 return true;
             }
 
             Debug.LogError(
-                "WorldManager requires assigned Generation, Renderer, and Persistence components.",
+                "WorldManager requires assigned Generation, Editing, Hydrology, " +
+                "Renderer, and Save components.",
                 this);
             return false;
         }
 
-        private void UnsubscribeFromCurrentWorld()
+        private void SubscribeToEditController()
         {
-            if (CurrentWorld != null)
-            {
-                CurrentWorld.Data.ChunkMarkedDirty -= OnChunkMarkedDirty;
-            }
-        }
-
-        private void OnChunkMarkedDirty(
-            ChunkCoordinate coordinate,
-            ChunkDirtyFlags flags)
-        {
-            SetDirty(true);
-            if ((flags & ChunkDirtyFlags.Hydrology) == 0)
+            if (subscribedEditController == editController)
             {
                 return;
             }
 
-            hydrologyDirtyChunks.Add(coordinate);
-            hydrologyDirty = true;
+            if (subscribedEditController != null)
+            {
+                subscribedEditController.ChangeCommitted -= OnWorldEdited;
+            }
+
+            subscribedEditController = editController;
+            if (subscribedEditController != null)
+            {
+                subscribedEditController.ChangeCommitted += OnWorldEdited;
+            }
+        }
+
+        private void OnWorldEdited(WorldChangeSet changeSet)
+        {
+            if (changeSet == null || changeSet.World != CurrentWorldData)
+            {
+                return;
+            }
+
+            hydrologyController.ApplyChanges(changeSet);
+            worldRenderer.ApplyChanges(changeSet);
+            SetDirty(true);
         }
 
         private void SetDirty(bool value)
@@ -369,7 +376,10 @@ namespace MiniCivilization.World.Runtime
 
         private void OnDestroy()
         {
-            UnsubscribeFromCurrentWorld();
+            if (subscribedEditController != null)
+            {
+                subscribedEditController.ChangeCommitted -= OnWorldEdited;
+            }
         }
     }
 }

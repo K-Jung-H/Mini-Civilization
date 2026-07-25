@@ -24,21 +24,27 @@ namespace MiniCivilization.World.Editor
         private static void DrawStatus(WorldManager manager)
         {
             if (manager.Generator == null
+                || manager.EditController == null
+                || manager.HydrologyController == null
                 || manager.Renderer == null
-                || manager.Persistence == null)
+                || manager.SaveController == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Generation, Renderer, and Persistence references must be assigned.",
+                    "Generation, Editing, Hydrology, Renderer, and Save " +
+                    "references must be assigned.",
                     MessageType.Error);
             }
 
             if (manager.HasWorld)
             {
-                var world = manager.CurrentWorld.Data;
+                var world = manager.CurrentWorldData;
+                var waterBodyCount =
+                    manager.HydrologyController?.State?.WaterBodies.Count ?? 0;
                 EditorGUILayout.HelpBox(
                     $"Active world: {world.Size} x {world.Size} x {world.Height}\n" +
                     $"Seed: {world.Seed}\n" +
-                    $"Water bodies: {manager.CurrentWorld.WaterBodies.Count}\n" +
+                    $"Water bodies: {waterBodyCount}\n" +
+                    $"Change ID: {world.CurrentChangeId}\n" +
                     $"Dirty: {(manager.IsDirty ? "Yes" : "No")}\n" +
                     $"Renderer: {manager.Renderer.BindingMode}",
                     MessageType.None);
@@ -57,11 +63,11 @@ namespace MiniCivilization.World.Editor
                     MessageType.Info);
             }
 
-            if (manager.Persistence != null)
+            if (manager.SaveController != null)
             {
                 EditorGUILayout.LabelField(
                     "Active World File",
-                    manager.Persistence.ActiveSavePath,
+                    manager.SaveController.ActiveSavePath,
                     EditorStyles.wordWrappedLabel);
             }
         }
@@ -86,7 +92,7 @@ namespace MiniCivilization.World.Editor
             {
                 if (GUILayout.Button("Save"))
                 {
-                    if (manager.Persistence.HasActiveSavePath)
+                    if (manager.SaveController.HasActiveSavePath)
                     {
                         manager.SaveWorld();
                     }
@@ -134,10 +140,10 @@ namespace MiniCivilization.World.Editor
 
         private static void SaveAs(WorldManager manager)
         {
-            var currentPath = manager.Persistence.ActiveSavePath;
+            var currentPath = manager.SaveController.ActiveSavePath;
             if (string.IsNullOrWhiteSpace(currentPath))
             {
-                currentPath = manager.Persistence.ConfiguredSavePath;
+                currentPath = manager.SaveController.ConfiguredSavePath;
             }
 
             var path = EditorUtility.SaveFilePanel(
@@ -153,10 +159,10 @@ namespace MiniCivilization.World.Editor
 
         private static void LoadFromFile(WorldManager manager)
         {
-            var currentPath = manager.Persistence.ActiveSavePath;
+            var currentPath = manager.SaveController.ActiveSavePath;
             if (string.IsNullOrWhiteSpace(currentPath))
             {
-                currentPath = manager.Persistence.ConfiguredSavePath;
+                currentPath = manager.SaveController.ConfiguredSavePath;
             }
 
             var path = EditorUtility.OpenFilePanel(

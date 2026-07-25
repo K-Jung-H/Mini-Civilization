@@ -78,7 +78,8 @@ namespace MiniCivilization.World.Interaction
             }
 
             var snapshot = infoProvider.Create(
-                worldManager.CurrentWorld,
+                worldManager.CurrentWorldData,
+                worldManager.HydrologyController?.State,
                 selected.Value);
             var model = WorldTileInfoViewModel.FromSnapshot(snapshot);
             infoPanel.Show(model);

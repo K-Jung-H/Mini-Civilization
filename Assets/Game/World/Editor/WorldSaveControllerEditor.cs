@@ -6,32 +6,32 @@ using UnityEngine;
 
 namespace MiniCivilization.World.Editor
 {
-    [CustomEditor(typeof(WorldPersistence))]
-    public sealed class WorldPersistenceEditor : UnityEditor.Editor
+    [CustomEditor(typeof(WorldSaveController))]
+    public sealed class WorldSaveControllerEditor : UnityEditor.Editor
     {
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
-            var persistence = (WorldPersistence)target;
+            var saveController = (WorldSaveController)target;
             EditorGUILayout.Space();
 
             try
             {
                 EditorGUILayout.LabelField(
                     "Default Save File",
-                    persistence.ConfiguredSavePath,
+                    saveController.ConfiguredSavePath,
                     EditorStyles.wordWrappedLabel);
                 EditorGUILayout.LabelField(
                     "Current World File",
-                    persistence.ActiveSavePath,
+                    saveController.ActiveSavePath,
                     EditorStyles.wordWrappedLabel);
                 EditorGUILayout.LabelField(
                     "Default File Exists",
-                    File.Exists(persistence.ConfiguredSavePath) ? "Yes" : "No");
+                    File.Exists(saveController.ConfiguredSavePath) ? "Yes" : "No");
 
                 if (GUILayout.Button("Choose Default Save File..."))
                 {
-                    var currentPath = persistence.ConfiguredSavePath;
+                    var currentPath = saveController.ConfiguredSavePath;
                     var path = EditorUtility.SaveFilePanel(
                         "Choose Default World File",
                         Path.GetDirectoryName(currentPath) ?? Application.persistentDataPath,
@@ -39,17 +39,17 @@ namespace MiniCivilization.World.Editor
                         "mcw");
                     if (!string.IsNullOrEmpty(path))
                     {
-                        Undo.RecordObject(persistence, "Change Default World File");
-                        persistence.SetConfiguredSavePath(path);
-                        EditorUtility.SetDirty(persistence);
+                        Undo.RecordObject(saveController, "Change Default World File");
+                        saveController.SetConfiguredSavePath(path);
+                        EditorUtility.SetDirty(saveController);
                     }
                 }
 
                 if (GUILayout.Button("Use PersistentData Default"))
                 {
-                    Undo.RecordObject(persistence, "Reset Default World File");
-                    persistence.ClearConfiguredSavePathOverride();
-                    EditorUtility.SetDirty(persistence);
+                    Undo.RecordObject(saveController, "Reset Default World File");
+                    saveController.ClearConfiguredSavePathOverride();
+                    EditorUtility.SetDirty(saveController);
                 }
             }
             catch (Exception exception)

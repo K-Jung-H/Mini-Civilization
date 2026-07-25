@@ -67,32 +67,10 @@ namespace MiniCivilization.World.Interaction
     public static class WorldCellIndex
     {
         public static int Encode(WorldData world, int x, int y, int z)
-        {
-            if (!world.Contains(x, y, z))
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(x),
-                    $"Cell ({x}, {y}, {z}) is outside the world.");
-            }
-
-            return x + world.Size * (z + world.Size * y);
-        }
+            => WorldIndex.EncodeCell(world, x, y, z);
 
         public static CellCoordinate Decode(WorldData world, int index)
-        {
-            var cellCount = checked(world.Size * world.Size * world.Height);
-            if ((uint)index >= cellCount)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index));
-            }
-
-            var layerSize = world.Size * world.Size;
-            var y = index / layerSize;
-            var layerIndex = index - y * layerSize;
-            var z = layerIndex / world.Size;
-            var x = layerIndex - z * world.Size;
-            return new CellCoordinate(x, y, z);
-        }
+            => WorldIndex.DecodeCell(world, index);
     }
 
     public readonly struct TilePickResult : IEquatable<TilePickResult>

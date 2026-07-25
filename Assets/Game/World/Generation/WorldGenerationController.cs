@@ -1,4 +1,5 @@
 using System;
+using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
 using UnityEngine;
 
@@ -12,7 +13,7 @@ namespace MiniCivilization.World.Generation
         public WorldGenerationSettings Settings => settings;
         public int Seed => seed;
 
-        public WorldState Generate()
+        public WorldData Generate()
         {
             if (settings == null)
             {
@@ -27,9 +28,9 @@ namespace MiniCivilization.World.Generation
         {
             var state = Generate();
             var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
-            asset.name = $"World {state.Data.Seed}";
+            asset.name = $"World {state.Seed}";
             asset.hideFlags = HideFlags.DontSave;
-            asset.Initialize(state.Data);
+            asset.Initialize(state);
             return asset;
         }
 

@@ -33,9 +33,9 @@ namespace MiniCivilization.World.Interaction
                 return;
             }
 
-            if (observedWorld != worldManager.CurrentWorld.Data)
+            if (observedWorld != worldManager.CurrentWorldData)
             {
-                observedWorld = worldManager.CurrentWorld.Data;
+                observedWorld = worldManager.CurrentWorldData;
                 selectionState.Clear();
             }
 
@@ -54,7 +54,7 @@ namespace MiniCivilization.World.Interaction
             var ray = interactionCamera.ScreenPointToRay(
                 mouse.position.ReadValue());
             if (WorldTilePicker.TryPick(
-                    worldManager.CurrentWorld.Data,
+                    worldManager.CurrentWorldData,
                     ray,
                     maxDistance,
                     interactionMask,

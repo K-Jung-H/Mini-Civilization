@@ -1,7 +1,6 @@
 using System.Text;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Hydrology;
-using MiniCivilization.World.Runtime;
 using UnityEngine;
 
 namespace MiniCivilization.World.Interaction
@@ -63,10 +62,10 @@ namespace MiniCivilization.World.Interaction
     public sealed class WorldCellInfoProvider : MonoBehaviour
     {
         public WorldCellInfoSnapshot Create(
-            WorldState worldState,
+            WorldData world,
+            HydrologyState hydrologyState,
             in TilePickResult pick)
         {
-            var world = worldState.Data;
             var cell = world.GetCell(pick.Cell.X, pick.Cell.Y, pick.Cell.Z);
             var column = world.GetSurfaceColumn(pick.Cell.X, pick.Cell.Z);
             var environment = world.GetColumnEnvironment(
@@ -76,27 +75,20 @@ namespace MiniCivilization.World.Interaction
                 cell,
                 column,
                 environment,
-                FindWaterBody(worldState, pick.Cell));
+                FindWaterBody(hydrologyState, pick.Cell));
         }
 
         private static WaterBody FindWaterBody(
-            WorldState worldState,
+            HydrologyState hydrologyState,
             CellCoordinate coordinate)
         {
-            var bodies = worldState.WaterBodies;
-            for (var bodyIndex = 0; bodyIndex < bodies.Count; bodyIndex++)
-            {
-                var body = bodies[bodyIndex];
-                for (var cellIndex = 0; cellIndex < body.Cells.Count; cellIndex++)
-                {
-                    if (body.Cells[cellIndex].Equals(coordinate))
-                    {
-                        return body;
-                    }
-                }
-            }
-
-            return null;
+            return hydrologyState != null
+                && hydrologyState.TryGetWaterBody(
+                    coordinate.X,
+                    coordinate.Z,
+                    out var waterBody)
+                    ? waterBody
+                    : null;
         }
     }
 }

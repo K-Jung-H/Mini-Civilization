@@ -1,6 +1,8 @@
 using System.Linq;
 using MiniCivilization.World.Definitions;
+using MiniCivilization.World.Editing;
 using MiniCivilization.World.Generation;
+using MiniCivilization.World.Hydrology;
 using MiniCivilization.World.Interaction;
 using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
@@ -41,6 +43,9 @@ namespace MiniCivilization.World.Editor
                 var root = GameObject.Find("World System");
                 if (root == null
                     || (root.transform.Find("World Management") != null
+                        && root.transform.Find("World Editing") != null
+                        && root.transform.Find("World Hydrology") != null
+                        && root.transform.Find("World Save") != null
                         && root.transform.Find("World UI/Canvas") != null))
                 {
                     return;
@@ -84,8 +89,13 @@ namespace MiniCivilization.World.Editor
 
             var managementObject = EnsureRoleObject(worldObject, "World Management");
             var generationObject = EnsureRoleObject(worldObject, "World Generation");
+            var editingObject = EnsureRoleObject(worldObject, "World Editing");
+            var hydrologyObject = EnsureRoleObject(worldObject, "World Hydrology");
             var renderingObject = EnsureRoleObject(worldObject, "World Rendering");
-            var persistenceObject = EnsureRoleObject(worldObject, "World Persistence");
+            var saveObject = EnsureRenamedRoleObject(
+                worldObject,
+                "World Save",
+                "World Persistence");
             var interactionObject = EnsureRoleObject(worldObject, "World Interaction");
             var uiObject = EnsureRoleObject(worldObject, "World UI");
 
@@ -97,13 +107,21 @@ namespace MiniCivilization.World.Editor
                 worldObject,
                 generationObject,
                 out var generatorCreated);
+            var editController = MoveOrAdd<WorldEditController>(
+                worldObject,
+                editingObject,
+                out _);
+            var hydrologyController = MoveOrAdd<WorldHydrologyController>(
+                worldObject,
+                hydrologyObject,
+                out _);
             var renderer = MoveOrAdd<WorldRenderer>(
                 worldObject,
                 renderingObject,
                 out _);
-            var persistence = MoveOrAdd<WorldPersistence>(
+            var saveController = MoveOrAdd<WorldSaveController>(
                 worldObject,
-                persistenceObject,
+                saveObject,
                 out _);
             var selectionState = MoveOrAdd<WorldTileSelectionState>(
                 worldObject,
@@ -153,8 +171,13 @@ namespace MiniCivilization.World.Editor
                 settings.RenderPatchSizeXZ,
                 true,
                 InteractionLayer);
-            persistence.Configure("Worlds", "default.mcw", true);
-            manager.Configure(generator, renderer, persistence);
+            saveController.Configure("Worlds", "default.mcw", true);
+            manager.Configure(
+                generator,
+                editController,
+                hydrologyController,
+                renderer,
+                saveController);
 
             var camera = ConfigureCamera(settings.WorldSize);
             interactionController.Configure(
@@ -185,8 +208,10 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(worldObject);
             EditorUtility.SetDirty(manager);
             EditorUtility.SetDirty(generator);
+            EditorUtility.SetDirty(editController);
+            EditorUtility.SetDirty(hydrologyController);
             EditorUtility.SetDirty(renderer);
-            EditorUtility.SetDirty(persistence);
+            EditorUtility.SetDirty(saveController);
             EditorUtility.SetDirty(selectionState);
             EditorUtility.SetDirty(interactionController);
             EditorUtility.SetDirty(highlighter);
@@ -269,6 +294,27 @@ namespace MiniCivilization.World.Editor
             var roleObject = new GameObject(roleName);
             roleObject.transform.SetParent(worldRoot.transform, false);
             return roleObject;
+        }
+
+        private static GameObject EnsureRenamedRoleObject(
+            GameObject worldRoot,
+            string roleName,
+            string legacyRoleName)
+        {
+            var current = worldRoot.transform.Find(roleName);
+            if (current != null)
+            {
+                return current.gameObject;
+            }
+
+            var legacy = worldRoot.transform.Find(legacyRoleName);
+            if (legacy != null)
+            {
+                legacy.name = roleName;
+                return legacy.gameObject;
+            }
+
+            return EnsureRoleObject(worldRoot, roleName);
         }
 
         private static T MoveOrAdd<T>(
