@@ -35,7 +35,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 3;
+        public const int CurrentLayoutVersion = 4;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
@@ -55,11 +55,18 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private Toggle areaSelectionToggle;
         [SerializeField] private Toggle brushToggle;
 
+        [Header("Brush Size")]
+        [SerializeField] private RectTransform brushSizePanel;
+        [SerializeField] private ToggleGroup brushSizeToggleGroup;
+        [SerializeField] private Toggle[] brushSizeToggles;
+
         [Header("Property Category")]
         [SerializeField] private ToggleGroup propertyToggleGroup;
         [SerializeField] private WorldEditPropertySection[] propertySections;
 
         private bool isExpanded;
+
+        public event Action SelectionChanged;
 
         public bool IsExpanded => isExpanded;
         public int LayoutVersion => layoutVersion;
@@ -71,6 +78,9 @@ namespace MiniCivilization.World.Editing
         public ToggleGroup ModeToggleGroup => modeToggleGroup;
         public Toggle AreaSelectionToggle => areaSelectionToggle;
         public Toggle BrushToggle => brushToggle;
+        public RectTransform BrushSizePanel => brushSizePanel;
+        public ToggleGroup BrushSizeToggleGroup => brushSizeToggleGroup;
+        public IReadOnlyList<Toggle> BrushSizeToggles => brushSizeToggles;
         public ToggleGroup PropertyToggleGroup => propertyToggleGroup;
         public IReadOnlyList<WorldEditPropertySection> PropertySections =>
             propertySections;
@@ -96,6 +106,9 @@ namespace MiniCivilization.World.Editing
             ToggleGroup modeGroup,
             Toggle areaSelection,
             Toggle brush,
+            RectTransform sizePanel,
+            ToggleGroup sizeGroup,
+            Toggle[] sizeToggles,
             ToggleGroup propertyGroup,
             WorldEditPropertySection[] sections)
         {
@@ -109,6 +122,9 @@ namespace MiniCivilization.World.Editing
             modeToggleGroup = modeGroup;
             areaSelectionToggle = areaSelection;
             brushToggle = brush;
+            brushSizePanel = sizePanel;
+            brushSizeToggleGroup = sizeGroup;
+            brushSizeToggles = sizeToggles;
             propertyToggleGroup = propertyGroup;
             propertySections = sections;
             layoutVersion = CurrentLayoutVersion;
@@ -139,6 +155,78 @@ namespace MiniCivilization.World.Editing
             }
 
             RefreshPropertyDetailPanels();
+            SelectionChanged?.Invoke();
+        }
+
+        public int GetSelectedModeIndex()
+        {
+            if (!isExpanded)
+            {
+                return 0;
+            }
+
+            if (areaSelectionToggle != null && areaSelectionToggle.isOn)
+            {
+                return 1;
+            }
+
+            return brushToggle != null && brushToggle.isOn ? 2 : 0;
+        }
+
+        public int GetSelectedBrushSize()
+        {
+            if (brushSizeToggles == null)
+            {
+                return 1;
+            }
+
+            for (var index = 0; index < brushSizeToggles.Length; index++)
+            {
+                if (brushSizeToggles[index] != null
+                    && brushSizeToggles[index].isOn)
+                {
+                    return index + 1;
+                }
+            }
+
+            return 1;
+        }
+
+        public bool TryGetSelectedProperty(
+            out int sectionIndex,
+            out int detailIndex)
+        {
+            sectionIndex = -1;
+            detailIndex = -1;
+            if (!isExpanded || propertySections == null)
+            {
+                return false;
+            }
+
+            for (var section = 0; section < propertySections.Length; section++)
+            {
+                var propertySection = propertySections[section];
+                if (propertySection?.CategoryToggle == null
+                    || !propertySection.CategoryToggle.isOn)
+                {
+                    continue;
+                }
+
+                sectionIndex = section;
+                var toggles = propertySection.DetailToggles;
+                for (var detail = 0; detail < toggles.Count; detail++)
+                {
+                    if (toggles[detail] != null && toggles[detail].isOn)
+                    {
+                        detailIndex = detail;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return false;
         }
 
         private void ToggleExpanded()
@@ -152,6 +240,16 @@ namespace MiniCivilization.World.Editing
             {
                 mainButton.onClick.RemoveListener(ToggleExpanded);
                 mainButton.onClick.AddListener(ToggleExpanded);
+            }
+
+            BindToggle(areaSelectionToggle);
+            BindToggle(brushToggle);
+            if (brushSizeToggles != null)
+            {
+                foreach (var sizeToggle in brushSizeToggles)
+                {
+                    BindToggle(sizeToggle);
+                }
             }
 
             if (propertySections == null)
@@ -170,6 +268,10 @@ namespace MiniCivilization.World.Editing
                     OnPropertySelectionChanged);
                 section.CategoryToggle.onValueChanged.AddListener(
                     OnPropertySelectionChanged);
+                foreach (var detailToggle in section.DetailToggles)
+                {
+                    BindToggle(detailToggle);
+                }
             }
         }
 
@@ -178,6 +280,16 @@ namespace MiniCivilization.World.Editing
             if (mainButton != null)
             {
                 mainButton.onClick.RemoveListener(ToggleExpanded);
+            }
+
+            UnbindToggle(areaSelectionToggle);
+            UnbindToggle(brushToggle);
+            if (brushSizeToggles != null)
+            {
+                foreach (var sizeToggle in brushSizeToggles)
+                {
+                    UnbindToggle(sizeToggle);
+                }
             }
 
             if (propertySections == null)
@@ -192,16 +304,53 @@ namespace MiniCivilization.World.Editing
                     section.CategoryToggle.onValueChanged.RemoveListener(
                         OnPropertySelectionChanged);
                 }
+
+                if (section == null)
+                {
+                    continue;
+                }
+
+                foreach (var detailToggle in section.DetailToggles)
+                {
+                    UnbindToggle(detailToggle);
+                }
             }
         }
 
         private void OnPropertySelectionChanged(bool _)
         {
             RefreshPropertyDetailPanels();
+            SelectionChanged?.Invoke();
+        }
+
+        private void OnSelectionChanged(bool _)
+        {
+            RefreshBrushSizePanel();
+            SelectionChanged?.Invoke();
+        }
+
+        private void BindToggle(Toggle toggle)
+        {
+            if (toggle == null)
+            {
+                return;
+            }
+
+            toggle.onValueChanged.RemoveListener(OnSelectionChanged);
+            toggle.onValueChanged.AddListener(OnSelectionChanged);
+        }
+
+        private void UnbindToggle(Toggle toggle)
+        {
+            if (toggle != null)
+            {
+                toggle.onValueChanged.RemoveListener(OnSelectionChanged);
+            }
         }
 
         private void RefreshPropertyDetailPanels()
         {
+            RefreshBrushSizePanel();
             if (propertySections == null)
             {
                 return;
@@ -218,6 +367,17 @@ namespace MiniCivilization.World.Editing
                     && section.CategoryToggle != null
                     && section.CategoryToggle.isOn;
                 section.DetailPanel.gameObject.SetActive(selected);
+            }
+        }
+
+        private void RefreshBrushSizePanel()
+        {
+            if (brushSizePanel != null)
+            {
+                brushSizePanel.gameObject.SetActive(
+                    isExpanded
+                    && brushToggle != null
+                    && brushToggle.isOn);
             }
         }
     }

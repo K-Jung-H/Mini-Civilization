@@ -8,9 +8,13 @@ namespace MiniCivilization.World.Interaction
     {
         public TilePickResult? Hovered { get; private set; }
         public TilePickResult? Selected { get; private set; }
+        public IWorldCellSelection EditHovered { get; private set; }
+        public IWorldCellSelection EditSelected { get; private set; }
 
         public event Action<TilePickResult?> HoverChanged;
         public event Action<TilePickResult?> SelectionChanged;
+        public event Action<IWorldCellSelection> EditHoverChanged;
+        public event Action<IWorldCellSelection> EditSelectionChanged;
 
         public void SetHovered(TilePickResult? next)
         {
@@ -39,10 +43,48 @@ namespace MiniCivilization.World.Interaction
             SetSelected(Hovered);
         }
 
+        public void ReplaceEditHovered(IWorldCellSelection next)
+        {
+            if (ReferenceEquals(EditHovered, next))
+            {
+                return;
+            }
+
+            EditHovered = next;
+            EditHoverChanged?.Invoke(EditHovered);
+        }
+
+        public void CommitEditHovered()
+        {
+            if (EditHovered == null)
+            {
+                return;
+            }
+
+            EditSelected = EditHovered;
+            EditSelectionChanged?.Invoke(EditSelected);
+            ReplaceEditHovered(null);
+        }
+
+        public void ClearEditHovered() => ReplaceEditHovered(null);
+
+        public void ClearEditSelected()
+        {
+            if (EditSelected == null)
+            {
+                return;
+            }
+
+            EditSelected = null;
+            EditSelectionChanged?.Invoke(null);
+        }
+
         public void Clear()
         {
             SetHovered(null);
             SetSelected(null);
+            ClearEditHovered();
+            ClearEditSelected();
         }
     }
 }

@@ -28,6 +28,7 @@ namespace MiniCivilization.World.Editor
         private const string WaterMaterialPath = SettingsDirectory + "/WorldWater.mat";
         private const string WaterfallMaterialPath = SettingsDirectory + "/WorldWaterfall.mat";
         private const string HighlightMaterialPath = SettingsDirectory + "/WorldTileHighlight.mat";
+        private const string WireframeMaterialPath = SettingsDirectory + "/WorldEditWireframe.mat";
         private const int InteractionLayer = 8;
 
         [InitializeOnLoadMethod]
@@ -61,6 +62,22 @@ namespace MiniCivilization.World.Editor
             if (root == null
                 || (root.transform.Find("World Management") != null
                     && root.transform.Find("World Editing") != null
+                    && root.transform.Find("World Editing")
+                        ?.GetComponent<WorldEditToolState>() != null
+                    && root.transform.Find("World Editing")
+                        ?.GetComponent<WorldEditInputController>() != null
+                    && root.transform.Find("World Editing/Selection Preview")
+                        ?.GetComponent<WorldEditWireframeRenderer>() != null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Highlight") != null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Hover Highlight") == null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Selected Highlight") == null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Edit Hover Highlight") == null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Edit Selected Highlight") == null
                     && root.transform.Find("World Hydrology") != null
                     && root.transform.Find("World Save") != null
                     && root.transform.Find(
@@ -74,6 +91,9 @@ namespace MiniCivilization.World.Editor
                         != null
                     && root.transform.Find(
                         "World UI/Canvas/World Edit UI/Toolbar/Expanded Content/Main Property Divider")
+                        != null
+                    && root.transform.Find(
+                        "World UI/Canvas/World Edit UI/Property Detail Panel/Brush Size Details")
                         != null
                     && root.transform.Find(
                             "World UI/Canvas/World Edit UI/Toolbar/Main Button/Label")
@@ -113,6 +133,23 @@ namespace MiniCivilization.World.Editor
                 HighlightMaterialPath,
                 "Mini Civilization/World Tile Highlight",
                 "World Tile Highlight Material");
+            var wireframeMaterial = LoadOrCreateMaterial(
+                WireframeMaterialPath,
+                "Mini Civilization/World Tile Highlight",
+                "World Edit Wireframe Material");
+            if (highlightMaterial.HasProperty("_ZTest"))
+            {
+                highlightMaterial.SetFloat(
+                    "_ZTest",
+                    (float)UnityEngine.Rendering.CompareFunction.LessEqual);
+            }
+
+            if (wireframeMaterial.HasProperty("_ZTest"))
+            {
+                wireframeMaterial.SetFloat(
+                    "_ZTest",
+                    (float)UnityEngine.Rendering.CompareFunction.Always);
+            }
 
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             var worldObject = GameObject.Find("World System")
@@ -141,6 +178,14 @@ namespace MiniCivilization.World.Editor
                 generationObject,
                 out var generatorCreated);
             var editController = MoveOrAdd<WorldEditController>(
+                worldObject,
+                editingObject,
+                out _);
+            var editToolState = MoveOrAdd<WorldEditToolState>(
+                worldObject,
+                editingObject,
+                out _);
+            var editInputController = MoveOrAdd<WorldEditInputController>(
                 worldObject,
                 editingObject,
                 out _);
@@ -185,9 +230,23 @@ namespace MiniCivilization.World.Editor
                 interactionObject.transform,
                 worldObject.transform,
                 "Highlight Root");
+            var editPreviewRoot = EnsureChildTransform(
+                editingObject.transform,
+                worldObject.transform,
+                "Selection Preview");
 
-            var hoverHighlight = EnsureHighlightChild(highlightRoot, "Hover Highlight");
-            var selectedHighlight = EnsureHighlightChild(highlightRoot, "Selected Highlight");
+            RemoveLegacyHighlightChildren(highlightRoot);
+            var highlight = EnsureHighlightChild(highlightRoot, "Highlight");
+            var previewFilter = GetOrAdd<MeshFilter>(
+                editPreviewRoot.gameObject,
+                out _);
+            var previewRenderer = GetOrAdd<MeshRenderer>(
+                editPreviewRoot.gameObject,
+                out _);
+            var wireframeRenderer = GetOrAdd<WorldEditWireframeRenderer>(
+                editPreviewRoot.gameObject,
+                out _);
+            editPreviewRoot.gameObject.layer = 2;
 
             generator.SetSettings(settings);
             if (generatorCreated)
@@ -213,23 +272,33 @@ namespace MiniCivilization.World.Editor
                 saveController);
 
             var camera = ConfigureCamera(settings.WorldSize);
-            interactionController.Configure(
-                camera,
-                manager,
-                selectionState,
-                1 << InteractionLayer,
-                settings.WorldSize * 4f);
             highlighter.Configure(
                 manager,
                 selectionState,
-                hoverHighlight.Filter,
-                hoverHighlight.Renderer,
-                selectedHighlight.Filter,
-                selectedHighlight.Renderer,
+                highlight.Filter,
+                highlight.Renderer,
                 highlightMaterial);
             var infoPanel = EnsureTileInfoCanvas(uiObject.transform);
             var editToolbar = EnsureWorldEditToolbar(
                 uiObject.transform.Find("Canvas") as RectTransform);
+            wireframeRenderer.Configure(
+                selectionState,
+                camera,
+                previewFilter,
+                previewRenderer,
+                wireframeMaterial);
+            editToolState.Configure(editToolbar);
+            editInputController.Configure(
+                manager,
+                editToolState,
+                selectionState);
+            interactionController.Configure(
+                camera,
+                manager,
+                selectionState,
+                editToolState,
+                1 << InteractionLayer,
+                settings.WorldSize * 4f);
             infoPresenter.Configure(
                 manager,
                 selectionState,
@@ -244,6 +313,11 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(manager);
             EditorUtility.SetDirty(generator);
             EditorUtility.SetDirty(editController);
+            EditorUtility.SetDirty(editToolState);
+            EditorUtility.SetDirty(editInputController);
+            EditorUtility.SetDirty(wireframeRenderer);
+            EditorUtility.SetDirty(previewFilter);
+            EditorUtility.SetDirty(previewRenderer);
             EditorUtility.SetDirty(hydrologyController);
             EditorUtility.SetDirty(renderer);
             EditorUtility.SetDirty(saveController);
@@ -839,6 +913,12 @@ namespace MiniCivilization.World.Editor
                     new Color(0.20f, 0.28f, 0.36f, 1f),
                     new Color(0.72f, 0.63f, 0.43f, 1f)
                 });
+            var brushSizePanel = EnsureBrushSizeSection(
+                detailHost,
+                toolbarFont,
+                -444f,
+                out var brushSizeGroup,
+                out var brushSizeToggles);
 
             area.SetIsOnWithoutNotify(true);
             brush.SetIsOnWithoutNotify(false);
@@ -857,6 +937,9 @@ namespace MiniCivilization.World.Editor
                 modeGroup,
                 area,
                 brush,
+                brushSizePanel,
+                brushSizeGroup,
+                brushSizeToggles,
                 propertyGroup,
                 new[]
                 {
@@ -995,6 +1078,97 @@ namespace MiniCivilization.World.Editor
             }
 
             return new WorldEditPropertySection(category, panel, group, toggles);
+        }
+
+        private static RectTransform EnsureBrushSizeSection(
+            RectTransform detailHost,
+            TMP_FontAsset font,
+            float alignedX,
+            out ToggleGroup group,
+            out Toggle[] toggles)
+        {
+            const float size = 64f;
+            const float gap = 8f;
+            const float titleHeight = 30f;
+            const float titleGap = 6f;
+            const float horizontalPadding = 16f;
+            const float bottomPadding = 16f;
+            const int rowCount = 3;
+            var buttonHeight = rowCount * size + (rowCount - 1) * gap;
+            var panel = EnsureUiRect(
+                detailHost,
+                "Brush Size Details",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(ToggleGroup));
+            ClearUiChildren(panel);
+            SetRect(
+                panel,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                Vector2.zero,
+                new Vector2(alignedX - horizontalPadding, 94f),
+                new Vector2(
+                    size + horizontalPadding * 2f,
+                    bottomPadding + buttonHeight + titleGap + titleHeight));
+            panel.GetComponent<Image>().color =
+                new Color(0.055f, 0.065f, 0.08f, 0.96f);
+            group = panel.GetComponent<ToggleGroup>();
+            group.allowSwitchOff = false;
+
+            var title = EnsureToolbarLabel(
+                panel,
+                "Title",
+                "\uD06C\uAE30",
+                font,
+                15,
+                FontStyles.Bold);
+            SetBottomLeftRect(
+                title.transform as RectTransform,
+                horizontalPadding,
+                bottomPadding + buttonHeight + titleGap,
+                size,
+                titleHeight);
+
+            var labels = new[]
+            {
+                "1\u00D71",
+                "2\u00D72",
+                "3\u00D73"
+            };
+            var colors = new[]
+            {
+                new Color(0.34f, 0.57f, 0.32f, 1f),
+                new Color(0.31f, 0.48f, 0.66f, 1f),
+                new Color(0.59f, 0.38f, 0.66f, 1f)
+            };
+            toggles = new Toggle[rowCount];
+            for (var index = 0; index < rowCount; index++)
+            {
+                var toggle = EnsureToolbarToggle(
+                    panel,
+                    $"Size {index + 1}x{index + 1}",
+                    labels[index],
+                    font,
+                    colors[index],
+                    group);
+                SetBottomLeftRect(
+                    toggle.transform as RectTransform,
+                    horizontalPadding,
+                    bottomPadding
+                    + (rowCount - 1 - index) * (size + gap),
+                    size,
+                    size);
+                toggles[index] = toggle;
+            }
+
+            toggles[0].SetIsOnWithoutNotify(true);
+            for (var index = 1; index < toggles.Length; index++)
+            {
+                toggles[index].SetIsOnWithoutNotify(false);
+            }
+
+            return panel;
         }
 
         private static void ConfigureBackgroundImage(
@@ -1303,11 +1477,48 @@ namespace MiniCivilization.World.Editor
 
             var filter = child.GetComponent<MeshFilter>()
                 ?? child.gameObject.AddComponent<MeshFilter>();
+            if (filter.sharedMesh != null
+                && !AssetDatabase.Contains(filter.sharedMesh))
+            {
+                Object.DestroyImmediate(filter.sharedMesh);
+                filter.sharedMesh = null;
+            }
+
             var renderer = child.GetComponent<MeshRenderer>()
                 ?? child.gameObject.AddComponent<MeshRenderer>();
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
+            renderer.enabled = false;
             return (filter, renderer);
+        }
+
+        private static void RemoveLegacyHighlightChildren(Transform parent)
+        {
+            var legacyNames = new[]
+            {
+                "Hover Highlight",
+                "Selected Highlight",
+                "Edit Hover Highlight",
+                "Edit Selected Highlight"
+            };
+            foreach (var legacyName in legacyNames)
+            {
+                var child = parent.Find(legacyName);
+                if (child == null)
+                {
+                    continue;
+                }
+
+                var filter = child.GetComponent<MeshFilter>();
+                if (filter != null
+                    && filter.sharedMesh != null
+                    && !AssetDatabase.Contains(filter.sharedMesh))
+                {
+                    Object.DestroyImmediate(filter.sharedMesh);
+                }
+
+                Object.DestroyImmediate(child.gameObject);
+            }
         }
 
         private static void ConfigureInteractionLayer()

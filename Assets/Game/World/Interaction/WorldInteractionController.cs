@@ -1,5 +1,6 @@
 using MiniCivilization.World.Runtime;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Editing;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -13,6 +14,7 @@ namespace MiniCivilization.World.Interaction
         [SerializeField] private Camera interactionCamera;
         [SerializeField] private WorldManager worldManager;
         [SerializeField] private WorldTileSelectionState selectionState;
+        [SerializeField] private WorldEditToolState editToolState;
 
         [Header("Raycast")]
         [SerializeField] private LayerMask interactionMask = 1 << 8;
@@ -67,7 +69,8 @@ namespace MiniCivilization.World.Interaction
                 selectionState.SetHovered(null);
             }
 
-            if (mouse.leftButton.wasPressedThisFrame)
+            if (mouse.leftButton.wasPressedThisFrame
+                && (editToolState == null || !editToolState.CapturesPointer))
             {
                 selectionState.SelectHovered();
             }
@@ -83,12 +86,14 @@ namespace MiniCivilization.World.Interaction
             Camera camera,
             WorldManager manager,
             WorldTileSelectionState state,
+            WorldEditToolState toolState,
             LayerMask mask,
             float rayDistance)
         {
             interactionCamera = camera;
             worldManager = manager;
             selectionState = state;
+            editToolState = toolState;
             interactionMask = mask;
             maxDistance = Mathf.Max(1f, rayDistance);
         }

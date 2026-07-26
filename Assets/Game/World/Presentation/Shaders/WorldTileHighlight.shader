@@ -3,6 +3,7 @@ Shader "Mini Civilization/World Tile Highlight"
     Properties
     {
         _BaseColor("Base Color", Color) = (0.1, 0.9, 1.0, 0.35)
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("Depth Test", Float) = 4
     }
 
     SubShader
@@ -21,7 +22,7 @@ Shader "Mini Civilization/World Tile Highlight"
 
             Blend SrcAlpha OneMinusSrcAlpha
             ZWrite Off
-            ZTest LEqual
+            ZTest [_ZTest]
             Cull Off
             Offset -1, -1
 

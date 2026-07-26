@@ -27,6 +27,18 @@ namespace MiniCivilization.World.Presentation
         public int PatchZ => patchZ;
         public int PatchSize => patchSize;
         public bool IsPrepared => preparedReadOnly;
+        public WorldChunkInteractionSurface InteractionSurface
+        {
+            get
+            {
+                if (interactionSurface == null)
+                {
+                    CacheExistingChildren();
+                }
+
+                return interactionSurface;
+            }
+        }
 
         public void Build(
             WorldData world,

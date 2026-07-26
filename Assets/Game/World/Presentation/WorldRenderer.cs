@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Interaction;
 using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
@@ -270,6 +271,33 @@ namespace MiniCivilization.World.Presentation
                     yield return chunkViews[x, z];
                 }
             }
+        }
+
+        public bool TryGetInteractionSurface(
+            int worldX,
+            int worldZ,
+            out WorldChunkInteractionSurface surface)
+        {
+            surface = null;
+            if (chunkViews == null
+                || activeRenderPatchSize <= 0
+                || boundWorld == null
+                || !boundWorld.ContainsColumn(worldX, worldZ))
+            {
+                return false;
+            }
+
+            var patchX = worldX / activeRenderPatchSize;
+            var patchZ = worldZ / activeRenderPatchSize;
+            if ((uint)patchX >= chunkViews.GetLength(0)
+                || (uint)patchZ >= chunkViews.GetLength(1))
+            {
+                return false;
+            }
+
+            var view = chunkViews[patchX, patchZ];
+            surface = view != null ? view.InteractionSurface : null;
+            return surface != null && surface.InteractionMesh != null;
         }
 
         private void DetachBoundWorld(bool clearViews)

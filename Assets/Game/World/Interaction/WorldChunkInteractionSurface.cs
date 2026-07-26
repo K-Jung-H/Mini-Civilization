@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace MiniCivilization.World.Interaction
@@ -11,6 +12,7 @@ namespace MiniCivilization.World.Interaction
         [SerializeField] private InteractionTriangleMetadata[] triangleMetadata =
             System.Array.Empty<InteractionTriangleMetadata>();
         [SerializeField, HideInInspector] private bool ownsInteractionMesh = true;
+        private readonly Dictionary<int, int[]> cellTriangleIndices = new();
 
         public Mesh InteractionMesh => interactionMesh;
         public InteractionTriangleMetadata[] TriangleMetadata => triangleMetadata;
@@ -32,6 +34,7 @@ namespace MiniCivilization.World.Interaction
             ownsInteractionMesh = ownsMesh;
             triangleMetadata = metadata
                 ?? System.Array.Empty<InteractionTriangleMetadata>();
+            RebuildCellTriangleIndex();
 
             meshCollider.sharedMesh = null;
             if (interactionMesh != null && triangleMetadata.Length > 0)
@@ -56,6 +59,15 @@ namespace MiniCivilization.World.Interaction
             return false;
         }
 
+        public bool TryGetOwnedTriangleIndices(
+            int cellIndex,
+            out int[] triangleIndices)
+        {
+            return cellTriangleIndices.TryGetValue(
+                cellIndex,
+                out triangleIndices);
+        }
+
         public void Release()
         {
             if (meshCollider == null)
@@ -76,6 +88,7 @@ namespace MiniCivilization.World.Interaction
             interactionMesh = null;
             triangleMetadata =
                 System.Array.Empty<InteractionTriangleMetadata>();
+            cellTriangleIndices.Clear();
             ownsInteractionMesh = true;
             GeometryVersion++;
         }
@@ -100,7 +113,42 @@ namespace MiniCivilization.World.Interaction
                         : null;
             }
 
+            RebuildCellTriangleIndex();
             GeometryVersion++;
+        }
+
+        private void RebuildCellTriangleIndex()
+        {
+            cellTriangleIndices.Clear();
+            if (triangleMetadata == null || triangleMetadata.Length == 0)
+            {
+                return;
+            }
+
+            var builders = new Dictionary<int, List<int>>();
+            for (var triangleIndex = 0;
+                 triangleIndex < triangleMetadata.Length;
+                 triangleIndex++)
+            {
+                var owner = triangleMetadata[triangleIndex].OwnerCellIndex;
+                if (owner < 0)
+                {
+                    continue;
+                }
+
+                if (!builders.TryGetValue(owner, out var ownedTriangles))
+                {
+                    ownedTriangles = new List<int>();
+                    builders.Add(owner, ownedTriangles);
+                }
+
+                ownedTriangles.Add(triangleIndex);
+            }
+
+            foreach (var pair in builders)
+            {
+                cellTriangleIndices.Add(pair.Key, pair.Value.ToArray());
+            }
         }
 
         private void OnDestroy()
