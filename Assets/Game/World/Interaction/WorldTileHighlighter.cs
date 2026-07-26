@@ -789,7 +789,11 @@ namespace MiniCivilization.World.Interaction
 
             if (buildTriangles.Count == 0)
             {
-                runtimeHighlightMesh?.Clear();
+                if (runtimeHighlightMesh != null)
+                {
+                    runtimeHighlightMesh.Clear();
+                }
+
                 targetRenderer.enabled = false;
                 return;
             }

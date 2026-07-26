@@ -66,17 +66,22 @@ namespace MiniCivilization.World.Interaction
             ReplaceEditHovered(null);
         }
 
-        public void ClearEditHovered() => ReplaceEditHovered(null);
-
-        public void ClearEditSelected()
+        public void ReplaceEditSelected(IWorldCellSelection next)
         {
-            if (EditSelected == null)
+            if (ReferenceEquals(EditSelected, next))
             {
                 return;
             }
 
-            EditSelected = null;
-            EditSelectionChanged?.Invoke(null);
+            EditSelected = next;
+            EditSelectionChanged?.Invoke(EditSelected);
+        }
+
+        public void ClearEditHovered() => ReplaceEditHovered(null);
+
+        public void ClearEditSelected()
+        {
+            ReplaceEditSelected(null);
         }
 
         public void Clear()

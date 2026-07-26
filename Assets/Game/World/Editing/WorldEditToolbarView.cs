@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using MiniCivilization.World.Domain;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 namespace MiniCivilization.World.Editing
@@ -35,7 +37,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 4;
+        public const int CurrentLayoutVersion = 5;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
@@ -65,8 +67,11 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private WorldEditPropertySection[] propertySections;
 
         private bool isExpanded;
+        private readonly Dictionary<Toggle, UnityAction<bool>>
+            editActionListeners = new();
 
         public event Action SelectionChanged;
+        public event Action<WorldEditAction> EditActionRequested;
 
         public bool IsExpanded => isExpanded;
         public int LayoutVersion => layoutVersion;
@@ -229,6 +234,58 @@ namespace MiniCivilization.World.Editing
             return false;
         }
 
+        public void SetActiveEditAction(WorldEditAction action)
+        {
+            if (!TryGetActionLocation(
+                    action,
+                    out var sectionIndex,
+                    out var detailIndex))
+            {
+                return;
+            }
+
+            var toggle = propertySections[sectionIndex]
+                .DetailToggles[detailIndex];
+            if (toggle == null || toggle.isOn)
+            {
+                return;
+            }
+
+            toggle.SetIsOnWithoutNotify(true);
+            SelectionChanged?.Invoke();
+        }
+
+        public void ClearActiveEditAction()
+        {
+            var changed = false;
+            if (propertySections != null)
+            {
+                foreach (var section in propertySections)
+                {
+                    if (section == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var toggle in section.DetailToggles)
+                    {
+                        if (toggle == null || !toggle.isOn)
+                        {
+                            continue;
+                        }
+
+                        toggle.SetIsOnWithoutNotify(false);
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                SelectionChanged?.Invoke();
+            }
+        }
+
         private void ToggleExpanded()
         {
             SetExpanded(!isExpanded);
@@ -257,8 +314,11 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            foreach (var section in propertySections)
+            for (var sectionIndex = 0;
+                 sectionIndex < propertySections.Length;
+                 sectionIndex++)
             {
+                var section = propertySections[sectionIndex];
                 if (section?.CategoryToggle == null)
                 {
                     continue;
@@ -268,15 +328,23 @@ namespace MiniCivilization.World.Editing
                     OnPropertySelectionChanged);
                 section.CategoryToggle.onValueChanged.AddListener(
                     OnPropertySelectionChanged);
-                foreach (var detailToggle in section.DetailToggles)
+                for (var detailIndex = 0;
+                     detailIndex < section.DetailToggles.Count;
+                     detailIndex++)
                 {
+                    var detailToggle = section.DetailToggles[detailIndex];
                     BindToggle(detailToggle);
+                    BindEditActionToggle(
+                        detailToggle,
+                        sectionIndex,
+                        detailIndex);
                 }
             }
         }
 
         private void UnbindEvents()
         {
+            UnbindEditActionToggles();
             if (mainButton != null)
             {
                 mainButton.onClick.RemoveListener(ToggleExpanded);
@@ -346,6 +414,138 @@ namespace MiniCivilization.World.Editing
             {
                 toggle.onValueChanged.RemoveListener(OnSelectionChanged);
             }
+        }
+
+        private void BindEditActionToggle(
+            Toggle toggle,
+            int sectionIndex,
+            int detailIndex)
+        {
+            if (toggle == null || editActionListeners.ContainsKey(toggle))
+            {
+                return;
+            }
+
+            UnityAction<bool> listener = isOn => OnEditActionToggleChanged(
+                toggle,
+                sectionIndex,
+                detailIndex,
+                isOn);
+            editActionListeners.Add(toggle, listener);
+            toggle.onValueChanged.AddListener(listener);
+        }
+
+        private void UnbindEditActionToggles()
+        {
+            foreach (var pair in editActionListeners)
+            {
+                if (pair.Key != null)
+                {
+                    pair.Key.onValueChanged.RemoveListener(pair.Value);
+                }
+            }
+
+            editActionListeners.Clear();
+        }
+
+        private void OnEditActionToggleChanged(
+            Toggle source,
+            int sectionIndex,
+            int detailIndex,
+            bool isOn)
+        {
+            if (!isOn
+                && HasAnotherActiveDetail(sectionIndex, source))
+            {
+                return;
+            }
+
+            if (!TryCreateEditAction(
+                    sectionIndex,
+                    detailIndex,
+                    out var action))
+            {
+                return;
+            }
+
+            EditActionRequested?.Invoke(action);
+        }
+
+        private bool HasAnotherActiveDetail(
+            int sectionIndex,
+            Toggle source)
+        {
+            if (propertySections == null
+                || (uint)sectionIndex >= propertySections.Length
+                || propertySections[sectionIndex] == null)
+            {
+                return false;
+            }
+
+            foreach (var toggle in propertySections[sectionIndex].DetailToggles)
+            {
+                if (toggle != null && toggle != source && toggle.isOn)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryCreateEditAction(
+            int sectionIndex,
+            int detailIndex,
+            out WorldEditAction action)
+        {
+            action = default;
+            if (sectionIndex == 0
+                && (uint)detailIndex <= (uint)TerrainEditOperation.Remove)
+            {
+                action = WorldEditAction.Terrain(
+                    (TerrainEditOperation)detailIndex);
+                return true;
+            }
+
+            if (sectionIndex == 1
+                && detailIndex >= 0
+                && detailIndex < (int)BiomeType.Mountain)
+            {
+                action = WorldEditAction.SetBiome(
+                    (BiomeType)(detailIndex + 1));
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryGetActionLocation(
+            WorldEditAction action,
+            out int sectionIndex,
+            out int detailIndex)
+        {
+            sectionIndex = -1;
+            detailIndex = -1;
+            switch (action.PropertyGroup)
+            {
+                case WorldEditPropertyGroup.Terrain:
+                    sectionIndex = 0;
+                    detailIndex = (int)action.TerrainOperation;
+                    break;
+                case WorldEditPropertyGroup.Biome
+                    when action.Biome > BiomeType.None:
+                    sectionIndex = 1;
+                    detailIndex = (int)action.Biome - 1;
+                    break;
+                default:
+                    return false;
+            }
+
+            return propertySections != null
+                && (uint)sectionIndex < propertySections.Length
+                && propertySections[sectionIndex] != null
+                && (uint)detailIndex
+                    < propertySections[sectionIndex].DetailToggles.Count;
         }
 
         private void RefreshPropertyDetailPanels()

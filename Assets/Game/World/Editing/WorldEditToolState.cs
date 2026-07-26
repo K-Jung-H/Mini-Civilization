@@ -1,4 +1,5 @@
 using System;
+using MiniCivilization.World.Domain;
 using UnityEngine;
 
 namespace MiniCivilization.World.Editing
@@ -17,6 +18,55 @@ namespace MiniCivilization.World.Editing
         Biome,
         Water,
         Surface
+    }
+
+    public enum TerrainEditOperation : byte
+    {
+        Raise,
+        Lower,
+        Add,
+        Remove
+    }
+
+    public readonly struct WorldEditAction : IEquatable<WorldEditAction>
+    {
+        public readonly WorldEditPropertyGroup PropertyGroup;
+        public readonly TerrainEditOperation TerrainOperation;
+        public readonly BiomeType Biome;
+
+        public bool IsSupported =>
+            PropertyGroup == WorldEditPropertyGroup.Terrain
+            || PropertyGroup == WorldEditPropertyGroup.Biome;
+
+        private WorldEditAction(
+            WorldEditPropertyGroup propertyGroup,
+            TerrainEditOperation terrainOperation,
+            BiomeType biome)
+        {
+            PropertyGroup = propertyGroup;
+            TerrainOperation = terrainOperation;
+            Biome = biome;
+        }
+
+        public static WorldEditAction Terrain(TerrainEditOperation operation) =>
+            new(WorldEditPropertyGroup.Terrain, operation, BiomeType.None);
+
+        public static WorldEditAction SetBiome(BiomeType biome) =>
+            new(WorldEditPropertyGroup.Biome, default, biome);
+
+        public bool Equals(WorldEditAction other) =>
+            PropertyGroup == other.PropertyGroup
+            && TerrainOperation == other.TerrainOperation
+            && Biome == other.Biome;
+
+        public override bool Equals(object obj) =>
+            obj is WorldEditAction other && Equals(other);
+
+        public override int GetHashCode() =>
+            HashCode.Combine(
+                (byte)PropertyGroup,
+                (byte)TerrainOperation,
+                (ushort)Biome);
     }
 
     public readonly struct WorldEditToolSnapshot :

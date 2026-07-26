@@ -66,10 +66,16 @@ namespace MiniCivilization.World.Editor
                         ?.GetComponent<WorldEditToolState>() != null
                     && root.transform.Find("World Editing")
                         ?.GetComponent<WorldEditInputController>() != null
+                    && root.transform.Find("World Editing")
+                        ?.GetComponent<WorldEditApplyController>() != null
                     && root.transform.Find("World Editing/Selection Preview")
                         ?.GetComponent<WorldEditWireframeRenderer>() != null
                     && root.transform.Find(
-                        "World Interaction/Highlight Root/Highlight") != null
+                        "World Interaction/Highlight Root/Highlight")
+                        ?.GetComponent<MeshFilter>() != null
+                    && root.transform.Find(
+                        "World Interaction/Highlight Root/Highlight")
+                        ?.GetComponent<MeshRenderer>() != null
                     && root.transform.Find(
                         "World Interaction/Highlight Root/Hover Highlight") == null
                     && root.transform.Find(
@@ -151,7 +157,10 @@ namespace MiniCivilization.World.Editor
                     (float)UnityEngine.Rendering.CompareFunction.Always);
             }
 
-            var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            var activeScene = SceneManager.GetActiveScene();
+            var scene = activeScene.IsValid() && activeScene.path == ScenePath
+                ? activeScene
+                : EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             var worldObject = GameObject.Find("World System")
                 ?? GameObject.Find("World Generator")
                 ?? new GameObject("World System");
@@ -186,6 +195,10 @@ namespace MiniCivilization.World.Editor
                 editingObject,
                 out _);
             var editInputController = MoveOrAdd<WorldEditInputController>(
+                worldObject,
+                editingObject,
+                out _);
+            var editApplyController = MoveOrAdd<WorldEditApplyController>(
                 worldObject,
                 editingObject,
                 out _);
@@ -292,6 +305,10 @@ namespace MiniCivilization.World.Editor
                 manager,
                 editToolState,
                 selectionState);
+            editApplyController.Configure(
+                editController,
+                selectionState,
+                editToolbar);
             interactionController.Configure(
                 camera,
                 manager,
@@ -315,6 +332,7 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(editController);
             EditorUtility.SetDirty(editToolState);
             EditorUtility.SetDirty(editInputController);
+            EditorUtility.SetDirty(editApplyController);
             EditorUtility.SetDirty(wireframeRenderer);
             EditorUtility.SetDirty(previewFilter);
             EditorUtility.SetDirty(previewRenderer);
@@ -1475,17 +1493,26 @@ namespace MiniCivilization.World.Editor
                 child.SetParent(parent, false);
             }
 
-            var filter = child.GetComponent<MeshFilter>()
-                ?? child.gameObject.AddComponent<MeshFilter>();
-            if (filter.sharedMesh != null
-                && !AssetDatabase.Contains(filter.sharedMesh))
+            var filter = child.GetComponent<MeshFilter>();
+            if (filter == null)
             {
-                Object.DestroyImmediate(filter.sharedMesh);
-                filter.sharedMesh = null;
+                filter = child.gameObject.AddComponent<MeshFilter>();
             }
 
-            var renderer = child.GetComponent<MeshRenderer>()
-                ?? child.gameObject.AddComponent<MeshRenderer>();
+            var staleMesh = filter.sharedMesh;
+            if (staleMesh != null
+                && !AssetDatabase.Contains(staleMesh))
+            {
+                filter.sharedMesh = null;
+                Object.DestroyImmediate(staleMesh);
+            }
+
+            var renderer = child.GetComponent<MeshRenderer>();
+            if (renderer == null)
+            {
+                renderer = child.gameObject.AddComponent<MeshRenderer>();
+            }
+
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
             renderer.enabled = false;

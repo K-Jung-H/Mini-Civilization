@@ -627,6 +627,42 @@ namespace MiniCivilization.World.Editing
                     cell));
         }
 
+        public bool RaiseColumn(int x, int z)
+        {
+            EnsureColumn(x, z);
+            if (!TryGetOccupiedRange(x, z, out var minimumY, out var maximumY)
+                || maximumY >= world.Height - 1)
+            {
+                return false;
+            }
+
+            var lowestCell = GetPendingCell(x, minimumY, z);
+            for (var y = maximumY; y >= minimumY; y--)
+            {
+                SetCell(x, y + 1, z, GetPendingCell(x, y, z));
+            }
+
+            SetCell(x, minimumY, z, lowestCell);
+            return true;
+        }
+
+        public bool LowerColumn(int x, int z)
+        {
+            EnsureColumn(x, z);
+            if (!TryGetOccupiedRange(x, z, out var minimumY, out var maximumY))
+            {
+                return false;
+            }
+
+            for (var y = minimumY; y < maximumY; y++)
+            {
+                SetCell(x, y, z, GetPendingCell(x, y + 1, z));
+            }
+
+            SetCell(x, maximumY, z, default);
+            return true;
+        }
+
         public void SetSolidHeight(
             int x,
             int z,
@@ -829,6 +865,38 @@ namespace MiniCivilization.World.Editing
                 ? change.Current
                 : world.GetCell(x, y, z);
         }
+
+        private bool TryGetOccupiedRange(
+            int x,
+            int z,
+            out int minimumY,
+            out int maximumY)
+        {
+            minimumY = -1;
+            maximumY = -1;
+            for (var y = 0; y < world.Height; y++)
+            {
+                if (!IsOccupied(GetPendingCell(x, y, z)))
+                {
+                    continue;
+                }
+
+                if (minimumY < 0)
+                {
+                    minimumY = y;
+                }
+
+                maximumY = y;
+            }
+
+            return minimumY >= 0;
+        }
+
+        private static bool IsOccupied(CellData cell) =>
+            cell.HasSolid
+            || cell.HasWater
+            || cell.Geology != CellMaterialType.None
+            || cell.DepositIndex != 0;
 
         private ColumnEnvironmentData GetPendingEnvironment(int x, int z)
         {
