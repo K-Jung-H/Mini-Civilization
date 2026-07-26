@@ -56,14 +56,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             var normal = cross.normalized;
-            var tangentDirection = Vector3.ProjectOnPlane(Vector3.right, normal);
-            if (tangentDirection.sqrMagnitude < 0.0001f)
-            {
-                tangentDirection = Vector3.ProjectOnPlane(Vector3.forward, normal);
-            }
-
-            tangentDirection.Normalize();
-            var tangent = new Vector4(tangentDirection.x, tangentDirection.y, tangentDirection.z, 1f);
+            var tangent = ResolveTangent(in a, in b, in c, normal);
             BuildTriangleTextureLayout(
                 in a.Appearance,
                 in b.Appearance,
@@ -77,6 +70,55 @@ namespace MiniCivilization.World.Meshing
             indices.Add(AddVertex(b, normal, tangent, layers, weightsB, scales));
             indices.Add(AddVertex(c, normal, tangent, layers, weightsC, scales));
             triangleMetadata.Add(currentTriangleMetadata);
+        }
+
+        private static Vector4 ResolveTangent(
+            in SurfaceVertex a,
+            in SurfaceVertex b,
+            in SurfaceVertex c,
+            Vector3 normal)
+        {
+            var edge1 = b.Position - a.Position;
+            var edge2 = c.Position - a.Position;
+            var uvEdge1 = b.Uv - a.Uv;
+            var uvEdge2 = c.Uv - a.Uv;
+            var determinant = uvEdge1.x * uvEdge2.y
+                - uvEdge1.y * uvEdge2.x;
+
+            if (Mathf.Abs(determinant) > 0.000001f)
+            {
+                var inverse = 1f / determinant;
+                var tangentDirection =
+                    (edge1 * uvEdge2.y - edge2 * uvEdge1.y) * inverse;
+                var bitangentDirection =
+                    (edge2 * uvEdge1.x - edge1 * uvEdge2.x) * inverse;
+                tangentDirection = Vector3.ProjectOnPlane(
+                    tangentDirection,
+                    normal);
+                if (tangentDirection.sqrMagnitude > 0.000001f)
+                {
+                    tangentDirection.Normalize();
+                    var handedness = Vector3.Dot(
+                        Vector3.Cross(normal, tangentDirection),
+                        bitangentDirection) < 0f
+                            ? -1f
+                            : 1f;
+                    return new Vector4(
+                        tangentDirection.x,
+                        tangentDirection.y,
+                        tangentDirection.z,
+                        handedness);
+                }
+            }
+
+            var fallback = Vector3.ProjectOnPlane(Vector3.right, normal);
+            if (fallback.sqrMagnitude < 0.0001f)
+            {
+                fallback = Vector3.ProjectOnPlane(Vector3.forward, normal);
+            }
+
+            fallback.Normalize();
+            return new Vector4(fallback.x, fallback.y, fallback.z, 1f);
         }
 
         internal void AddTriangleFacing(

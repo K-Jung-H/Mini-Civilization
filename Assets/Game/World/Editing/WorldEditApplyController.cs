@@ -17,7 +17,8 @@ namespace MiniCivilization.World.Editing
         private readonly List<CellCoordinate> selectedCells = new();
         private readonly List<CellCoordinate> remappedCells = new();
         private readonly HashSet<int> selectedColumns = new();
-        private readonly HashSet<int> shiftedColumns = new();
+        private readonly HashSet<int> selectedTerrainCells = new();
+        private readonly Dictionary<int, int> shiftedColumnBottoms = new();
 
         private bool isSubscribed;
 
@@ -51,7 +52,16 @@ namespace MiniCivilization.World.Editing
             }
 
             toolbarView.EditActionRequested += OnEditActionRequested;
+            toolbarView.ExpandedChanged += OnExpandedChanged;
+            toolbarView.UndoRequested += OnUndoRequested;
+            toolbarView.RedoRequested += OnRedoRequested;
+            if (editController != null)
+            {
+                editController.HistoryChanged += RefreshHistoryButtons;
+            }
+
             isSubscribed = true;
+            RefreshHistoryButtons();
         }
 
         private void Unsubscribe()
@@ -64,9 +74,48 @@ namespace MiniCivilization.World.Editing
             if (toolbarView != null)
             {
                 toolbarView.EditActionRequested -= OnEditActionRequested;
+                toolbarView.ExpandedChanged -= OnExpandedChanged;
+                toolbarView.UndoRequested -= OnUndoRequested;
+                toolbarView.RedoRequested -= OnRedoRequested;
+            }
+
+            if (editController != null)
+            {
+                editController.HistoryChanged -= RefreshHistoryButtons;
             }
 
             isSubscribed = false;
+        }
+
+        private void OnExpandedChanged(bool expanded)
+        {
+            if (expanded)
+            {
+                return;
+            }
+
+            selectionState?.ClearEditSelected();
+            editController?.ClearHistory();
+            RefreshHistoryButtons();
+        }
+
+        private void OnUndoRequested()
+        {
+            editController?.Undo();
+            RefreshHistoryButtons();
+        }
+
+        private void OnRedoRequested()
+        {
+            editController?.Redo();
+            RefreshHistoryButtons();
+        }
+
+        private void RefreshHistoryButtons()
+        {
+            toolbarView?.SetHistoryAvailability(
+                editController != null && editController.CanUndo,
+                editController != null && editController.CanRedo);
         }
 
         private void OnEditActionRequested(WorldEditAction action)
@@ -108,7 +157,8 @@ namespace MiniCivilization.World.Editing
             TerrainEditOperation operation)
         {
             selectedColumns.Clear();
-            shiftedColumns.Clear();
+            selectedTerrainCells.Clear();
+            shiftedColumnBottoms.Clear();
             var transaction = editController.BeginTransaction();
             try
             {
@@ -134,14 +184,14 @@ namespace MiniCivilization.World.Editing
 
                         break;
                     case TerrainEditOperation.Remove:
+                        selectedCells.Sort(CompareCellsHighestFirst);
                         for (var index = 0; index < selectedCells.Count; index++)
                         {
                             var coordinate = selectedCells[index];
-                            transaction.SetCell(
+                            transaction.TryClearCell(
                                 coordinate.X,
                                 coordinate.Y,
-                                coordinate.Z,
-                                default);
+                                coordinate.Z);
                         }
 
                         break;
@@ -150,11 +200,33 @@ namespace MiniCivilization.World.Editing
                         for (var index = 0; index < selectedCells.Count; index++)
                         {
                             var coordinate = selectedCells[index];
+                            if (!world.GetCell(
+                                    coordinate.X,
+                                    coordinate.Y,
+                                    coordinate.Z).HasSolid)
+                            {
+                                continue;
+                            }
+
+                            selectedTerrainCells.Add(
+                                WorldIndex.EncodeCell(
+                                    world,
+                                    coordinate.X,
+                                    coordinate.Y,
+                                    coordinate.Z));
                             var columnIndex = WorldIndex.EncodeColumn(
                                 world,
                                 coordinate.X,
                                 coordinate.Z);
                             if (!selectedColumns.Add(columnIndex))
+                            {
+                                continue;
+                            }
+
+                            if (!transaction.TryGetLowestPendingSolidY(
+                                    coordinate.X,
+                                    coordinate.Z,
+                                    out var lowestSolidY))
                             {
                                 continue;
                             }
@@ -168,7 +240,9 @@ namespace MiniCivilization.World.Editing
                                     coordinate.Z);
                             if (shifted)
                             {
-                                shiftedColumns.Add(columnIndex);
+                                shiftedColumnBottoms.Add(
+                                    columnIndex,
+                                    lowestSolidY);
                             }
                         }
 
@@ -182,11 +256,9 @@ namespace MiniCivilization.World.Editing
 
                 var changeSet = transaction.Commit();
                 if (changeSet != null
-                    && shiftedColumns.Count > 0)
+                    && shiftedColumnBottoms.Count > 0)
                 {
-                    RemapShiftedSelection(
-                        world,
-                        operation == TerrainEditOperation.Raise ? 1 : -1);
+                    RemapShiftedSelection(world, operation);
                 }
             }
             catch
@@ -240,7 +312,9 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private void RemapShiftedSelection(WorldData world, int deltaY)
+        private void RemapShiftedSelection(
+            WorldData world,
+            TerrainEditOperation operation)
         {
             remappedCells.Clear();
             for (var index = 0; index < selectedCells.Count; index++)
@@ -250,12 +324,36 @@ namespace MiniCivilization.World.Editing
                     world,
                     coordinate.X,
                     coordinate.Z);
-                var remapped = shiftedColumns.Contains(columnIndex)
-                    ? new CellCoordinate(
-                        coordinate.X,
-                        coordinate.Y + deltaY,
-                        coordinate.Z)
-                    : coordinate;
+                var remapped = coordinate;
+                if (shiftedColumnBottoms.TryGetValue(
+                        columnIndex,
+                        out var lowestSolidY)
+                    && selectedTerrainCells.Contains(
+                        WorldIndex.EncodeCell(
+                            world,
+                            coordinate.X,
+                            coordinate.Y,
+                            coordinate.Z)))
+                {
+                    if (operation == TerrainEditOperation.Raise)
+                    {
+                        remapped = new CellCoordinate(
+                            coordinate.X,
+                            coordinate.Y + 1,
+                            coordinate.Z);
+                    }
+                    else if (operation == TerrainEditOperation.Lower)
+                    {
+                        if (coordinate.Y > lowestSolidY)
+                        {
+                            remapped = new CellCoordinate(
+                                coordinate.X,
+                                coordinate.Y - 1,
+                                coordinate.Z);
+                        }
+                    }
+                }
+
                 if (world.Contains(remapped.X, remapped.Y, remapped.Z))
                 {
                     remappedCells.Add(remapped);
@@ -285,6 +383,22 @@ namespace MiniCivilization.World.Editing
             current.Flags &= ~(CellFlags.River | CellFlags.Waterfall);
             current.Flags |= CellFlags.Generated;
             return current;
+        }
+
+        private static int CompareCellsHighestFirst(
+            CellCoordinate left,
+            CellCoordinate right)
+        {
+            var yComparison = right.Y.CompareTo(left.Y);
+            if (yComparison != 0)
+            {
+                return yComparison;
+            }
+
+            var zComparison = left.Z.CompareTo(right.Z);
+            return zComparison != 0
+                ? zComparison
+                : left.X.CompareTo(right.X);
         }
     }
 }

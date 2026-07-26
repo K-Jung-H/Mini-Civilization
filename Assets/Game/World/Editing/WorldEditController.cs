@@ -8,6 +8,9 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditController : MonoBehaviour
     {
+        [Header("History")]
+        [SerializeField, Min(1)] private int historyLimit = 30;
+
         private readonly Stack<WorldEditRecord> undoRecords = new();
         private readonly Stack<WorldEditRecord> redoRecords = new();
 
@@ -18,8 +21,17 @@ namespace MiniCivilization.World.Editing
         public bool HasActiveTransaction => activeTransaction != null;
         public bool CanUndo => activeTransaction == null && undoRecords.Count > 0;
         public bool CanRedo => activeTransaction == null && redoRecords.Count > 0;
+        public int HistoryLimit => historyLimit;
 
         public event Action<WorldChangeSet> ChangeCommitted;
+        public event Action HistoryChanged;
+
+        private void OnValidate()
+        {
+            historyLimit = Math.Max(1, historyLimit);
+            TrimHistory(undoRecords);
+            TrimHistory(redoRecords);
+        }
 
         public void Bind(WorldData world)
         {
@@ -37,8 +49,14 @@ namespace MiniCivilization.World.Editing
             activeTransaction?.Cancel();
             activeTransaction = null;
             boundWorld = null;
+            ClearHistory();
+        }
+
+        public void ClearHistory()
+        {
             undoRecords.Clear();
             redoRecords.Clear();
+            HistoryChanged?.Invoke();
         }
 
         public WorldEditTransaction BeginTransaction()
@@ -135,8 +153,20 @@ namespace MiniCivilization.World.Editing
             }
 
             var record = undoRecords.Pop();
-            ApplyRecord(record, usePreviousValues: true);
+            try
+            {
+                ApplyRecord(record, usePreviousValues: true);
+            }
+            catch
+            {
+                undoRecords.Push(record);
+                HistoryChanged?.Invoke();
+                throw;
+            }
+
             redoRecords.Push(record);
+            TrimHistory(redoRecords);
+            HistoryChanged?.Invoke();
             return true;
         }
 
@@ -148,8 +178,20 @@ namespace MiniCivilization.World.Editing
             }
 
             var record = redoRecords.Pop();
-            ApplyRecord(record, usePreviousValues: false);
+            try
+            {
+                ApplyRecord(record, usePreviousValues: false);
+            }
+            catch
+            {
+                redoRecords.Push(record);
+                HistoryChanged?.Invoke();
+                throw;
+            }
+
             undoRecords.Push(record);
+            TrimHistory(undoRecords);
+            HistoryChanged?.Invoke();
             return true;
         }
 
@@ -204,6 +246,12 @@ namespace MiniCivilization.World.Editing
                         columnIndex,
                         out var x,
                         out var z);
+                    if (!boundWorld.HasSolidCell(x, z))
+                    {
+                        throw new InvalidOperationException(
+                            $"World edit would remove every solid cell from column ({x}, {z}).");
+                    }
+
                     if (!boundWorld.IsWaterSupported(x, z))
                     {
                         throw new InvalidOperationException(
@@ -242,11 +290,28 @@ namespace MiniCivilization.World.Editing
                 undoRecords.Push(new WorldEditRecord(
                     cellChanges,
                     environmentChanges));
+                TrimHistory(undoRecords);
                 redoRecords.Clear();
+                HistoryChanged?.Invoke();
             }
 
             ChangeCommitted?.Invoke(changeSet);
             return changeSet;
+        }
+
+        private void TrimHistory(Stack<WorldEditRecord> records)
+        {
+            if (records.Count <= historyLimit)
+            {
+                return;
+            }
+
+            var ordered = records.ToArray();
+            records.Clear();
+            for (var index = historyLimit - 1; index >= 0; index--)
+            {
+                records.Push(ordered[index]);
+            }
         }
 
         private void ApplyRecord(
@@ -630,36 +695,90 @@ namespace MiniCivilization.World.Editing
         public bool RaiseColumn(int x, int z)
         {
             EnsureColumn(x, z);
-            if (!TryGetOccupiedRange(x, z, out var minimumY, out var maximumY)
-                || maximumY >= world.Height - 1)
+            if (!TryGetLowestPendingSolidY(x, z, out var lowestSolidY)
+                || !TryGetHighestPendingSolidY(x, z, out var highestSolidY)
+                || highestSolidY >= world.Height - 1)
             {
                 return false;
             }
 
-            var lowestCell = GetPendingCell(x, minimumY, z);
-            for (var y = maximumY; y >= minimumY; y--)
+            var lowestTerrain = TerrainCellState.FromCell(
+                GetPendingCell(x, lowestSolidY, z));
+            for (var y = highestSolidY; y >= lowestSolidY; y--)
             {
-                SetCell(x, y + 1, z, GetPendingCell(x, y, z));
+                var terrain = TerrainCellState.FromCell(
+                    GetPendingCell(x, y, z));
+                SetTerrainState(x, y + 1, z, terrain);
             }
 
-            SetCell(x, minimumY, z, lowestCell);
+            SetTerrainState(
+                x,
+                lowestSolidY,
+                z,
+                lowestTerrain.CreateFoundation());
+            RemoveUnsupportedWater(x, z);
             return true;
         }
 
         public bool LowerColumn(int x, int z)
         {
             EnsureColumn(x, z);
-            if (!TryGetOccupiedRange(x, z, out var minimumY, out var maximumY))
+            if (!TryGetLowestPendingSolidY(x, z, out var lowestSolidY))
             {
                 return false;
             }
 
-            for (var y = minimumY; y < maximumY; y++)
+            var removalY = lowestSolidY + 1;
+            if (removalY >= world.Height
+                || !GetPendingCell(x, removalY, z).HasSolid
+                || !TryGetHighestPendingSolidY(
+                    x,
+                    z,
+                    out var highestSolidY))
             {
-                SetCell(x, y, z, GetPendingCell(x, y + 1, z));
+                return false;
             }
 
-            SetCell(x, maximumY, z, default);
+            for (var y = lowestSolidY; y < highestSolidY; y++)
+            {
+                var terrain = TerrainCellState.FromCell(
+                    GetPendingCell(x, y + 1, z));
+                SetTerrainState(x, y, z, terrain);
+            }
+
+            SetTerrainState(
+                x,
+                highestSolidY,
+                z,
+                default);
+            RemoveUnsupportedWater(x, z);
+            return true;
+        }
+
+        public bool TryClearCell(int x, int y, int z)
+        {
+            EnsureOpen();
+            if (!world.Contains(x, y, z))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(x),
+                    $"Cell ({x}, {y}, {z}) is outside the world.");
+            }
+
+            var current = GetPendingCell(x, y, z);
+            if (current.Equals(default(CellData)))
+            {
+                return false;
+            }
+
+            if (current.HasSolid
+                && TryGetLowestPendingSolidY(x, z, out var lowestSolidY)
+                && y == lowestSolidY)
+            {
+                return false;
+            }
+
+            SetCell(x, y, z, default);
             return true;
         }
 
@@ -866,37 +985,152 @@ namespace MiniCivilization.World.Editing
                 : world.GetCell(x, y, z);
         }
 
-        private bool TryGetOccupiedRange(
+        public bool TryGetLowestPendingSolidY(
             int x,
             int z,
-            out int minimumY,
-            out int maximumY)
+            out int lowestY)
         {
-            minimumY = -1;
-            maximumY = -1;
+            EnsureColumn(x, z);
             for (var y = 0; y < world.Height; y++)
             {
-                if (!IsOccupied(GetPendingCell(x, y, z)))
+                if (GetPendingCell(x, y, z).HasSolid)
+                {
+                    lowestY = y;
+                    return true;
+                }
+            }
+
+            lowestY = -1;
+            return false;
+        }
+
+        private bool TryGetHighestPendingSolidY(
+            int x,
+            int z,
+            out int highestY)
+        {
+            EnsureColumn(x, z);
+            for (var y = world.Height - 1; y >= 0; y--)
+            {
+                if (GetPendingCell(x, y, z).HasSolid)
+                {
+                    highestY = y;
+                    return true;
+                }
+            }
+
+            highestY = -1;
+            return false;
+        }
+
+        private void SetTerrainState(
+            int x,
+            int y,
+            int z,
+            in TerrainCellState terrain)
+        {
+            var cell = GetPendingCell(x, y, z);
+            terrain.ApplyTo(ref cell);
+            SetCell(x, y, z, cell);
+        }
+
+        private void RemoveUnsupportedWater(int x, int z)
+        {
+            for (var y = 1; y < world.Height; y++)
+            {
+                var cell = GetPendingCell(x, y, z);
+                if (!cell.HasWater || cell.HasSolid)
                 {
                     continue;
                 }
 
-                if (minimumY < 0)
+                var below = GetPendingCell(x, y - 1, z);
+                if (below.SolidFill + below.WaterFill
+                    >= WorldGrid.HeightStepsPerCell)
                 {
-                    minimumY = y;
+                    continue;
                 }
 
-                maximumY = y;
+                ClearWater(ref cell);
+                SetCell(x, y, z, cell);
             }
-
-            return minimumY >= 0;
         }
 
-        private static bool IsOccupied(CellData cell) =>
-            cell.HasSolid
-            || cell.HasWater
-            || cell.Geology != CellMaterialType.None
-            || cell.DepositIndex != 0;
+        private static void ClearWater(ref CellData cell)
+        {
+            cell.Water = WaterType.None;
+            cell.WaterFill = 0;
+            cell.Flags &= ~(CellFlags.River | CellFlags.Waterfall);
+        }
+
+        private readonly struct TerrainCellState
+        {
+            private readonly CellMaterialType material;
+            private readonly SurfaceType surface;
+            private readonly CellMaterialType geology;
+            private readonly ushort depositIndex;
+            private readonly byte solidFill;
+            private readonly CellFlags flags;
+
+            private bool HasSolid => solidFill > 0;
+
+            private TerrainCellState(
+                CellMaterialType material,
+                SurfaceType surface,
+                CellMaterialType geology,
+                ushort depositIndex,
+                byte solidFill,
+                CellFlags flags)
+            {
+                this.material = material;
+                this.surface = surface;
+                this.geology = geology;
+                this.depositIndex = depositIndex;
+                this.solidFill = solidFill;
+                this.flags = flags & CellFlags.Generated;
+            }
+
+            public static TerrainCellState FromCell(in CellData cell) =>
+                new(
+                    cell.Material,
+                    cell.Surface,
+                    cell.Geology,
+                    cell.DepositIndex,
+                    cell.SolidFill,
+                    cell.Flags);
+
+            public TerrainCellState CreateFoundation() =>
+                new(
+                    material,
+                    SurfaceType.None,
+                    geology,
+                    depositIndex,
+                    (byte)WorldGrid.HeightStepsPerCell,
+                    flags);
+
+            public void ApplyTo(ref CellData cell)
+            {
+                cell.Material = material;
+                cell.Surface = surface;
+                cell.Geology = geology;
+                cell.DepositIndex = depositIndex;
+                cell.SolidFill = solidFill;
+                cell.Flags = (cell.Flags
+                    & (CellFlags.Generated
+                        | CellFlags.River
+                        | CellFlags.Waterfall))
+                    | flags;
+
+                if (HasSolid)
+                {
+                    ClearWater(ref cell);
+                }
+                else if (!cell.HasWater)
+                {
+                    cell.Flags = CellFlags.None;
+                }
+            }
+        }
 
         private ColumnEnvironmentData GetPendingEnvironment(int x, int z)
         {

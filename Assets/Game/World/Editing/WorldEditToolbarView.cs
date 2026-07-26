@@ -37,7 +37,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 5;
+        public const int CurrentLayoutVersion = 6;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
@@ -51,6 +51,11 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private TMP_Text mainButtonLabel;
         [SerializeField] private TMP_FontAsset labelFont;
         [SerializeField] private bool startExpanded;
+
+        [Header("History")]
+        [SerializeField] private RectTransform historyPanel;
+        [SerializeField] private Button undoButton;
+        [SerializeField] private Button redoButton;
 
         [Header("Edit Mode")]
         [SerializeField] private ToggleGroup modeToggleGroup;
@@ -71,7 +76,10 @@ namespace MiniCivilization.World.Editing
             editActionListeners = new();
 
         public event Action SelectionChanged;
+        public event Action<bool> ExpandedChanged;
         public event Action<WorldEditAction> EditActionRequested;
+        public event Action UndoRequested;
+        public event Action RedoRequested;
 
         public bool IsExpanded => isExpanded;
         public int LayoutVersion => layoutVersion;
@@ -80,6 +88,9 @@ namespace MiniCivilization.World.Editing
         public RectTransform ExpandedContent => expandedContent;
         public RectTransform PropertyDetailPanel => propertyDetailPanel;
         public Button MainButton => mainButton;
+        public RectTransform HistoryPanel => historyPanel;
+        public Button UndoButton => undoButton;
+        public Button RedoButton => redoButton;
         public ToggleGroup ModeToggleGroup => modeToggleGroup;
         public Toggle AreaSelectionToggle => areaSelectionToggle;
         public Toggle BrushToggle => brushToggle;
@@ -107,6 +118,9 @@ namespace MiniCivilization.World.Editing
             RectTransform detailPanel,
             Button menu,
             TMP_Text menuLabel,
+            RectTransform history,
+            Button undo,
+            Button redo,
             TMP_FontAsset font,
             ToggleGroup modeGroup,
             Toggle areaSelection,
@@ -123,6 +137,9 @@ namespace MiniCivilization.World.Editing
             propertyDetailPanel = detailPanel;
             mainButton = menu;
             mainButtonLabel = menuLabel;
+            historyPanel = history;
+            undoButton = undo;
+            redoButton = redo;
             labelFont = font;
             modeToggleGroup = modeGroup;
             areaSelectionToggle = areaSelection;
@@ -141,8 +158,22 @@ namespace MiniCivilization.World.Editing
             }
         }
 
+        public void SetHistoryAvailability(bool canUndo, bool canRedo)
+        {
+            if (undoButton != null)
+            {
+                undoButton.interactable = canUndo;
+            }
+
+            if (redoButton != null)
+            {
+                redoButton.interactable = canRedo;
+            }
+        }
+
         public void SetExpanded(bool expanded)
         {
+            var changed = isExpanded != expanded;
             isExpanded = expanded;
             if (expandedContent != null)
             {
@@ -161,6 +192,10 @@ namespace MiniCivilization.World.Editing
 
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
+            if (changed)
+            {
+                ExpandedChanged?.Invoke(isExpanded);
+            }
         }
 
         public int GetSelectedModeIndex()
@@ -299,6 +334,18 @@ namespace MiniCivilization.World.Editing
                 mainButton.onClick.AddListener(ToggleExpanded);
             }
 
+            if (undoButton != null)
+            {
+                undoButton.onClick.RemoveListener(RequestUndo);
+                undoButton.onClick.AddListener(RequestUndo);
+            }
+
+            if (redoButton != null)
+            {
+                redoButton.onClick.RemoveListener(RequestRedo);
+                redoButton.onClick.AddListener(RequestRedo);
+            }
+
             BindToggle(areaSelectionToggle);
             BindToggle(brushToggle);
             if (brushSizeToggles != null)
@@ -350,6 +397,16 @@ namespace MiniCivilization.World.Editing
                 mainButton.onClick.RemoveListener(ToggleExpanded);
             }
 
+            if (undoButton != null)
+            {
+                undoButton.onClick.RemoveListener(RequestUndo);
+            }
+
+            if (redoButton != null)
+            {
+                redoButton.onClick.RemoveListener(RequestRedo);
+            }
+
             UnbindToggle(areaSelectionToggle);
             UnbindToggle(brushToggle);
             if (brushSizeToggles != null)
@@ -389,6 +446,16 @@ namespace MiniCivilization.World.Editing
         {
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
+        }
+
+        private void RequestUndo()
+        {
+            UndoRequested?.Invoke();
+        }
+
+        private void RequestRedo()
+        {
+            RedoRequested?.Invoke();
         }
 
         private void OnSelectionChanged(bool _)
@@ -551,6 +618,11 @@ namespace MiniCivilization.World.Editing
         private void RefreshPropertyDetailPanels()
         {
             RefreshBrushSizePanel();
+            if (historyPanel != null)
+            {
+                historyPanel.gameObject.SetActive(isExpanded);
+            }
+
             if (propertySections == null)
             {
                 return;

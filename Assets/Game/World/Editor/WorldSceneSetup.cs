@@ -102,6 +102,12 @@ namespace MiniCivilization.World.Editor
                         "World UI/Canvas/World Edit UI/Property Detail Panel/Brush Size Details")
                         != null
                     && root.transform.Find(
+                        "World UI/Canvas/World Edit UI/Property Detail Panel/History Details/Undo")
+                        ?.GetComponent<Button>() != null
+                    && root.transform.Find(
+                        "World UI/Canvas/World Edit UI/Property Detail Panel/History Details/Redo")
+                        ?.GetComponent<Button>() != null
+                    && root.transform.Find(
                             "World UI/Canvas/World Edit UI/Toolbar/Main Button/Label")
                         ?.GetComponent<TextMeshProUGUI>() != null
                     && toolbarView != null
@@ -918,7 +924,7 @@ namespace MiniCivilization.World.Editor
                 "Surface Details",
                 "표면 세부 종류",
                 toolbarFont,
-                -156f,
+                -228f,
                 new[] { "없음", "지면", "절벽", "도로", "강바닥", "호수", "해저", "해안" },
                 new[]
                 {
@@ -937,6 +943,11 @@ namespace MiniCivilization.World.Editor
                 -444f,
                 out var brushSizeGroup,
                 out var brushSizeToggles);
+            var historyPanel = EnsureHistorySection(
+                detailHost,
+                toolbarFont,
+                out var undoButton,
+                out var redoButton);
 
             area.SetIsOnWithoutNotify(true);
             brush.SetIsOnWithoutNotify(false);
@@ -951,6 +962,9 @@ namespace MiniCivilization.World.Editor
                 detailHost,
                 mainButton,
                 mainLabel,
+                historyPanel,
+                undoButton,
+                redoButton,
                 toolbarFont,
                 modeGroup,
                 area,
@@ -967,6 +981,82 @@ namespace MiniCivilization.World.Editor
                     surfaceSection
                 });
             return view;
+        }
+
+        private static RectTransform EnsureHistorySection(
+            RectTransform detailHost,
+            TMP_FontAsset font,
+            out Button undoButton,
+            out Button redoButton)
+        {
+            const float size = 64f;
+            const float gap = 8f;
+            const float titleHeight = 30f;
+            const float titleGap = 6f;
+            const float horizontalPadding = 16f;
+            const float bottomPadding = 16f;
+            const int rowCount = 2;
+            var buttonHeight = rowCount * size + (rowCount - 1) * gap;
+            var panel = EnsureUiRect(
+                detailHost,
+                "History Details",
+                typeof(CanvasRenderer),
+                typeof(Image));
+            ClearUiChildren(panel);
+            SetRect(
+                panel,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(6f, 94f),
+                new Vector2(
+                    size + horizontalPadding * 2f,
+                    bottomPadding + buttonHeight + titleGap + titleHeight));
+            panel.GetComponent<Image>().color =
+                new Color(0.055f, 0.065f, 0.08f, 0.96f);
+
+            var title = EnsureToolbarLabel(
+                panel,
+                "Title",
+                "\uAE30\uB85D",
+                font,
+                15,
+                FontStyles.Bold);
+            SetBottomLeftRect(
+                title.transform as RectTransform,
+                horizontalPadding,
+                bottomPadding + buttonHeight + titleGap,
+                size,
+                titleHeight);
+
+            undoButton = EnsureToolbarButton(
+                panel,
+                "Undo",
+                "\uC2E4\uD589\n\uCDE8\uC18C",
+                font,
+                new Color(0.72f, 0.40f, 0.22f, 1f));
+            SetBottomLeftRect(
+                undoButton.transform as RectTransform,
+                horizontalPadding,
+                bottomPadding,
+                size,
+                size);
+
+            redoButton = EnsureToolbarButton(
+                panel,
+                "Redo",
+                "\uB2E4\uC2DC\n\uC2E4\uD589",
+                font,
+                new Color(0.26f, 0.48f, 0.70f, 1f));
+            SetBottomLeftRect(
+                redoButton.transform as RectTransform,
+                horizontalPadding,
+                bottomPadding + size + gap,
+                size,
+                size);
+            undoButton.interactable = false;
+            redoButton.interactable = false;
+            return panel;
         }
 
         private static TMP_FontAsset ResolveToolbarFont(

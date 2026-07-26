@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Interaction;
+using MiniCivilization.World.Meshing;
 using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
@@ -32,6 +33,7 @@ namespace MiniCivilization.World.Presentation
         private readonly HashSet<Vector2Int> pendingMaterialPatches = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
+        private WorldExposureCache exposureCache;
         private int activeRenderPatchSize;
 
         public WorldData BoundWorld => boundWorld;
@@ -63,6 +65,7 @@ namespace MiniCivilization.World.Presentation
             Unbind();
 
             boundWorld = world;
+            exposureCache = new WorldExposureCache(world);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             LastAppliedChangeId = world.CurrentChangeId;
@@ -79,6 +82,7 @@ namespace MiniCivilization.World.Presentation
             ValidateReferences();
             Unbind();
             boundWorld = world;
+            exposureCache = new WorldExposureCache(world);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.PreparedScene;
             LastAppliedChangeId = world.CurrentChangeId;
@@ -130,6 +134,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             boundWorld = world;
+            exposureCache = new WorldExposureCache(world);
             activeRenderPatchSize = preparedPatchSize;
             chunkViews = adoptedViews;
             BindingMode = WorldRenderBindingMode.PreparedScene;
@@ -166,6 +171,7 @@ namespace MiniCivilization.World.Presentation
                 (changeSet.ChangeTypes & geometryChanges) != 0;
             var rebuildMaterials =
                 (changeSet.ChangeTypes & materialChanges) != 0;
+            exposureCache?.ApplyChanges(changeSet);
 
             if ((rebuildGeometry || rebuildMaterials)
                 && activeRenderPatchSize > 0)
@@ -201,6 +207,7 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
+            exposureCache = new WorldExposureCache(boundWorld);
             ClearViews();
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             BuildAllPatches(persistentSceneObjects: false);
@@ -303,6 +310,7 @@ namespace MiniCivilization.World.Presentation
         private void DetachBoundWorld(bool clearViews)
         {
             boundWorld = null;
+            exposureCache = null;
             activeRenderPatchSize = 0;
             BindingMode = WorldRenderBindingMode.None;
             LastAppliedChangeId = WorldChangeId.None;
@@ -375,7 +383,8 @@ namespace MiniCivilization.World.Presentation
                 waterfallMaterial,
                 generateColliders,
                 interactionLayer,
-                rebuildInteraction);
+                rebuildInteraction,
+                exposureCache);
         }
 
         private int ResolveRenderPatchSize(WorldData world)

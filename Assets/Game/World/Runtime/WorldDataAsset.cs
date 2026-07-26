@@ -11,6 +11,8 @@ namespace MiniCivilization.World.Runtime
         menuName = "Mini Civilization/World Data")]
     public sealed class WorldDataAsset : ScriptableObject
     {
+        private const int CurrentPreparedMeshSchema = 2;
+
         [SerializeField, HideInInspector] private byte[] serializedWorld =
             Array.Empty<byte>();
         [SerializeField, HideInInspector] private int seed;
@@ -22,6 +24,7 @@ namespace MiniCivilization.World.Runtime
         [SerializeField, HideInInspector] private bool hasPreparedRenderCache;
         [SerializeField, HideInInspector] private int preparedPatchSize;
         [SerializeField, HideInInspector] private int preparedPatchCount;
+        [SerializeField, HideInInspector] private int preparedMeshSchema;
         [SerializeField, HideInInspector] private List<Mesh> preparedMeshes = new();
 
         [NonSerialized] private WorldData runtimeData;
@@ -35,7 +38,8 @@ namespace MiniCivilization.World.Runtime
         public int ChunkSizeY => runtimeData?.ChunkSizeY ?? chunkSizeY;
         public int ChunkSizeZ => runtimeData?.ChunkSizeZ ?? chunkSizeZ;
         public int SerializedByteCount => serializedWorld?.Length ?? 0;
-        public bool HasPreparedRenderCache => hasPreparedRenderCache;
+        public bool HasPreparedRenderCache => hasPreparedRenderCache
+            && preparedMeshSchema == CurrentPreparedMeshSchema;
         public int PreparedPatchSize => preparedPatchSize;
         public int PreparedPatchCount => preparedPatchCount;
         public IReadOnlyList<Mesh> PreparedMeshes => preparedMeshes;
@@ -105,6 +109,7 @@ namespace MiniCivilization.World.Runtime
             copy.hasPreparedRenderCache = hasPreparedRenderCache;
             copy.preparedPatchSize = preparedPatchSize;
             copy.preparedPatchCount = preparedPatchCount;
+            copy.preparedMeshSchema = preparedMeshSchema;
             copy.preparedMeshes = new List<Mesh>(preparedMeshes);
             return copy;
         }
@@ -116,6 +121,7 @@ namespace MiniCivilization.World.Runtime
         {
             preparedPatchSize = Mathf.Max(0, patchSize);
             preparedPatchCount = Mathf.Max(0, patchCount);
+            preparedMeshSchema = CurrentPreparedMeshSchema;
             preparedMeshes.Clear();
             if (meshes != null)
             {
@@ -138,6 +144,7 @@ namespace MiniCivilization.World.Runtime
             hasPreparedRenderCache = false;
             preparedPatchSize = 0;
             preparedPatchCount = 0;
+            preparedMeshSchema = 0;
             preparedMeshes.Clear();
         }
 

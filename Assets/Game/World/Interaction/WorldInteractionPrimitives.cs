@@ -20,7 +20,8 @@ namespace MiniCivilization.World.Interaction
         Waterfall,
         ShoreApron,
         ApronCornerJoin,
-        ApronBridge
+        ApronBridge,
+        Bottom
     }
 
     public readonly struct SurfaceTriangleMetadata

@@ -186,6 +186,24 @@ namespace MiniCivilization.World.Domain
             return surfaceColumnMap[x + Size * z];
         }
 
+        public bool HasSolidCell(int x, int z)
+        {
+            if (!ContainsColumn(x, z))
+            {
+                return false;
+            }
+
+            for (var y = 0; y < Height; y++)
+            {
+                if (GetCell(x, y, z).HasSolid)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public void SetSurfaceColumn(int x, int z, SurfaceColumnData column)
         {
             surfaceColumnMap[x + Size * z] = column;

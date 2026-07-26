@@ -53,6 +53,106 @@ namespace MiniCivilization.World.Meshing
             return SurfaceAppearance.Lerp(row0, row1, blendZ);
         }
 
+        public static SurfaceAppearance ResolveWaterCell(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int y,
+            int z,
+            float localX,
+            float localZ)
+        {
+            ResolveAxis(localX, out var offsetX, out var blendX);
+            ResolveAxis(localZ, out var offsetZ, out var blendZ);
+            var cell = world.GetCell(x, y, z);
+            var current = ResolveWaterAppearance(catalog, cell.Water);
+            var xAppearance = ResolveWaterCellNeighbor(
+                world,
+                catalog,
+                x + offsetX,
+                y,
+                z,
+                current);
+            var zAppearance = ResolveWaterCellNeighbor(
+                world,
+                catalog,
+                x,
+                y,
+                z + offsetZ,
+                current);
+            var diagonalAppearance = ResolveWaterCellNeighbor(
+                world,
+                catalog,
+                x + offsetX,
+                y,
+                z + offsetZ,
+                current);
+            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
+            var row1 = SurfaceAppearance.Lerp(
+                zAppearance,
+                diagonalAppearance,
+                blendX);
+            return SurfaceAppearance.Lerp(row0, row1, blendZ);
+        }
+
+        public static SurfaceAppearance ResolveTerrainCell(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int y,
+            int z,
+            float localX,
+            float localZ,
+            SurfaceType? surfaceOverride = null)
+        {
+            ResolveAxis(localX, out var offsetX, out var blendX);
+            ResolveAxis(localZ, out var offsetZ, out var blendZ);
+
+            var current = ResolveTerrainCellAppearance(
+                world,
+                catalog,
+                x,
+                y,
+                z,
+                surfaceOverride,
+                default,
+                false);
+            var xAppearance = ResolveTerrainCellAppearance(
+                world,
+                catalog,
+                x + offsetX,
+                y,
+                z,
+                surfaceOverride,
+                current,
+                true);
+            var zAppearance = ResolveTerrainCellAppearance(
+                world,
+                catalog,
+                x,
+                y,
+                z + offsetZ,
+                surfaceOverride,
+                current,
+                true);
+            var diagonalAppearance = ResolveTerrainCellAppearance(
+                world,
+                catalog,
+                x + offsetX,
+                y,
+                z + offsetZ,
+                surfaceOverride,
+                current,
+                true);
+
+            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
+            var row1 = SurfaceAppearance.Lerp(
+                zAppearance,
+                diagonalAppearance,
+                blendX);
+            return SurfaceAppearance.Lerp(row0, row1, blendZ);
+        }
+
         internal static SurfaceAppearance ResolveTerrainAppearance(
             WorldSurfaceCatalog catalog,
             BiomeType biome,
@@ -162,6 +262,52 @@ namespace MiniCivilization.World.Meshing
             return column.HasWater
                 ? ResolveWaterAppearance(catalog, column.Water)
                 : fallback;
+        }
+
+        private static SurfaceAppearance ResolveWaterCellNeighbor(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int y,
+            int z,
+            in SurfaceAppearance fallback)
+        {
+            if (!world.TryGetCell(x, y, z, out var cell) || !cell.HasWater)
+            {
+                return fallback;
+            }
+
+            return ResolveWaterAppearance(catalog, cell.Water);
+        }
+
+        private static SurfaceAppearance ResolveTerrainCellAppearance(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            int x,
+            int y,
+            int z,
+            SurfaceType? surfaceOverride,
+            in SurfaceAppearance fallback,
+            bool useFallback)
+        {
+            if (!world.ContainsColumn(x, z))
+            {
+                return useFallback ? fallback : default;
+            }
+
+            if (!world.TryGetCell(x, y, z, out var cell) || !cell.HasSolid)
+            {
+                return useFallback ? fallback : default;
+            }
+
+            var surface = cell.Surface != SurfaceType.None
+                ? cell.Surface
+                : SurfaceType.Ground;
+
+            return ResolveTerrainAppearance(
+                catalog,
+                world.GetColumnEnvironment(x, z).Biome,
+                surfaceOverride ?? surface);
         }
     }
 }

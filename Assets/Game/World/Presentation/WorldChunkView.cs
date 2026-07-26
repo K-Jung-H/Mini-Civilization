@@ -51,7 +51,8 @@ namespace MiniCivilization.World.Presentation
             Material waterfallMaterial,
             bool buildCollider,
             int interactionLayer,
-            bool rebuildInteraction)
+            bool rebuildInteraction,
+            WorldExposureCache exposureCache)
         {
             this.patchX = patchX;
             this.patchZ = patchZ;
@@ -72,16 +73,27 @@ namespace MiniCivilization.World.Presentation
 
             var replacePreparedMeshes = preparedReadOnly;
             var terrainBuffers = TerrainChunkMeshBuilder.Build(
-                world, patchX, patchZ, patchSize, catalog);
+                world,
+                patchX,
+                patchZ,
+                patchSize,
+                catalog,
+                exposureCache);
             terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
                 $"Terrain [{patchX}, {patchZ}]",
                 replacePreparedMeshes ? null : terrainFilter.sharedMesh);
             terrainRenderer.sharedMaterial = terrainMaterial;
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
+            terrainRenderer.enabled = !terrainBuffers.IsEmpty;
 
             var waterBuffers = WaterChunkMeshBuilder.Build(
-                world, patchX, patchZ, patchSize, catalog);
+                world,
+                patchX,
+                patchZ,
+                patchSize,
+                catalog,
+                exposureCache);
             waterFilter.sharedMesh = waterBuffers.Surface.CreateMesh(
                 $"Water [{patchX}, {patchZ}]",
                 replacePreparedMeshes ? null : waterFilter.sharedMesh);
