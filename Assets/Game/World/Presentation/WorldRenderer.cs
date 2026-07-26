@@ -30,6 +30,7 @@ namespace MiniCivilization.World.Presentation
         [SerializeField, Range(0, 31)] private int interactionLayer = 8;
 
         private readonly HashSet<Vector2Int> pendingGeometryPatches = new();
+        private readonly HashSet<Vector2Int> pendingWaterPatches = new();
         private readonly HashSet<Vector2Int> pendingMaterialPatches = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
@@ -162,18 +163,19 @@ namespace MiniCivilization.World.Presentation
 
             const WorldChangeType geometryChanges =
                 WorldChangeType.CellStructure
-                | WorldChangeType.Surface
-                | WorldChangeType.WaterTopology;
+                | WorldChangeType.Surface;
             const WorldChangeType materialChanges =
                 WorldChangeType.Material
                 | WorldChangeType.Environment;
             var rebuildGeometry =
                 (changeSet.ChangeTypes & geometryChanges) != 0;
+            var rebuildWater =
+                (changeSet.ChangeTypes & WorldChangeType.WaterTopology) != 0;
             var rebuildMaterials =
                 (changeSet.ChangeTypes & materialChanges) != 0;
             exposureCache?.ApplyChanges(changeSet);
 
-            if ((rebuildGeometry || rebuildMaterials)
+            if ((rebuildGeometry || rebuildWater || rebuildMaterials)
                 && activeRenderPatchSize > 0)
             {
                 for (var index = 0;
@@ -189,6 +191,10 @@ namespace MiniCivilization.World.Presentation
                     if (rebuildGeometry)
                     {
                         pendingGeometryPatches.Add(patch);
+                    }
+                    else if (rebuildWater)
+                    {
+                        pendingWaterPatches.Add(patch);
                     }
                     else
                     {
@@ -218,6 +224,7 @@ namespace MiniCivilization.World.Presentation
             if (boundWorld == null
                 || chunkViews == null
                 || (pendingGeometryPatches.Count == 0
+                    && pendingWaterPatches.Count == 0
                     && pendingMaterialPatches.Count == 0))
             {
                 return;
@@ -238,9 +245,25 @@ namespace MiniCivilization.World.Presentation
                     true);
             }
 
+            foreach (var patch in pendingWaterPatches)
+            {
+                if (pendingGeometryPatches.Contains(patch)
+                    || (uint)patch.x >= chunkViews.GetLength(0)
+                    || (uint)patch.y >= chunkViews.GetLength(1))
+                {
+                    continue;
+                }
+
+                BuildWaterPatch(
+                    chunkViews[patch.x, patch.y],
+                    patch.x,
+                    patch.y);
+            }
+
             foreach (var patch in pendingMaterialPatches)
             {
                 if (pendingGeometryPatches.Contains(patch)
+                    || pendingWaterPatches.Contains(patch)
                     || (uint)patch.x >= chunkViews.GetLength(0)
                     || (uint)patch.y >= chunkViews.GetLength(1))
                 {
@@ -255,6 +278,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             pendingGeometryPatches.Clear();
+            pendingWaterPatches.Clear();
             pendingMaterialPatches.Clear();
         }
 
@@ -315,6 +339,7 @@ namespace MiniCivilization.World.Presentation
             BindingMode = WorldRenderBindingMode.None;
             LastAppliedChangeId = WorldChangeId.None;
             pendingGeometryPatches.Clear();
+            pendingWaterPatches.Clear();
             pendingMaterialPatches.Clear();
             if (clearViews)
             {
@@ -384,6 +409,24 @@ namespace MiniCivilization.World.Presentation
                 generateColliders,
                 interactionLayer,
                 rebuildInteraction,
+                exposureCache);
+        }
+
+        private void BuildWaterPatch(
+            WorldChunkView view,
+            int patchX,
+            int patchZ)
+        {
+            view.RebuildWater(
+                boundWorld,
+                patchX,
+                patchZ,
+                activeRenderPatchSize,
+                surfaceCatalog,
+                waterMaterial,
+                waterfallMaterial,
+                generateColliders,
+                interactionLayer,
                 exposureCache);
         }
 

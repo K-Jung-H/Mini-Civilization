@@ -45,6 +45,7 @@ namespace MiniCivilization.World.Generation
             GenerateRivers(world, settings, seed, solidHeights, waterSurfaces, waterTypes, waterFlags);
             ApplyColumns(world, solidHeights, waterSurfaces, waterTypes, waterFlags);
             ApplyBiomes(world, settings, seed);
+            world.WaterState.InitializeFromGeneratedWorld(world);
 
             return world;
         }

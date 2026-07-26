@@ -142,6 +142,77 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
+        public void RebuildWater(
+            WorldData world,
+            int patchX,
+            int patchZ,
+            int patchSize,
+            WorldSurfaceCatalog catalog,
+            Material waterMaterial,
+            Material waterfallMaterial,
+            bool buildCollider,
+            int interactionLayer,
+            WorldExposureCache exposureCache)
+        {
+            this.patchX = patchX;
+            this.patchZ = patchZ;
+            this.patchSize = patchSize;
+            EnsureChildren(buildCollider, interactionLayer);
+            if (catalog != null)
+            {
+                catalog.ApplyToMaterials(null, waterMaterial, waterfallMaterial);
+            }
+
+            var replacePreparedMeshes = preparedReadOnly;
+            var waterBuffers = WaterChunkMeshBuilder.Build(
+                world,
+                patchX,
+                patchZ,
+                patchSize,
+                catalog,
+                exposureCache);
+            waterFilter.sharedMesh = waterBuffers.Surface.CreateMesh(
+                $"Water [{patchX}, {patchZ}]",
+                replacePreparedMeshes ? null : waterFilter.sharedMesh);
+            waterfallFilter.sharedMesh = waterBuffers.Waterfalls.CreateMesh(
+                $"Waterfalls [{patchX}, {patchZ}]",
+                replacePreparedMeshes ? null : waterfallFilter.sharedMesh);
+            waterRenderer.sharedMaterial = waterMaterial;
+            waterfallRenderer.sharedMaterial = waterfallMaterial;
+            waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            waterfallRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            waterRenderer.receiveShadows = true;
+            waterfallRenderer.receiveShadows = true;
+            waterRenderer.enabled = !waterBuffers.Surface.IsEmpty;
+            waterfallRenderer.enabled = !waterBuffers.Waterfalls.IsEmpty;
+
+            if (interactionSurface != null)
+            {
+                // The interaction mesh remains one combined mesh. Rebuild its
+                // terrain buffers for picking, but keep the rendered terrain
+                // mesh untouched.
+                var terrainBuffers = TerrainChunkMeshBuilder.Build(
+                    world,
+                    patchX,
+                    patchZ,
+                    patchSize,
+                    catalog,
+                    exposureCache);
+                var interactionData = ChunkInteractionMeshBuilder.Build(
+                    terrainBuffers,
+                    waterBuffers);
+                var interactionMesh = interactionData.CreateMesh(
+                    $"Interaction [{patchX}, {patchZ}]",
+                    out var metadata,
+                    replacePreparedMeshes
+                        ? null
+                        : interactionSurface.ReusableMesh);
+                interactionSurface.Bind(interactionMesh, metadata);
+            }
+
+            preparedReadOnly = false;
+        }
+
         private void OnDestroy() => ReleaseMeshes();
 
         public bool AdoptPrepared(int interactionLayer)

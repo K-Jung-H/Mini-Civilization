@@ -78,6 +78,7 @@ namespace MiniCivilization.World.Domain
         public int ChunkCountZ { get; }
         public int Seed { get; }
         public WorldChangeId CurrentChangeId { get; private set; }
+        public WaterState WaterState { get; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -108,6 +109,7 @@ namespace MiniCivilization.World.Domain
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
             surfaceColumnMap = new SurfaceColumnData[size * size];
             columnEnvironmentMap = new ColumnEnvironmentData[size * size];
+            WaterState = new WaterState(checked(size * size * height));
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
             for (var chunkZ = 0; chunkZ < ChunkCountZ; chunkZ++)

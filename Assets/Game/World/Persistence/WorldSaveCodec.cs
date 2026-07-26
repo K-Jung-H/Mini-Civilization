@@ -10,6 +10,7 @@ namespace MiniCivilization.World.Persistence
     {
         private const uint Magic = 0x3157434D; // "MCW1"
         private const uint Footer = 0x444E454D; // "MEND"
+        private const uint WaterStateMarker = 0x52544157; // "WATR"
         private const ushort CurrentVersion = 1;
         private const int CellByteSize = 14;
         private const int EnvironmentByteSize = 5;
@@ -94,6 +95,7 @@ namespace MiniCivilization.World.Persistence
                 WriteEnvironmentSection(writer, world, chunkX, chunkZ);
             }
 
+            WriteWaterState(writer, world.WaterState);
             writer.Write(Footer);
             writer.Flush();
         }
@@ -198,13 +200,153 @@ namespace MiniCivilization.World.Persistence
                 ReadEnvironmentSection(reader, world, chunkX, chunkZ);
             }
 
-            if (reader.ReadUInt32() != Footer)
+            var trailingMarker = reader.ReadUInt32();
+            if (trailingMarker == WaterStateMarker)
+            {
+                ReadWaterState(reader, world.WaterState);
+                trailingMarker = reader.ReadUInt32();
+            }
+            else
+            {
+                // Saves created before persistent hydrology used CellData as
+                // their only water source. Convert it without changing the
+                // external save format version.
+                world.RebuildAllSurfaceColumns();
+                world.WaterState.InitializeFromGeneratedWorld(world);
+            }
+
+            if (trailingMarker != Footer)
             {
                 throw new InvalidDataException("The world save footer is missing or corrupt.");
             }
 
             world.RebuildAllSurfaceColumns();
             return world;
+        }
+
+        private static void WriteWaterState(
+            BinaryWriter writer,
+            WaterState waterState)
+        {
+            writer.Write(WaterStateMarker);
+            writer.Write(waterState.IsInitialized);
+            var populatedCount = 0;
+            for (var index = 0; index < waterState.CellCount; index++)
+            {
+                if (waterState.GetAmount(index) != 0
+                    || waterState.GetBehavior(index) != WaterCellBehavior.None
+                    || waterState.GetSourceGroupId(index) != 0)
+                {
+                    populatedCount++;
+                }
+            }
+
+            writer.Write(populatedCount);
+            for (var index = 0; index < waterState.CellCount; index++)
+            {
+                var amount = waterState.GetAmount(index);
+                var behavior = waterState.GetBehavior(index);
+                var sourceGroupId = waterState.GetSourceGroupId(index);
+                if (amount == 0
+                    && behavior == WaterCellBehavior.None
+                    && sourceGroupId == 0)
+                {
+                    continue;
+                }
+
+                writer.Write(index);
+                writer.Write(amount);
+                writer.Write((byte)behavior);
+                writer.Write(sourceGroupId);
+            }
+
+            writer.Write(waterState.SourceGroups.Count);
+            for (var groupIndex = 0;
+                 groupIndex < waterState.SourceGroups.Count;
+                 groupIndex++)
+            {
+                var group = waterState.SourceGroups[groupIndex];
+                writer.Write(group.Id);
+                writer.Write((ushort)group.WaterType);
+                writer.Write(group.OutputSurfaceTenths);
+                writer.Write(group.EmissionPerTick);
+                writer.Write(group.CellIndices.Count);
+                for (var cellIndex = 0;
+                     cellIndex < group.CellIndices.Count;
+                     cellIndex++)
+                {
+                    writer.Write(group.CellIndices[cellIndex]);
+                }
+            }
+        }
+
+        private static void ReadWaterState(
+            BinaryReader reader,
+            WaterState waterState)
+        {
+            var initialized = reader.ReadBoolean();
+            var entryCount = reader.ReadInt32();
+            if (entryCount < 0 || entryCount > waterState.CellCount)
+            {
+                throw new InvalidDataException("The water state entry count is invalid.");
+            }
+
+            for (var entryIndex = 0; entryIndex < entryCount; entryIndex++)
+            {
+                var cellIndex = reader.ReadInt32();
+                if ((uint)cellIndex >= waterState.CellCount)
+                {
+                    throw new InvalidDataException("A water state Cell index is outside the world.");
+                }
+
+                var amount = reader.ReadByte();
+                var behavior = (WaterCellBehavior)reader.ReadByte();
+                var sourceGroupId = reader.ReadInt32();
+                waterState.SetCell(cellIndex, amount, behavior, sourceGroupId);
+            }
+
+            var groupCount = reader.ReadInt32();
+            if (groupCount < 0 || groupCount > waterState.CellCount)
+            {
+                throw new InvalidDataException("The water source group count is invalid.");
+            }
+
+            var groups = new WaterSourceGroupData[groupCount];
+            for (var groupIndex = 0; groupIndex < groupCount; groupIndex++)
+            {
+                var id = reader.ReadInt32();
+                var waterType = (WaterType)reader.ReadUInt16();
+                var outputSurfaceTenths = reader.ReadInt16();
+                var emissionPerTick = reader.ReadByte();
+                var cellCount = reader.ReadInt32();
+                if (cellCount < 0 || cellCount > waterState.CellCount)
+                {
+                    throw new InvalidDataException("A water source group size is invalid.");
+                }
+
+                var cellIndices = new int[cellCount];
+                for (var cellIndex = 0; cellIndex < cellCount; cellIndex++)
+                {
+                    cellIndices[cellIndex] = reader.ReadInt32();
+                    if ((uint)cellIndices[cellIndex] >= waterState.CellCount)
+                    {
+                        throw new InvalidDataException("A source Cell index is outside the world.");
+                    }
+                }
+
+                groups[groupIndex] = new WaterSourceGroupData(
+                    id,
+                    waterType,
+                    outputSurfaceTenths,
+                    emissionPerTick,
+                    cellIndices);
+            }
+
+            waterState.ReplaceSourceGroups(groups);
+            if (initialized)
+            {
+                waterState.MarkInitialized();
+            }
         }
 
         private static void WriteCellSection(BinaryWriter writer, ReadOnlySpan<CellData> cells)
