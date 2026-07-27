@@ -509,9 +509,12 @@ namespace MiniCivilization.World.Generation
                 : settings.SeaLevelUnits;
             var start = path[0];
             var startIndex = ToColumnIndex(world.Size, start.x, start.z);
-            var sourceLevel = Math.Max(
+            var sourceLevel = AlignToCellCeiling(Math.Max(
                 outletLevel,
-                solidHeights[startIndex] - 1);
+                solidHeights[startIndex] - 1));
+            sourceLevel = Math.Min(
+                sourceLevel,
+                world.Height * WorldGrid.HeightStepsPerCell);
             levels[0] = sourceLevel;
 
             for (var i = 1; i < path.Count - 1; i++)
@@ -538,14 +541,19 @@ namespace MiniCivilization.World.Generation
                 var point = path[i];
                 var index = ToColumnIndex(world.Size, point.x, point.z);
                 var waterLevel = levels[i];
-                solidHeights[index] = Math.Min(solidHeights[index], waterLevel - settings.RiverDepthSteps);
+                var riverDepth = waterLevel == sourceLevel
+                    ? WorldGrid.HeightStepsPerCell
+                    : settings.RiverDepthSteps;
+                solidHeights[index] = Math.Min(
+                    solidHeights[index],
+                    waterLevel - riverDepth);
                 waterSurfaces[index] = Math.Max(waterSurfaces[index], waterLevel);
                 waterTypes[index] = WaterType.Fresh;
                 waterFlags[index] |= CellFlags.River;
 
                 if (i + 1 < path.Count && levels[i] - levels[i + 1] >= 2)
                 {
-                    waterFlags[index] |= CellFlags.Waterfall;
+                    waterFlags[index] |= CellFlags.FallingWater;
                 }
 
                 for (var directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
@@ -565,6 +573,12 @@ namespace MiniCivilization.World.Generation
                     }
                 }
             }
+        }
+
+        private static int AlignToCellCeiling(int heightUnits)
+        {
+            var steps = WorldGrid.HeightStepsPerCell;
+            return ((heightUnits + steps - 1) / steps) * steps;
         }
 
         private static void ApplyColumns(

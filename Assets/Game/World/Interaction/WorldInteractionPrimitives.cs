@@ -8,8 +8,7 @@ namespace MiniCivilization.World.Interaction
     public enum SurfaceInteractionType : byte
     {
         Terrain,
-        Water,
-        Waterfall
+        Water
     }
 
     public enum SurfaceTriangleRole : byte
@@ -17,11 +16,8 @@ namespace MiniCivilization.World.Interaction
         Core,
         Cliff,
         GapFill,
-        Waterfall,
-        ShoreApron,
-        ApronCornerJoin,
-        ApronBridge,
-        Bottom
+        FallingWater,
+        Bottom = 7
     }
 
     public readonly struct SurfaceTriangleMetadata

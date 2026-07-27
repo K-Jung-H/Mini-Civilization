@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Hydrology
+namespace MiniCivilization.World.WaterFlow
 {
     public enum WaterBodyType : byte
     {

@@ -12,7 +12,8 @@ namespace MiniCivilization.World.Interaction
         [SerializeField] private InteractionTriangleMetadata[] triangleMetadata =
             System.Array.Empty<InteractionTriangleMetadata>();
         [SerializeField, HideInInspector] private bool ownsInteractionMesh = true;
-        private readonly Dictionary<int, int[]> cellTriangleIndices = new();
+        private readonly Dictionary<int, List<int>> cellTriangleIndices = new();
+        private readonly Stack<List<int>> cellTriangleListPool = new();
 
         public Mesh InteractionMesh => interactionMesh;
         public InteractionTriangleMetadata[] TriangleMetadata => triangleMetadata;
@@ -32,8 +33,18 @@ namespace MiniCivilization.World.Interaction
 
             this.interactionMesh = interactionMesh;
             ownsInteractionMesh = ownsMesh;
-            triangleMetadata = metadata
-                ?? System.Array.Empty<InteractionTriangleMetadata>();
+            metadata ??= System.Array.Empty<InteractionTriangleMetadata>();
+            if (triangleMetadata == null
+                || triangleMetadata.Length != metadata.Length)
+            {
+                triangleMetadata = new InteractionTriangleMetadata[
+                    metadata.Length];
+            }
+
+            System.Array.Copy(
+                metadata,
+                triangleMetadata,
+                metadata.Length);
             RebuildCellTriangleIndex();
 
             meshCollider.sharedMesh = null;
@@ -61,11 +72,18 @@ namespace MiniCivilization.World.Interaction
 
         public bool TryGetOwnedTriangleIndices(
             int cellIndex,
-            out int[] triangleIndices)
+            out IReadOnlyList<int> triangleIndices)
         {
-            return cellTriangleIndices.TryGetValue(
-                cellIndex,
-                out triangleIndices);
+            if (cellTriangleIndices.TryGetValue(
+                    cellIndex,
+                    out var indices))
+            {
+                triangleIndices = indices;
+                return true;
+            }
+
+            triangleIndices = null;
+            return false;
         }
 
         public void Release()
@@ -88,7 +106,7 @@ namespace MiniCivilization.World.Interaction
             interactionMesh = null;
             triangleMetadata =
                 System.Array.Empty<InteractionTriangleMetadata>();
-            cellTriangleIndices.Clear();
+            ClearCellTriangleIndex();
             ownsInteractionMesh = true;
             GeometryVersion++;
         }
@@ -119,13 +137,12 @@ namespace MiniCivilization.World.Interaction
 
         private void RebuildCellTriangleIndex()
         {
-            cellTriangleIndices.Clear();
+            ClearCellTriangleIndex();
             if (triangleMetadata == null || triangleMetadata.Length == 0)
             {
                 return;
             }
 
-            var builders = new Dictionary<int, List<int>>();
             for (var triangleIndex = 0;
                  triangleIndex < triangleMetadata.Length;
                  triangleIndex++)
@@ -136,19 +153,29 @@ namespace MiniCivilization.World.Interaction
                     continue;
                 }
 
-                if (!builders.TryGetValue(owner, out var ownedTriangles))
+                if (!cellTriangleIndices.TryGetValue(
+                        owner,
+                        out var ownedTriangles))
                 {
-                    ownedTriangles = new List<int>();
-                    builders.Add(owner, ownedTriangles);
+                    ownedTriangles = cellTriangleListPool.Count > 0
+                        ? cellTriangleListPool.Pop()
+                        : new List<int>();
+                    cellTriangleIndices.Add(owner, ownedTriangles);
                 }
 
                 ownedTriangles.Add(triangleIndex);
             }
+        }
 
-            foreach (var pair in builders)
+        private void ClearCellTriangleIndex()
+        {
+            foreach (var pair in cellTriangleIndices)
             {
-                cellTriangleIndices.Add(pair.Key, pair.Value.ToArray());
+                pair.Value.Clear();
+                cellTriangleListPool.Push(pair.Value);
             }
+
+            cellTriangleIndices.Clear();
         }
 
         private void OnDestroy()

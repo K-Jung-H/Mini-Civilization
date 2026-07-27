@@ -365,8 +365,7 @@ namespace MiniCivilization.World.Editing
             }
 
             var column = world.GetSurfaceColumn(x, z);
-            if (surfaceType == SurfaceInteractionType.Water
-                || surfaceType == SurfaceInteractionType.Waterfall)
+            if (surfaceType == SurfaceInteractionType.Water)
             {
                 return column.HasWater
                     ? column.WaterCellY

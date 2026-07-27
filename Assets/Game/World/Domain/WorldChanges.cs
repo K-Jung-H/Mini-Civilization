@@ -48,7 +48,8 @@ namespace MiniCivilization.World.Domain
         Environment = 1 << 4,
         Navigation = 1 << 5,
         Ecology = 1 << 6,
-        Occupancy = 1 << 7
+        Occupancy = 1 << 7,
+        WaterSurface = 1 << 8
     }
 
     public readonly struct CellBounds : IEquatable<CellBounds>

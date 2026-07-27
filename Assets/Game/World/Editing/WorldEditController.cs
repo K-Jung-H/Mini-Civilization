@@ -252,11 +252,6 @@ namespace MiniCivilization.World.Editing
                             $"World edit would remove every solid cell from column ({x}, {z}).");
                     }
 
-                    if (!boundWorld.IsWaterSupported(x, z))
-                    {
-                        throw new InvalidOperationException(
-                            $"World edit would leave unsupported water in column ({x}, {z}).");
-                    }
                 }
             }
             catch
@@ -546,7 +541,7 @@ namespace MiniCivilization.World.Editing
             }
 
             const CellFlags waterFlags =
-                CellFlags.River | CellFlags.Waterfall;
+                CellFlags.River | CellFlags.FallingWater;
             if (previous.Water != current.Water
                 || previous.WaterFill != current.WaterFill
                 || (previous.Flags & waterFlags) != (current.Flags & waterFlags))
@@ -864,7 +859,7 @@ namespace MiniCivilization.World.Editing
                 cell.Water = cell.WaterFill > 0 ? water : WaterType.None;
                 cell.Flags = cell.WaterFill > 0
                     ? cell.Flags | flags | CellFlags.Generated
-                    : cell.Flags & ~(CellFlags.River | CellFlags.Waterfall);
+                    : cell.Flags & ~(CellFlags.River | CellFlags.FallingWater);
                 SetCell(x, y, z, cell);
             }
         }
@@ -1060,7 +1055,7 @@ namespace MiniCivilization.World.Editing
         {
             cell.Water = WaterType.None;
             cell.WaterFill = 0;
-            cell.Flags &= ~(CellFlags.River | CellFlags.Waterfall);
+            cell.Flags &= ~(CellFlags.River | CellFlags.FallingWater);
         }
 
         private readonly struct TerrainCellState
@@ -1118,7 +1113,7 @@ namespace MiniCivilization.World.Editing
                 cell.Flags = (cell.Flags
                     & (CellFlags.Generated
                         | CellFlags.River
-                        | CellFlags.Waterfall))
+                        | CellFlags.FallingWater))
                     | flags;
 
                 if (HasSolid)

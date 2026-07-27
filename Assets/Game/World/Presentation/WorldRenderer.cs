@@ -4,6 +4,7 @@ using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Interaction;
 using MiniCivilization.World.Meshing;
+using MiniCivilization.World.WaterFlow;
 using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
@@ -21,7 +22,6 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private WorldSurfaceCatalog surfaceCatalog;
         [SerializeField] private Material terrainMaterial;
         [SerializeField] private Material waterMaterial;
-        [SerializeField] private Material waterfallMaterial;
         [SerializeField] private Transform renderRoot;
 
         [Header("Mesh")]
@@ -32,8 +32,10 @@ namespace MiniCivilization.World.Presentation
         private readonly HashSet<Vector2Int> pendingGeometryPatches = new();
         private readonly HashSet<Vector2Int> pendingWaterPatches = new();
         private readonly HashSet<Vector2Int> pendingMaterialPatches = new();
+        private readonly WorldMeshBuildScratch meshBuildScratch = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
+        private WaterFlowState boundWaterFlowState;
         private WorldExposureCache exposureCache;
         private int activeRenderPatchSize;
 
@@ -52,10 +54,15 @@ namespace MiniCivilization.World.Presentation
 
         public void Bind(WorldData world)
         {
-            BuildRuntimeWorld(world);
+            BuildRuntimeWorld(world, null);
         }
 
-        public void BuildRuntimeWorld(WorldData world)
+        public void BuildRuntimeWorld(WorldData world) =>
+            BuildRuntimeWorld(world, null);
+
+        public void BuildRuntimeWorld(
+            WorldData world,
+            WaterFlowState waterFlowState)
         {
             if (world == null)
             {
@@ -66,6 +73,7 @@ namespace MiniCivilization.World.Presentation
             Unbind();
 
             boundWorld = world;
+            boundWaterFlowState = waterFlowState;
             exposureCache = new WorldExposureCache(world);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
@@ -93,7 +101,18 @@ namespace MiniCivilization.World.Presentation
         public bool TryAdoptPreparedWorld(
             WorldData world,
             int preparedPatchSize,
-            int preparedPatchCount)
+            int preparedPatchCount) =>
+            TryAdoptPreparedWorld(
+                world,
+                preparedPatchSize,
+                preparedPatchCount,
+                null);
+
+        public bool TryAdoptPreparedWorld(
+            WorldData world,
+            int preparedPatchSize,
+            int preparedPatchCount,
+            WaterFlowState waterFlowState)
         {
             if (world == null
                 || preparedPatchSize <= 0
@@ -135,12 +154,33 @@ namespace MiniCivilization.World.Presentation
             }
 
             boundWorld = world;
+            boundWaterFlowState = waterFlowState;
             exposureCache = new WorldExposureCache(world);
             activeRenderPatchSize = preparedPatchSize;
             chunkViews = adoptedViews;
             BindingMode = WorldRenderBindingMode.PreparedScene;
             LastAppliedChangeId = world.CurrentChangeId;
             return true;
+        }
+
+        public void SetWaterFlowState(WaterFlowState waterFlowState)
+        {
+            if (ReferenceEquals(boundWaterFlowState, waterFlowState))
+            {
+                return;
+            }
+
+            boundWaterFlowState = waterFlowState;
+            if (chunkViews == null)
+            {
+                return;
+            }
+
+            for (var z = 0; z < chunkViews.GetLength(1); z++)
+            for (var x = 0; x < chunkViews.GetLength(0); x++)
+            {
+                pendingWaterPatches.Add(new Vector2Int(x, z));
+            }
         }
 
         public void ApplyChanges(WorldChangeSet changeSet)
@@ -170,10 +210,15 @@ namespace MiniCivilization.World.Presentation
             var rebuildGeometry =
                 (changeSet.ChangeTypes & geometryChanges) != 0;
             var rebuildWater =
-                (changeSet.ChangeTypes & WorldChangeType.WaterTopology) != 0;
+                (changeSet.ChangeTypes
+                    & (WorldChangeType.WaterTopology
+                        | WorldChangeType.WaterSurface)) != 0;
             var rebuildMaterials =
                 (changeSet.ChangeTypes & materialChanges) != 0;
-            exposureCache?.ApplyChanges(changeSet);
+            if (rebuildGeometry || rebuildWater)
+            {
+                exposureCache?.ApplyChanges(changeSet);
+            }
 
             if ((rebuildGeometry || rebuildWater || rebuildMaterials)
                 && activeRenderPatchSize > 0)
@@ -334,6 +379,7 @@ namespace MiniCivilization.World.Presentation
         private void DetachBoundWorld(bool clearViews)
         {
             boundWorld = null;
+            boundWaterFlowState = null;
             exposureCache = null;
             activeRenderPatchSize = 0;
             BindingMode = WorldRenderBindingMode.None;
@@ -355,7 +401,6 @@ namespace MiniCivilization.World.Presentation
             WorldSurfaceCatalog catalog,
             Material terrain,
             Material water,
-            Material waterfall,
             Transform root,
             int patchSize,
             bool buildColliders,
@@ -364,7 +409,6 @@ namespace MiniCivilization.World.Presentation
             surfaceCatalog = catalog;
             terrainMaterial = terrain;
             waterMaterial = water;
-            waterfallMaterial = waterfall;
             renderRoot = root;
             renderPatchSizeXZ = Math.Max(1, patchSize);
             generateColliders = buildColliders;
@@ -405,11 +449,12 @@ namespace MiniCivilization.World.Presentation
                 surfaceCatalog,
                 terrainMaterial,
                 waterMaterial,
-                waterfallMaterial,
                 generateColliders,
                 interactionLayer,
                 rebuildInteraction,
-                exposureCache);
+                boundWaterFlowState,
+                exposureCache,
+                meshBuildScratch);
         }
 
         private void BuildWaterPatch(
@@ -424,10 +469,11 @@ namespace MiniCivilization.World.Presentation
                 activeRenderPatchSize,
                 surfaceCatalog,
                 waterMaterial,
-                waterfallMaterial,
                 generateColliders,
                 interactionLayer,
-                exposureCache);
+                boundWaterFlowState,
+                exposureCache,
+                meshBuildScratch);
         }
 
         private int ResolveRenderPatchSize(WorldData world)
@@ -447,11 +493,10 @@ namespace MiniCivilization.World.Presentation
             }
 
             if (terrainMaterial == null
-                || waterMaterial == null
-                || waterfallMaterial == null)
+                || waterMaterial == null)
             {
                 throw new MissingReferenceException(
-                    "Terrain, water, and waterfall materials must all be assigned.");
+                    "Terrain and water materials must both be assigned.");
             }
 
             if (renderRoot == null)

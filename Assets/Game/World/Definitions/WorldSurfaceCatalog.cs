@@ -351,8 +351,7 @@ namespace MiniCivilization.World.Definitions
 
         public void ApplyToMaterials(
             Material terrainMaterial,
-            Material waterMaterial,
-            Material waterfallMaterial = null)
+            Material waterMaterial)
         {
             EnsureRuntimeCache();
             ApplyArrays(
@@ -363,12 +362,6 @@ namespace MiniCivilization.World.Definitions
                 terrainArrayAvailability);
             ApplyArrays(
                 waterMaterial,
-                waterAlbedoArray,
-                waterNormalArray,
-                waterMaskArray,
-                waterArrayAvailability);
-            ApplyArrays(
-                waterfallMaterial,
                 waterAlbedoArray,
                 waterNormalArray,
                 waterMaskArray,

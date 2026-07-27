@@ -15,7 +15,7 @@ namespace MiniCivilization.World.Domain
     {
         None = 0,
         River = 1 << 0,
-        Waterfall = 1 << 1,
+        FallingWater = 1 << 1,
         Generated = 1 << 2
     }
 
@@ -86,7 +86,7 @@ namespace MiniCivilization.World.Domain
             if (WaterFill == 0)
             {
                 Water = WaterType.None;
-                Flags &= ~(CellFlags.River | CellFlags.Waterfall);
+                Flags &= ~(CellFlags.River | CellFlags.FallingWater);
             }
         }
 

@@ -1,6 +1,6 @@
 using System.Text;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Hydrology;
+using MiniCivilization.World.WaterFlow;
 using UnityEngine;
 
 namespace MiniCivilization.World.Interaction
@@ -63,7 +63,7 @@ namespace MiniCivilization.World.Interaction
     {
         public WorldCellInfoSnapshot Create(
             WorldData world,
-            HydrologyState hydrologyState,
+            WaterFlowState waterFlowState,
             in TilePickResult pick)
         {
             var cell = world.GetCell(pick.Cell.X, pick.Cell.Y, pick.Cell.Z);
@@ -75,15 +75,15 @@ namespace MiniCivilization.World.Interaction
                 cell,
                 column,
                 environment,
-                FindWaterBody(hydrologyState, pick.Cell));
+                FindWaterBody(waterFlowState, pick.Cell));
         }
 
         private static WaterBody FindWaterBody(
-            HydrologyState hydrologyState,
+            WaterFlowState waterFlowState,
             CellCoordinate coordinate)
         {
-            return hydrologyState != null
-                && hydrologyState.TryGetWaterBody(
+            return waterFlowState != null
+                && waterFlowState.TryGetWaterBody(
                     coordinate.X,
                     coordinate.Z,
                     out var waterBody)

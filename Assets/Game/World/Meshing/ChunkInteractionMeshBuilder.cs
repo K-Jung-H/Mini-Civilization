@@ -5,14 +5,24 @@ using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Meshing
 {
-    public sealed class ChunkInteractionMeshData
+    internal sealed class ChunkInteractionMeshData
     {
         private readonly List<Vector3> positions = new();
         private readonly List<int> indices = new();
         private readonly List<InteractionTriangleMetadata> metadata = new();
         private readonly Dictionary<Vector3, int> vertexLookup = new();
+        private InteractionTriangleMetadata[] metadataBuffer =
+            System.Array.Empty<InteractionTriangleMetadata>();
 
         public bool IsEmpty => indices.Count == 0;
+
+        internal void Clear()
+        {
+            positions.Clear();
+            indices.Clear();
+            metadata.Clear();
+            vertexLookup.Clear();
+        }
 
         internal void AddTriangle(
             Vector3 a,
@@ -45,8 +55,29 @@ namespace MiniCivilization.World.Meshing
             mesh.SetVertices(positions);
             mesh.SetTriangles(indices, 0, true);
             mesh.RecalculateBounds();
-            triangleMetadata = metadata.ToArray();
+            if (metadataBuffer.Length != metadata.Count)
+            {
+                metadataBuffer = new InteractionTriangleMetadata[metadata.Count];
+            }
+
+            metadata.CopyTo(metadataBuffer, 0);
+            triangleMetadata = metadataBuffer;
             return mesh;
+        }
+
+        internal void AppendTo(ChunkInteractionMeshData target)
+        {
+            for (var triangleIndex = 0;
+                 triangleIndex < metadata.Count;
+                 triangleIndex++)
+            {
+                var indexStart = triangleIndex * 3;
+                target.AddTriangle(
+                    positions[indices[indexStart]],
+                    positions[indices[indexStart + 1]],
+                    positions[indices[indexStart + 2]],
+                    metadata[triangleIndex]);
+            }
         }
 
         private int AddVertex(Vector3 position)
@@ -63,26 +94,31 @@ namespace MiniCivilization.World.Meshing
         }
     }
 
-    public static class ChunkInteractionMeshBuilder
+    internal static class ChunkInteractionMeshBuilder
     {
-        public static ChunkInteractionMeshData Build(
+        internal static void BuildTerrainCache(
             MeshBuffers terrain,
-            WaterChunkMeshBuffers water)
+            ChunkInteractionMeshData target)
         {
-            var result = new ChunkInteractionMeshData();
+            target.Clear();
             Append(
                 terrain,
                 SurfaceInteractionType.Terrain,
-                result);
+                target);
+        }
+
+        internal static ChunkInteractionMeshData BuildFromTerrainCache(
+            ChunkInteractionMeshData terrain,
+            MeshBuffers water,
+            ChunkInteractionMeshData reusableData)
+        {
+            reusableData.Clear();
+            terrain.AppendTo(reusableData);
             Append(
-                water.Surface,
+                water,
                 SurfaceInteractionType.Water,
-                result);
-            Append(
-                water.Waterfalls,
-                SurfaceInteractionType.Waterfall,
-                result);
-            return result;
+                reusableData);
+            return reusableData;
         }
 
         private static void Append(

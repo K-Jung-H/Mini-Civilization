@@ -35,8 +35,124 @@ namespace MiniCivilization.World.Meshing
         public bool IsValid => TopUnits > BottomUnits;
     }
 
+    /// <summary>
+    /// Describes the eight Solid occupancy samples incident to one quantized
+    /// world corner. Each bit represents one of the four XZ quadrants around
+    /// the corner. Below and Above are sampled on the two sides of the
+    /// horizontal plane at <see cref="HeightUnits"/>.
+    /// </summary>
+    internal readonly struct SolidCornerOccupancy
+    {
+        public readonly int CornerX;
+        public readonly int HeightUnits;
+        public readonly int CornerZ;
+        public readonly byte BelowMask;
+        public readonly byte AboveMask;
+
+        public SolidCornerOccupancy(
+            int cornerX,
+            int heightUnits,
+            int cornerZ,
+            byte belowMask,
+            byte aboveMask)
+        {
+            CornerX = cornerX;
+            HeightUnits = heightUnits;
+            CornerZ = cornerZ;
+            BelowMask = belowMask;
+            AboveMask = aboveMask;
+        }
+
+        public byte TopMask => (byte)(BelowMask & ~AboveMask & 0x0f);
+        public byte BottomMask => (byte)(AboveMask & ~BelowMask & 0x0f);
+        public byte ThroughMask => (byte)(BelowMask & AboveMask & 0x0f);
+
+        public static int GetQuadrantIndex(
+            int cornerX,
+            int cornerZ,
+            int cellX,
+            int cellZ)
+        {
+            var xIndex = cellX == cornerX ? 1 : 0;
+            var zIndex = cellZ == cornerZ ? 2 : 0;
+            return xIndex | zIndex;
+        }
+
+        public void GetCellCoordinate(
+            int quadrantIndex,
+            out int cellX,
+            out int cellZ)
+        {
+            cellX = CornerX - 1 + (quadrantIndex & 1);
+            cellZ = CornerZ - 1 + ((quadrantIndex >> 1) & 1);
+        }
+    }
+
     internal static class CellOccupancyResolver
     {
+        public static SolidCornerOccupancy ResolveSolidCornerOccupancy(
+            WorldData world,
+            int cornerX,
+            int heightUnits,
+            int cornerZ)
+        {
+            byte belowMask = 0;
+            byte aboveMask = 0;
+            for (var quadrant = 0; quadrant < 4; quadrant++)
+            {
+                var cellX = cornerX - 1 + (quadrant & 1);
+                var cellZ = cornerZ - 1 + ((quadrant >> 1) & 1);
+                var bit = (byte)(1 << quadrant);
+                if (IsSolidAtHeightUnit(
+                        world,
+                        cellX,
+                        heightUnits - 1,
+                        cellZ))
+                {
+                    belowMask |= bit;
+                }
+
+                if (IsSolidAtHeightUnit(
+                        world,
+                        cellX,
+                        heightUnits,
+                        cellZ))
+                {
+                    aboveMask |= bit;
+                }
+            }
+
+            return new SolidCornerOccupancy(
+                cornerX,
+                heightUnits,
+                cornerZ,
+                belowMask,
+                aboveMask);
+        }
+
+        private static bool IsSolidAtHeightUnit(
+            WorldData world,
+            int x,
+            int heightUnit,
+            int z)
+        {
+            if (heightUnit < 0
+                || !world.ContainsColumn(x, z))
+            {
+                return false;
+            }
+
+            var y = heightUnit / WorldGrid.HeightStepsPerCell;
+            if (!world.TryGetCell(x, y, z, out var cell))
+            {
+                return false;
+            }
+
+            var localHeightUnit = heightUnit
+                - y * WorldGrid.HeightStepsPerCell;
+            return localHeightUnit < cell.SolidFill;
+        }
+
         public static HeightInterval GetSolidInterval(int y, in CellData cell)
         {
             var bottom = y * WorldGrid.HeightStepsPerCell;

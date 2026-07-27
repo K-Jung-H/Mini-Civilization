@@ -2,7 +2,7 @@ using System;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
 using MiniCivilization.World.Generation;
-using MiniCivilization.World.Hydrology;
+using MiniCivilization.World.WaterFlow;
 using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
 using UnityEngine;
@@ -19,18 +19,18 @@ namespace MiniCivilization.World.Runtime
         [Header("Services")]
         [SerializeField] private WorldGenerationController generator;
         [SerializeField] private WorldEditController editController;
-        [SerializeField] private WorldHydrologyController hydrologyController;
+        [SerializeField] private WorldWaterFlowController waterFlowController;
         [SerializeField] private WorldRenderer worldRenderer;
         [FormerlySerializedAs("persistence")]
         [SerializeField] private WorldSaveController saveController;
 
         private WorldEditController subscribedEditController;
-        private WorldHydrologyController subscribedHydrologyController;
+        private WorldWaterFlowController subscribedWaterFlowController;
 
         public WorldGenerationController Generator => generator;
         public WorldEditController EditController => editController;
-        public WorldHydrologyController HydrologyController =>
-            hydrologyController;
+        public WorldWaterFlowController WaterFlowController =>
+            waterFlowController;
         public WorldRenderer Renderer => worldRenderer;
         public WorldSaveController SaveController => saveController;
         public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
@@ -230,7 +230,7 @@ namespace MiniCivilization.World.Runtime
         public void UnloadWorld()
         {
             worldRenderer?.Unbind();
-            hydrologyController?.Unbind();
+            waterFlowController?.Unbind();
             editController?.Unbind();
             var previousAsset = currentWorldDataAsset;
             CurrentWorldData = null;
@@ -243,17 +243,17 @@ namespace MiniCivilization.World.Runtime
         public void Configure(
             WorldGenerationController generationController,
             WorldEditController worldEditor,
-            WorldHydrologyController hydrology,
+            WorldWaterFlowController waterFlow,
             WorldRenderer renderer,
             WorldSaveController saveLoad)
         {
             generator = generationController;
             editController = worldEditor;
-            hydrologyController = hydrology;
+            waterFlowController = waterFlow;
             worldRenderer = renderer;
             saveController = saveLoad;
             SubscribeToEditController();
-            SubscribeToHydrologyController();
+            SubscribeToWaterFlowController();
         }
 
         private void ActivateWorldAsset(
@@ -282,19 +282,22 @@ namespace MiniCivilization.World.Runtime
             currentWorldDataAsset = nextAsset;
             CurrentWorldData = nextAsset.Data;
             SubscribeToEditController();
-            SubscribeToHydrologyController();
+            SubscribeToWaterFlowController();
             editController.Bind(nextAsset.Data);
-            hydrologyController.Bind(nextAsset.Data);
+            waterFlowController.Bind(nextAsset.Data);
 
             var adoptedPreparedScene = preferPreparedScene
                 && nextAsset.HasPreparedRenderCache
                 && worldRenderer.TryAdoptPreparedWorld(
                     nextAsset.Data,
                     nextAsset.PreparedPatchSize,
-                    nextAsset.PreparedPatchCount);
+                    nextAsset.PreparedPatchCount,
+                    waterFlowController.State);
             if (!adoptedPreparedScene)
             {
-                worldRenderer.BuildRuntimeWorld(nextAsset.Data);
+                worldRenderer.BuildRuntimeWorld(
+                    nextAsset.Data,
+                    waterFlowController.State);
             }
 
             SetDirty(markDirty);
@@ -309,17 +312,17 @@ namespace MiniCivilization.World.Runtime
         {
             if (generator != null
                 && editController != null
-                && hydrologyController != null
+                && waterFlowController != null
                 && worldRenderer != null
                 && saveController != null)
             {
                 SubscribeToEditController();
-                SubscribeToHydrologyController();
+                SubscribeToWaterFlowController();
                 return true;
             }
 
             Debug.LogError(
-                "WorldManager requires assigned Generation, Editing, Hydrology, " +
+                "WorldManager requires assigned Generation, Editing, Water Flow, " +
                 "Renderer, and Save components.",
                 this);
             return false;
@@ -351,33 +354,42 @@ namespace MiniCivilization.World.Runtime
                 return;
             }
 
-            hydrologyController.ApplyChanges(changeSet);
+            waterFlowController.ApplyChanges(changeSet);
             worldRenderer.ApplyChanges(changeSet);
             SetDirty(true);
         }
 
-        private void SubscribeToHydrologyController()
+        private void SubscribeToWaterFlowController()
         {
-            if (subscribedHydrologyController == hydrologyController)
+            if (subscribedWaterFlowController == waterFlowController)
             {
                 return;
             }
 
-            if (subscribedHydrologyController != null)
+            if (subscribedWaterFlowController != null)
             {
-                subscribedHydrologyController.ChangeCommitted -=
-                    OnHydrologyChanged;
+                subscribedWaterFlowController.ChangeCommitted -=
+                    OnWaterFlowChanged;
+                subscribedWaterFlowController.StateChanged -=
+                    OnWaterFlowStateChanged;
             }
 
-            subscribedHydrologyController = hydrologyController;
-            if (subscribedHydrologyController != null)
+            subscribedWaterFlowController = waterFlowController;
+            if (subscribedWaterFlowController != null)
             {
-                subscribedHydrologyController.ChangeCommitted +=
-                    OnHydrologyChanged;
+                subscribedWaterFlowController.ChangeCommitted +=
+                    OnWaterFlowChanged;
+                subscribedWaterFlowController.StateChanged +=
+                    OnWaterFlowStateChanged;
             }
         }
 
-        private void OnHydrologyChanged(WorldChangeSet changeSet)
+        private void OnWaterFlowStateChanged(WaterFlowState state)
+        {
+            worldRenderer?.SetWaterFlowState(state);
+        }
+
+        private void OnWaterFlowChanged(WorldChangeSet changeSet)
         {
             if (changeSet == null || changeSet.World != CurrentWorldData)
             {
@@ -418,10 +430,12 @@ namespace MiniCivilization.World.Runtime
             }
 
 
-            if (subscribedHydrologyController != null)
+            if (subscribedWaterFlowController != null)
             {
-                subscribedHydrologyController.ChangeCommitted -=
-                    OnHydrologyChanged;
+                subscribedWaterFlowController.ChangeCommitted -=
+                    OnWaterFlowChanged;
+                subscribedWaterFlowController.StateChanged -=
+                    OnWaterFlowStateChanged;
             }
         }
     }

@@ -244,7 +244,7 @@ namespace MiniCivilization.World.Interaction
                     out var ownedTriangles))
             {
                 var geometry = GetSourceGeometry(source);
-                for (var index = 0; index < ownedTriangles.Length; index++)
+                for (var index = 0; index < ownedTriangles.Count; index++)
                 {
                     var triangleIndex = ownedTriangles[index];
                     if (!source.TryResolveMetadata(
@@ -332,7 +332,7 @@ namespace MiniCivilization.World.Interaction
             }
 
             var geometry = GetSourceGeometry(source);
-            for (var index = 0; index < ownedTriangles.Length; index++)
+            for (var index = 0; index < ownedTriangles.Count; index++)
             {
                 var triangleIndex = ownedTriangles[index];
                 if (!source.TryResolveMetadata(
@@ -507,8 +507,7 @@ namespace MiniCivilization.World.Interaction
                 return candidate == SurfaceInteractionType.Terrain;
             }
 
-            return candidate == SurfaceInteractionType.Water
-                || candidate == SurfaceInteractionType.Waterfall;
+            return candidate == SurfaceInteractionType.Water;
         }
 
         private void InitializeRenderer()

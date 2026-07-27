@@ -7,6 +7,15 @@ using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Meshing
 {
+    internal sealed class WorldMeshBuildScratch
+    {
+        public MeshBuffers Terrain { get; } = new();
+        public MeshBuffers Water { get; } = new();
+        public ChunkInteractionMeshData Interaction { get; } = new();
+        public List<ExposedCell> SolidCells { get; } = new();
+        public List<ExposedCell> WaterCells { get; } = new();
+    }
+
     internal readonly struct SurfaceVertex
     {
         public readonly Vector3 Position;
@@ -21,7 +30,7 @@ namespace MiniCivilization.World.Meshing
         }
     }
 
-    public sealed class MeshBuffers
+    internal sealed class MeshBuffers
     {
         private readonly List<Vector3> positions = new();
         private readonly List<Vector3> normals = new();
@@ -45,6 +54,23 @@ namespace MiniCivilization.World.Meshing
         {
             get => currentTriangleMetadata;
             set => currentTriangleMetadata = value;
+        }
+
+        public void Clear()
+        {
+            positions.Clear();
+            normals.Clear();
+            tangents.Clear();
+            uv0.Clear();
+            materialParameters.Clear();
+            textureLayers.Clear();
+            textureWeights.Clear();
+            textureScales.Clear();
+            colors.Clear();
+            indices.Clear();
+            triangleMetadata.Clear();
+            vertexLookup.Clear();
+            currentTriangleMetadata = SurfaceTriangleMetadata.NotInteractive;
         }
 
         internal void AddTriangle(in SurfaceVertex a, in SurfaceVertex b, in SurfaceVertex c)

@@ -2,7 +2,7 @@ using System.Linq;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Editing;
 using MiniCivilization.World.Generation;
-using MiniCivilization.World.Hydrology;
+using MiniCivilization.World.WaterFlow;
 using MiniCivilization.World.Interaction;
 using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
@@ -26,7 +26,6 @@ namespace MiniCivilization.World.Editor
         private const string CatalogPath = SettingsDirectory + "/WorldSurfaceCatalog.asset";
         private const string TerrainMaterialPath = SettingsDirectory + "/WorldTerrain.mat";
         private const string WaterMaterialPath = SettingsDirectory + "/WorldWater.mat";
-        private const string WaterfallMaterialPath = SettingsDirectory + "/WorldWaterfall.mat";
         private const string HighlightMaterialPath = SettingsDirectory + "/WorldTileHighlight.mat";
         private const string WireframeMaterialPath = SettingsDirectory + "/WorldEditWireframe.mat";
         private const int InteractionLayer = 8;
@@ -84,7 +83,7 @@ namespace MiniCivilization.World.Editor
                         "World Interaction/Highlight Root/Edit Hover Highlight") == null
                     && root.transform.Find(
                         "World Interaction/Highlight Root/Edit Selected Highlight") == null
-                    && root.transform.Find("World Hydrology") != null
+                    && root.transform.Find("World Water Flow") != null
                     && root.transform.Find("World Save") != null
                     && root.transform.Find(
                         "World UI/Canvas/World Edit UI/Toolbar/Expanded Content")
@@ -135,12 +134,6 @@ namespace MiniCivilization.World.Editor
                 WaterMaterialPath,
                 "Mini Civilization/World Water Lit",
                 "World Water Material");
-            var waterfallMaterial = LoadOrCreateMaterial(
-                WaterfallMaterialPath,
-                "Mini Civilization/World Water Lit",
-                "World Waterfall Material");
-            waterfallMaterial.SetFloat("_DepthBiasFactor", -1f);
-            waterfallMaterial.SetFloat("_DepthBiasUnits", -1f);
             var highlightMaterial = LoadOrCreateMaterial(
                 HighlightMaterialPath,
                 "Mini Civilization/World Tile Highlight",
@@ -175,7 +168,9 @@ namespace MiniCivilization.World.Editor
             var managementObject = EnsureRoleObject(worldObject, "World Management");
             var generationObject = EnsureRoleObject(worldObject, "World Generation");
             var editingObject = EnsureRoleObject(worldObject, "World Editing");
-            var hydrologyObject = EnsureRoleObject(worldObject, "World Hydrology");
+            var waterFlowObject = EnsureRoleObject(
+                worldObject,
+                "World Water Flow");
             var renderingObject = EnsureRoleObject(worldObject, "World Rendering");
             var saveObject = EnsureRenamedRoleObject(
                 worldObject,
@@ -208,9 +203,9 @@ namespace MiniCivilization.World.Editor
                 worldObject,
                 editingObject,
                 out _);
-            var hydrologyController = MoveOrAdd<WorldHydrologyController>(
+            var waterFlowController = MoveOrAdd<WorldWaterFlowController>(
                 worldObject,
-                hydrologyObject,
+                waterFlowObject,
                 out _);
             var renderer = MoveOrAdd<WorldRenderer>(
                 worldObject,
@@ -277,7 +272,6 @@ namespace MiniCivilization.World.Editor
                 catalog,
                 terrainMaterial,
                 waterMaterial,
-                waterfallMaterial,
                 renderRoot,
                 settings.RenderPatchSizeXZ,
                 true,
@@ -286,7 +280,7 @@ namespace MiniCivilization.World.Editor
             manager.Configure(
                 generator,
                 editController,
-                hydrologyController,
+                waterFlowController,
                 renderer,
                 saveController);
 
@@ -342,7 +336,7 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(wireframeRenderer);
             EditorUtility.SetDirty(previewFilter);
             EditorUtility.SetDirty(previewRenderer);
-            EditorUtility.SetDirty(hydrologyController);
+            EditorUtility.SetDirty(waterFlowController);
             EditorUtility.SetDirty(renderer);
             EditorUtility.SetDirty(saveController);
             EditorUtility.SetDirty(selectionState);

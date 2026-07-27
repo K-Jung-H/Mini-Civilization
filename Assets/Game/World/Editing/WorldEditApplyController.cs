@@ -380,7 +380,7 @@ namespace MiniCivilization.World.Editing
             current.SolidFill = (byte)WorldGrid.HeightStepsPerCell;
             current.Water = WaterType.None;
             current.WaterFill = 0;
-            current.Flags &= ~(CellFlags.River | CellFlags.Waterfall);
+            current.Flags &= ~(CellFlags.River | CellFlags.FallingWater);
             current.Flags |= CellFlags.Generated;
             return current;
         }

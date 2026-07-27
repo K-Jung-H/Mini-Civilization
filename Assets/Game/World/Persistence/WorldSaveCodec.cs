@@ -10,7 +10,7 @@ namespace MiniCivilization.World.Persistence
     {
         private const uint Magic = 0x3157434D; // "MCW1"
         private const uint Footer = 0x444E454D; // "MEND"
-        private const uint WaterStateMarker = 0x52544157; // "WATR"
+        private const uint WaterStateMarker = 0x32544157; // "WAT2"
         private const ushort CurrentVersion = 1;
         private const int CellByteSize = 14;
         private const int EnvironmentByteSize = 5;
@@ -208,11 +208,8 @@ namespace MiniCivilization.World.Persistence
             }
             else
             {
-                // Saves created before persistent hydrology used CellData as
-                // their only water source. Convert it without changing the
-                // external save format version.
-                world.RebuildAllSurfaceColumns();
-                world.WaterState.InitializeFromGeneratedWorld(world);
+                throw new InvalidDataException(
+                    "The world save does not contain the current water state section.");
             }
 
             if (trailingMarker != Footer)
@@ -230,6 +227,7 @@ namespace MiniCivilization.World.Persistence
         {
             writer.Write(WaterStateMarker);
             writer.Write(waterState.IsInitialized);
+            writer.Write(waterState.MaximumAmount);
             var populatedCount = 0;
             for (var index = 0; index < waterState.CellCount; index++)
             {
@@ -269,7 +267,7 @@ namespace MiniCivilization.World.Persistence
                 writer.Write(group.Id);
                 writer.Write((ushort)group.WaterType);
                 writer.Write(group.OutputSurfaceTenths);
-                writer.Write(group.EmissionPerTick);
+                writer.Write(group.SourceAmount);
                 writer.Write(group.CellIndices.Count);
                 for (var cellIndex = 0;
                      cellIndex < group.CellIndices.Count;
@@ -285,6 +283,8 @@ namespace MiniCivilization.World.Persistence
             WaterState waterState)
         {
             var initialized = reader.ReadBoolean();
+            waterState.ConfigureMaximumAmount(
+                Math.Max((ushort)1, reader.ReadUInt16()));
             var entryCount = reader.ReadInt32();
             if (entryCount < 0 || entryCount > waterState.CellCount)
             {
@@ -299,7 +299,7 @@ namespace MiniCivilization.World.Persistence
                     throw new InvalidDataException("A water state Cell index is outside the world.");
                 }
 
-                var amount = reader.ReadByte();
+                var amount = reader.ReadUInt16();
                 var behavior = (WaterCellBehavior)reader.ReadByte();
                 var sourceGroupId = reader.ReadInt32();
                 waterState.SetCell(cellIndex, amount, behavior, sourceGroupId);
@@ -317,7 +317,7 @@ namespace MiniCivilization.World.Persistence
                 var id = reader.ReadInt32();
                 var waterType = (WaterType)reader.ReadUInt16();
                 var outputSurfaceTenths = reader.ReadInt16();
-                var emissionPerTick = reader.ReadByte();
+                var sourceAmount = reader.ReadUInt16();
                 var cellCount = reader.ReadInt32();
                 if (cellCount < 0 || cellCount > waterState.CellCount)
                 {
@@ -338,7 +338,7 @@ namespace MiniCivilization.World.Persistence
                     id,
                     waterType,
                     outputSurfaceTenths,
-                    emissionPerTick,
+                    sourceAmount,
                     cellIndices);
             }
 

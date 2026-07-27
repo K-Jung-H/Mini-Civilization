@@ -25,12 +25,12 @@ namespace MiniCivilization.World.Editor
         {
             if (manager.Generator == null
                 || manager.EditController == null
-                || manager.HydrologyController == null
+                || manager.WaterFlowController == null
                 || manager.Renderer == null
                 || manager.SaveController == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Generation, Editing, Hydrology, Renderer, and Save " +
+                    "Generation, Editing, Water Flow, Renderer, and Save " +
                     "references must be assigned.",
                     MessageType.Error);
             }
@@ -39,7 +39,7 @@ namespace MiniCivilization.World.Editor
             {
                 var world = manager.CurrentWorldData;
                 var waterBodyCount =
-                    manager.HydrologyController?.State?.WaterBodies.Count ?? 0;
+                    manager.WaterFlowController?.State?.WaterBodies.Count ?? 0;
                 EditorGUILayout.HelpBox(
                     $"Active world: {world.Size} x {world.Size} x {world.Height}\n" +
                     $"Seed: {world.Seed}\n" +

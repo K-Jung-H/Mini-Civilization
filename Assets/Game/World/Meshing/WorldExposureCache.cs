@@ -18,7 +18,7 @@ namespace MiniCivilization.World.Meshing
         }
     }
 
-    public sealed class WorldExposureCache
+    internal sealed class WorldExposureCache
     {
         private sealed class ChunkExposure
         {
@@ -50,7 +50,8 @@ namespace MiniCivilization.World.Meshing
             if (changeSet == null
                 || changeSet.World != world
                 || (!changeSet.Includes(WorldChangeType.CellStructure)
-                    && !changeSet.Includes(WorldChangeType.WaterTopology)))
+                    && !changeSet.Includes(WorldChangeType.WaterTopology)
+                    && !changeSet.Includes(WorldChangeType.WaterSurface)))
             {
                 return;
             }
