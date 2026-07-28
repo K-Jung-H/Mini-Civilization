@@ -6,34 +6,33 @@ namespace MiniCivilization.World.WaterFlow
 {
     internal readonly struct WaterFlowParameters : IEquatable<WaterFlowParameters>
     {
-        public readonly ushort MaximumAmount;
-        public readonly ushort SpreadAmountLoss;
-        public readonly ushort MinimumSpreadAmount;
+        public readonly byte SpreadAmountLoss;
+        public readonly byte MinimumSpreadAmount;
 
         public WaterFlowParameters(
-            float maximumAmount,
             float spreadAmountLoss,
             float minimumSpreadAmount)
         {
-            MaximumAmount = WaterAmountConversion.ToUnits(maximumAmount);
-            SpreadAmountLoss = Math.Min(
-                MaximumAmount,
-                WaterAmountConversion.ToUnits(spreadAmountLoss));
-            MinimumSpreadAmount = Math.Min(
-                MaximumAmount,
-                WaterAmountConversion.ToUnits(minimumSpreadAmount));
+            SpreadAmountLoss = WaterAmount.FromNormalized(
+                spreadAmountLoss);
+            MinimumSpreadAmount = WaterAmount.FromNormalized(
+                minimumSpreadAmount);
+        }
+
+        public WaterFlowParameters(in WaterFlowRules rules)
+        {
+            SpreadAmountLoss = rules.SpreadAmountLoss;
+            MinimumSpreadAmount = rules.MinimumSpreadAmount;
         }
 
         public bool Equals(WaterFlowParameters other) =>
-            MaximumAmount == other.MaximumAmount
-            && SpreadAmountLoss == other.SpreadAmountLoss
+            SpreadAmountLoss == other.SpreadAmountLoss
             && MinimumSpreadAmount == other.MinimumSpreadAmount;
 
         public override bool Equals(object obj) =>
             obj is WaterFlowParameters other && Equals(other);
 
         public override int GetHashCode() => HashCode.Combine(
-            MaximumAmount,
             SpreadAmountLoss,
             MinimumSpreadAmount);
     }
@@ -42,27 +41,29 @@ namespace MiniCivilization.World.WaterFlow
     {
         private readonly byte waterFill;
         private readonly WaterType waterType;
+        private readonly WaterCellRole waterRole;
         private readonly byte connectionMask;
-        private readonly bool isFalling;
-        private readonly bool connectsFromAbove;
+        private readonly WaterFlowDirectionMask direction;
 
         private WaterVisualState(
             byte waterFill,
             WaterType waterType,
+            WaterCellRole waterRole,
             byte connectionMask,
-            bool isFalling,
-            bool connectsFromAbove)
+            WaterFlowDirectionMask direction)
         {
             this.waterFill = waterFill;
             this.waterType = waterType;
+            this.waterRole = waterRole;
             this.connectionMask = connectionMask;
-            this.isFalling = isFalling;
-            this.connectsFromAbove = connectsFromAbove;
+            this.direction = direction;
         }
 
         public bool HasWater => waterFill > 0;
 
-        public static WaterVisualState Resolve(WorldData world, int cellIndex)
+        public static WaterVisualState Resolve(
+            WorldData world,
+            int cellIndex)
         {
             var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             var cell = world.GetCell(
@@ -81,22 +82,18 @@ namespace MiniCivilization.World.WaterFlow
             AddConnection(0, -1, 0, 1 << 3);
             AddConnection(0, 0, 1, 1 << 4);
             AddConnection(0, 0, -1, 1 << 5);
-
-            var connectsFromAbove = world.TryGetCell(
-                    coordinate.X,
-                    coordinate.Y + 1,
-                    coordinate.Z,
-                    out var above)
-                && above.HasWater
-                && (above.Flags & CellFlags.FallingWater) != 0;
             return new WaterVisualState(
                 cell.WaterFill,
-                cell.Water,
+                cell.Water.Type,
+                cell.Water.Role,
                 connections,
-                (cell.Flags & CellFlags.FallingWater) != 0,
-                connectsFromAbove);
+                cell.Water.Direction);
 
-            void AddConnection(int offsetX, int offsetY, int offsetZ, int mask)
+            void AddConnection(
+                int offsetX,
+                int offsetY,
+                int offsetZ,
+                int mask)
             {
                 if (world.TryGetCell(
                         coordinate.X + offsetX,
@@ -113,9 +110,9 @@ namespace MiniCivilization.World.WaterFlow
         public bool Equals(WaterVisualState other) =>
             waterFill == other.waterFill
             && waterType == other.waterType
+            && waterRole == other.waterRole
             && connectionMask == other.connectionMask
-            && isFalling == other.isFalling
-            && connectsFromAbove == other.connectsFromAbove;
+            && direction == other.direction;
 
         public override bool Equals(object obj) =>
             obj is WaterVisualState other && Equals(other);
@@ -123,9 +120,9 @@ namespace MiniCivilization.World.WaterFlow
         public override int GetHashCode() => HashCode.Combine(
             waterFill,
             waterType,
+            waterRole,
             connectionMask,
-            isFalling,
-            connectsFromAbove);
+            direction);
     }
 
     internal sealed class WaterFlowRecalculationResult
@@ -135,9 +132,12 @@ namespace MiniCivilization.World.WaterFlow
         public readonly HashSet<int> TopologyChangedCellIndices = new();
         public readonly HashSet<int> ChangedColumnIndices = new();
 
-        public bool HasPersistentChanges => LogicalChangedCellIndices.Count > 0;
-        public bool HasRenderChanges => RenderChangedCellIndices.Count > 0;
-        public bool HasTopologyChanges => TopologyChangedCellIndices.Count > 0;
+        public bool HasPersistentChanges =>
+            LogicalChangedCellIndices.Count > 0;
+        public bool HasRenderChanges =>
+            RenderChangedCellIndices.Count > 0;
+        public bool HasTopologyChanges =>
+            TopologyChangedCellIndices.Count > 0;
 
         public void Clear()
         {
@@ -149,9 +149,8 @@ namespace MiniCivilization.World.WaterFlow
     }
 
     /// <summary>
-    /// Re-evaluates water from neighboring cells until the quantized state is
-    /// stable. Sources are fixed boundary cells; flowing water has no owner,
-    /// parent, or child relationship.
+    /// Resolves water from neighboring Cells. No source ownership or
+    /// parent/child flow graph is retained.
     /// </summary>
     internal sealed class WaterFlowResolver
     {
@@ -163,9 +162,11 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Queue<int> dirtyCells;
         private readonly int[] queuedGenerationByCell;
         private readonly int[] expandedGenerationByCell;
-        private readonly WaterVisualState[] previousVisualStatesByCell;
-        private readonly HashSet<int> stateChangedCells = new();
         private readonly HashSet<int> applyCells = new();
+        private readonly List<int> changedCellsInPass = new();
+        private readonly List<int> expandedCellsInPass = new();
+        private readonly Dictionary<int, WaterVisualState>
+            previousVisualStates = new();
         private readonly WaterFlowRecalculationResult result = new();
         private int generation;
 
@@ -179,7 +180,6 @@ namespace MiniCivilization.World.WaterFlow
             dirtyCells = new Queue<int>(Math.Min(cellCount, 4096));
             queuedGenerationByCell = new int[cellCount];
             expandedGenerationByCell = new int[cellCount];
-            previousVisualStatesByCell = new WaterVisualState[cellCount];
         }
 
         public WaterFlowRecalculationResult Recalculate(
@@ -201,8 +201,8 @@ namespace MiniCivilization.World.WaterFlow
 
             BeginGeneration();
             result.Clear();
-            stateChangedCells.Clear();
             applyCells.Clear();
+            previousVisualStates.Clear();
             state.IsRecalculating = true;
 
             foreach (var cellIndex in changedCellIndices)
@@ -212,7 +212,11 @@ namespace MiniCivilization.World.WaterFlow
 
             foreach (var columnIndex in changedColumnIndices)
             {
-                WorldIndex.DecodeColumn(world, columnIndex, out var x, out var z);
+                WorldIndex.DecodeColumn(
+                    world,
+                    columnIndex,
+                    out var x,
+                    out var z);
                 for (var y = 0; y < world.Height; y++)
                 {
                     EnqueueCellAndNeighbors(
@@ -221,128 +225,121 @@ namespace MiniCivilization.World.WaterFlow
                 }
             }
 
-            var processedCellCount = 0;
-            var maximumProcessedCellCount = Math.Max(
+            var processed = 0;
+            var maximumProcessed = Math.Max(
                 checked(state.CellCount * 32),
                 4096);
             try
             {
                 while (dirtyCells.Count > 0)
                 {
-                    if (++processedCellCount > maximumProcessedCellCount)
+                    var passCount = dirtyCells.Count;
+                    changedCellsInPass.Clear();
+                    expandedCellsInPass.Clear();
+                    for (var passIndex = 0;
+                         passIndex < passCount;
+                         passIndex++)
                     {
-                        throw new InvalidOperationException(
-                            "Water flow did not converge. " +
-                            "The local routing state contains a cycle.");
-                    }
+                        if (++processed > maximumProcessed)
+                        {
+                            throw new InvalidOperationException(
+                                "Water flow did not converge.");
+                        }
 
-                    var cellIndex = dirtyCells.Dequeue();
-                    queuedGenerationByCell[cellIndex] = 0;
-                    var firstExpansion =
-                        expandedGenerationByCell[cellIndex] != generation;
-                    expandedGenerationByCell[cellIndex] = generation;
+                        var cellIndex = dirtyCells.Dequeue();
+                        queuedGenerationByCell[cellIndex] = 0;
+                        var firstExpansion =
+                            expandedGenerationByCell[cellIndex] != generation;
+                        expandedGenerationByCell[cellIndex] = generation;
 
-                    ResolveDesiredState(
-                        world,
-                        state,
-                        cellIndex,
-                        parameters,
-                        out var desiredAmount,
-                        out var desiredWaterType,
-                        out var desiredIncomingDirections,
-                        out var desiredFlowHeading,
-                        out var desiredFlowMode);
-                    var changed = state.SetResolvedCell(
-                        cellIndex,
-                        desiredAmount,
-                        desiredWaterType,
-                        desiredIncomingDirections,
-                        desiredFlowHeading,
-                        desiredFlowMode);
-                    if (changed)
-                    {
-                        stateChangedCells.Add(cellIndex);
-                        EnqueueCellAndNeighbors(world, cellIndex);
-                        continue;
-                    }
-
-                    if (firstExpansion
-                        && state.GetTargetAmount(cellIndex)
-                            >= parameters.MinimumSpreadAmount)
-                    {
-                        EnqueuePotentialRecipients(
+                        var desired = ResolveDesiredWater(
                             world,
                             state,
                             cellIndex,
                             parameters);
+                        if (state.StageResolvedCell(cellIndex, desired))
+                        {
+                            changedCellsInPass.Add(cellIndex);
+                        }
+                        else if (firstExpansion
+                                 && desired.Amount
+                                 >= parameters.MinimumSpreadAmount)
+                        {
+                            expandedCellsInPass.Add(cellIndex);
+                        }
+                    }
+
+                    state.ApplyResolutionPass();
+                    for (var index = 0;
+                         index < changedCellsInPass.Count;
+                         index++)
+                    {
+                        EnqueueCellAndNeighbors(
+                            world,
+                            changedCellsInPass[index]);
+                    }
+
+                    for (var index = 0;
+                         index < expandedCellsInPass.Count;
+                         index++)
+                    {
+                        EnqueueCellAndNeighbors(
+                            world,
+                            expandedCellsInPass[index]);
                     }
                 }
 
-                BuildApplySet(world);
+                BuildApplySet(world, state);
                 ApplyResolvedState(world, state);
                 return result;
             }
             finally
             {
+                state.CancelResolutionPass();
                 state.IsRecalculating = false;
+                state.ClearResolvedCells();
             }
         }
 
-        private void ResolveDesiredState(
+        private static WaterCellData ResolveDesiredWater(
             WorldData world,
             WaterFlowState state,
             int cellIndex,
-            in WaterFlowParameters parameters,
-            out ushort desiredAmount,
-            out WaterType desiredWaterType,
-            out WaterIncomingDirectionMask desiredIncomingDirections,
-            out WaterFlowHeadingMask desiredFlowHeading,
-            out WaterFlowMode desiredFlowMode)
+            in WaterFlowParameters parameters)
         {
             var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             var cell = world.GetCell(
                 coordinate.X,
                 coordinate.Y,
                 coordinate.Z);
-            var capacity = GetWaterCapacityAmount(cell, parameters.MaximumAmount);
-            var behavior = world.WaterState.GetBehavior(cellIndex);
-            if (IsFixedBehavior(behavior))
+            var current = state.GetWater(cellIndex);
+            var capacitySteps =
+                WorldGrid.HeightStepsPerCell - cell.SolidFill;
+            if (capacitySteps <= 0)
             {
-                var amount = behavior == WaterCellBehavior.Source
-                    ? Math.Max(
-                        world.WaterState.GetAmount(cellIndex),
-                        world.WaterState.GetSourceAmount(cellIndex))
-                    : world.WaterState.GetAmount(cellIndex);
-                desiredAmount = checked((ushort)Math.Min(capacity, amount));
-                desiredWaterType = desiredAmount == 0
-                    ? WaterType.None
-                    : cell.Water != WaterType.None
-                        ? cell.Water
-                        : world.WaterState.GetSourceWaterType(cellIndex);
-                desiredIncomingDirections = WaterIncomingDirectionMask.None;
-                desiredFlowHeading = WaterFlowHeadingMask.None;
-                desiredFlowMode = desiredAmount > 0
-                    ? WaterFlowMode.Surface
-                    : WaterFlowMode.None;
-                return;
+                return default;
             }
 
-            if (capacity < parameters.MinimumSpreadAmount)
+            if (current.Role == WaterCellRole.Source)
             {
-                desiredAmount = 0;
-                desiredWaterType = WaterType.None;
-                desiredIncomingDirections = WaterIncomingDirectionMask.None;
-                desiredFlowHeading = WaterFlowHeadingMask.None;
-                desiredFlowMode = WaterFlowMode.None;
-                return;
+                current.Amount = WaterAmount.Full;
+                current.Direction &= WaterFlowDirectionMask.Horizontal;
+                if (CanFlowDown(world, coordinate))
+                {
+                    current.Direction |= WaterFlowDirectionMask.Down;
+                }
+
+                current.Normalize();
+                return current;
             }
 
-            var bestAmount = 0;
-            var bestDonorIndex = int.MaxValue;
-            var bestWaterType = WaterType.None;
-            var incomingDirections = WaterIncomingDirectionMask.None;
-            var flowHeading = WaterFlowHeadingMask.None;
+            if (current.Role == WaterCellRole.Reservoir)
+            {
+                current.Normalize();
+                return current;
+            }
 
+            var desired = default(WaterCellData);
             if (coordinate.Y + 1 < world.Height)
             {
                 var aboveIndex = WorldIndex.EncodeCell(
@@ -350,35 +347,22 @@ namespace MiniCivilization.World.WaterFlow
                     coordinate.X,
                     coordinate.Y + 1,
                     coordinate.Z);
-                var aboveAmount = state.GetTargetAmount(aboveIndex);
-                var aboveCell = world.GetCell(
-                    coordinate.X,
-                    coordinate.Y + 1,
-                    coordinate.Z);
-                var aboveCoordinate = new CellCoordinate(
-                    coordinate.X,
-                    coordinate.Y + 1,
-                    coordinate.Z);
-                if (aboveAmount >= parameters.MinimumSpreadAmount
+                var above = state.GetWater(aboveIndex);
+                if (above.Amount >= parameters.MinimumSpreadAmount
                     && CanFlowDown(
                         world,
-                        aboveCoordinate,
-                        aboveCell,
-                        parameters.MinimumSpreadAmount,
-                        parameters.MaximumAmount))
+                        new CellCoordinate(
+                            coordinate.X,
+                            coordinate.Y + 1,
+                            coordinate.Z)))
                 {
-                    SelectBestDonor(
-                        state,
-                        aboveIndex,
-                        Math.Min(capacity, aboveAmount),
-                        WaterIncomingDirectionMask.FromAbove,
-                        state.GetFlowHeading(aboveIndex),
-                        parameters.MinimumSpreadAmount,
-                        ref bestAmount,
-                        ref bestDonorIndex,
-                        ref bestWaterType,
-                        ref incomingDirections,
-                        ref flowHeading);
+                    desired = CreateDynamicWater(
+                        above.Amount,
+                        above.Type,
+                        (above.Direction
+                            & WaterFlowDirectionMask.Horizontal)
+                        | WaterFlowDirectionMask.Down,
+                        above.Flags);
                 }
             }
 
@@ -386,9 +370,9 @@ namespace MiniCivilization.World.WaterFlow
                  directionIndex < HorizontalDirections.Length;
                  directionIndex++)
             {
-                var direction = HorizontalDirections[directionIndex];
-                var donorX = coordinate.X + direction.x;
-                var donorZ = coordinate.Z + direction.z;
+                var offset = HorizontalDirections[directionIndex];
+                var donorX = coordinate.X - offset.x;
+                var donorZ = coordinate.Z - offset.z;
                 if (!world.Contains(donorX, coordinate.Y, donorZ))
                 {
                     continue;
@@ -399,143 +383,185 @@ namespace MiniCivilization.World.WaterFlow
                     donorX,
                     coordinate.Y,
                     donorZ);
-                var donorAmount = state.GetTargetAmount(donorIndex);
-                var candidateAmount = donorAmount - parameters.SpreadAmountLoss;
-                if (candidateAmount < parameters.MinimumSpreadAmount)
+                var donor = state.GetWater(donorIndex);
+                if (donor.Amount <= parameters.SpreadAmountLoss
+                    || donor.Amount < parameters.MinimumSpreadAmount
+                    || CanFlowDown(
+                        world,
+                        new CellCoordinate(
+                            donorX,
+                            coordinate.Y,
+                            donorZ)))
                 {
                     continue;
                 }
 
-                var donorCoordinate = new CellCoordinate(
-                    donorX,
-                    coordinate.Y,
-                    donorZ);
-                if (!CanFlowHorizontallyTo(
+                var candidateAmount = checked((byte)(
+                    donor.Amount - parameters.SpreadAmountLoss));
+                if (candidateAmount < parameters.MinimumSpreadAmount
+                    || !CanReachHorizontally(
                         world,
                         state,
                         donorIndex,
-                        donorCoordinate,
                         cellIndex,
-                        parameters))
+                        candidateAmount))
                 {
                     continue;
                 }
 
-                SelectBestDonor(
-                    state,
-                    donorIndex,
-                    Math.Min(capacity, candidateAmount),
-                    GetIncomingDirection(directionIndex),
-                    GetHeadingFromDonorOffset(directionIndex),
-                    parameters.MinimumSpreadAmount,
-                    ref bestAmount,
-                    ref bestDonorIndex,
-                    ref bestWaterType,
-                    ref incomingDirections,
-                    ref flowHeading);
-            }
-
-            desiredAmount = checked((ushort)bestAmount);
-            desiredWaterType = bestAmount > 0
-                ? bestWaterType != WaterType.None
-                    ? bestWaterType
-                    : WaterType.Fresh
-                : WaterType.None;
-            desiredIncomingDirections = bestAmount > 0
-                ? incomingDirections
-                : WaterIncomingDirectionMask.None;
-            desiredFlowHeading = bestAmount > 0
-                ? flowHeading
-                : WaterFlowHeadingMask.None;
-            desiredFlowMode = ResolveFlowMode(
-                world,
-                coordinate,
-                cell,
-                desiredAmount,
-                incomingDirections,
-                parameters);
-        }
-
-        private static void SelectBestDonor(
-            WaterFlowState state,
-            int donorIndex,
-            int candidateAmount,
-            WaterIncomingDirectionMask incomingDirection,
-            WaterFlowHeadingMask candidateHeading,
-            ushort minimumSpreadAmount,
-            ref int bestAmount,
-            ref int bestDonorIndex,
-            ref WaterType bestWaterType,
-            ref WaterIncomingDirectionMask incomingDirections,
-            ref WaterFlowHeadingMask flowHeading)
-        {
-            if (candidateAmount < minimumSpreadAmount
-                || candidateAmount < bestAmount)
-            {
-                return;
-            }
-
-            if (candidateAmount == bestAmount)
-            {
-                incomingDirections |= incomingDirection;
-                flowHeading |= candidateHeading;
-                if (donorIndex >= bestDonorIndex)
+                var outgoingDirection = ToDirection(offset.x, offset.z);
+                var donorHeading = donor.Direction
+                    & WaterFlowDirectionMask.Horizontal;
+                if (donor.Role == WaterCellRole.Dynamic
+                    && donorHeading != WaterFlowDirectionMask.None
+                    && (donorHeading & outgoingDirection) == 0
+                    && HasReachablePreferredDirection(
+                        world,
+                        state,
+                        donorIndex,
+                        donorHeading,
+                        candidateAmount))
                 {
-                    return;
+                    continue;
                 }
+
+                if (candidateAmount > desired.Amount)
+                {
+                    desired = CreateDynamicWater(
+                        candidateAmount,
+                        donor.Type,
+                        outgoingDirection,
+                        donor.Flags | WaterCellFlags.River);
+                }
+                else if (candidateAmount == desired.Amount
+                         && candidateAmount > 0)
+                {
+                    desired.Direction |= outgoingDirection;
+                }
+            }
+
+            if (desired.Amount == 0)
+            {
+                return default;
+            }
+
+            if (CanFlowDown(world, coordinate))
+            {
+                desired.Direction |= WaterFlowDirectionMask.Down;
             }
             else
             {
-                incomingDirections = incomingDirection;
-                flowHeading = candidateHeading;
+                desired.Direction &= WaterFlowDirectionMask.Horizontal;
             }
 
-            bestAmount = candidateAmount;
-            bestDonorIndex = donorIndex;
-            bestWaterType = state.GetWaterType(donorIndex);
+            desired.Normalize();
+            return desired;
         }
 
-        private bool CanFlowHorizontallyTo(
+        private static WaterCellData CreateDynamicWater(
+            byte amount,
+            WaterType type,
+            WaterFlowDirectionMask direction,
+            WaterCellFlags flags) => new()
+        {
+            Amount = amount,
+            Type = type == WaterType.None ? WaterType.Fresh : type,
+            Role = WaterCellRole.Dynamic,
+            Direction = direction,
+            Flags = flags
+        };
+
+        private static bool CanFlowDown(
+            WorldData world,
+            CellCoordinate coordinate)
+        {
+            if (coordinate.Y <= 0)
+            {
+                return false;
+            }
+
+            var below = world.GetCell(
+                coordinate.X,
+                coordinate.Y - 1,
+                coordinate.Z);
+            return below.SolidFill < WorldGrid.HeightStepsPerCell;
+        }
+
+        private static bool CanReachHorizontally(
             WorldData world,
             WaterFlowState state,
             int donorIndex,
-            in CellCoordinate donorCoordinate,
             int targetIndex,
-            in WaterFlowParameters parameters)
+            byte candidateAmount)
         {
+            var donorCoordinate = WorldIndex.DecodeCell(world, donorIndex);
+            var targetCoordinate = WorldIndex.DecodeCell(world, targetIndex);
             var donorCell = world.GetCell(
                 donorCoordinate.X,
                 donorCoordinate.Y,
                 donorCoordinate.Z);
-            if (CanFlowDown(
+            var targetCell = world.GetCell(
+                targetCoordinate.X,
+                targetCoordinate.Y,
+                targetCoordinate.Z);
+            var donorWater = state.GetWater(donorIndex);
+            var donorCapacity =
+                WorldGrid.HeightStepsPerCell - donorCell.SolidFill;
+            var donorTopUnits = donorCoordinate.Y
+                * WorldGrid.HeightStepsPerCell
+                + donorCell.SolidFill
+                + donorWater.Amount
+                * donorCapacity
+                / (float)WaterAmount.Full;
+            var targetFloorUnits = targetCoordinate.Y
+                * WorldGrid.HeightStepsPerCell
+                + targetCell.SolidFill;
+            if (targetFloorUnits >= donorTopUnits)
+            {
+                return false;
+            }
+
+            return candidateAmount > 0
+                && targetCell.SolidFill < WorldGrid.HeightStepsPerCell;
+        }
+
+        private static bool HasReachablePreferredDirection(
+            WorldData world,
+            WaterFlowState state,
+            int donorIndex,
+            WaterFlowDirectionMask preferredDirections,
+            byte candidateAmount)
+        {
+            var donor = WorldIndex.DecodeCell(world, donorIndex);
+            for (var index = 0;
+                 index < HorizontalDirections.Length;
+                 index++)
+            {
+                var offset = HorizontalDirections[index];
+                var direction = ToDirection(offset.x, offset.z);
+                if ((preferredDirections & direction) == 0)
+                {
+                    continue;
+                }
+
+                var targetX = donor.X + offset.x;
+                var targetZ = donor.Z + offset.z;
+                if (!world.Contains(targetX, donor.Y, targetZ))
+                {
+                    continue;
+                }
+
+                var targetIndex = WorldIndex.EncodeCell(
                     world,
-                    donorCoordinate,
-                    donorCell,
-                    parameters.MinimumSpreadAmount,
-                    parameters.MaximumAmount))
-            {
-                return false;
-            }
-
-            Span<FlowCandidate> candidates = stackalloc FlowCandidate[4];
-            var count = BuildHorizontalCandidates(
-                world,
-                state,
-                donorIndex,
-                donorCoordinate,
-                donorCell,
-                parameters,
-                candidates);
-            if (count == 0)
-            {
-                return false;
-            }
-
-            var behavior = world.WaterState.GetBehavior(donorIndex);
-            var recipientCount = IsFixedBehavior(behavior) ? count : 1;
-            for (var index = 0; index < recipientCount; index++)
-            {
-                if (candidates[index].TargetCellIndex == targetIndex)
+                    targetX,
+                    donor.Y,
+                    targetZ);
+                if (CanReachHorizontally(
+                        world,
+                        state,
+                        donorIndex,
+                        targetIndex,
+                        candidateAmount))
                 {
                     return true;
                 }
@@ -544,142 +570,17 @@ namespace MiniCivilization.World.WaterFlow
             return false;
         }
 
-        private int BuildHorizontalCandidates(
-            WorldData world,
-            WaterFlowState state,
-            int donorIndex,
-            in CellCoordinate coordinate,
-            in CellData cell,
-            in WaterFlowParameters parameters,
-            Span<FlowCandidate> candidates)
+        private void BuildApplySet(WorldData world, WaterFlowState state)
         {
-            var donorAmount = state.GetTargetAmount(donorIndex);
-            if (donorAmount - parameters.SpreadAmountLoss
-                < parameters.MinimumSpreadAmount)
+            foreach (var pair in state.EnumerateResolvedCells())
             {
-                return 0;
+                AddApplyCellAndNeighbors(world, pair.Key);
             }
 
-            var donorSurface = coordinate.Y * parameters.MaximumAmount
-                + GetSolidFillAmount(cell, parameters.MaximumAmount)
-                + donorAmount;
-            var flowHeading = state.GetFlowHeading(donorIndex);
-            var count = 0;
-            for (var directionIndex = 0;
-                 directionIndex < HorizontalDirections.Length;
-                 directionIndex++)
+            foreach (var cellIndex in applyCells)
             {
-                var direction = HorizontalDirections[directionIndex];
-                var targetX = coordinate.X + direction.x;
-                var targetZ = coordinate.Z + direction.z;
-                if (!world.Contains(targetX, coordinate.Y, targetZ))
-                {
-                    continue;
-                }
-
-                var targetIndex = WorldIndex.EncodeCell(
-                    world,
-                    targetX,
-                    coordinate.Y,
-                    targetZ);
-                if (IsFixedWater(world, targetIndex))
-                {
-                    continue;
-                }
-
-                var target = world.GetCell(targetX, coordinate.Y, targetZ);
-                if (GetWaterCapacityAmount(target, parameters.MaximumAmount)
-                    < parameters.MinimumSpreadAmount)
-                {
-                    continue;
-                }
-
-                var targetFloor = coordinate.Y * parameters.MaximumAmount
-                    + GetSolidFillAmount(target, parameters.MaximumAmount);
-                var availableSurface = donorSurface
-                    - parameters.SpreadAmountLoss;
-                if (availableSurface <= targetFloor)
-                {
-                    continue;
-                }
-
-                var targetCoordinate = new CellCoordinate(
-                    targetX,
-                    coordinate.Y,
-                    targetZ);
-                var flowDirection = (HorizontalFlowDirection)directionIndex;
-                candidates[count++] = new FlowCandidate(
-                    targetIndex,
-                    targetFloor,
-                    CanFlowDown(
-                        world,
-                        targetCoordinate,
-                        target,
-                        parameters.MinimumSpreadAmount,
-                        parameters.MaximumAmount),
-                    IsStraightContinuation(
-                        flowHeading,
-                        flowDirection),
-                    IsReverseDirection(
-                        flowHeading,
-                        flowDirection));
-            }
-
-            SortCandidates(world.Seed, candidates, count);
-            return count;
-        }
-
-        private void EnqueuePotentialRecipients(
-            WorldData world,
-            WaterFlowState state,
-            int cellIndex,
-            in WaterFlowParameters parameters)
-        {
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-            var cell = world.GetCell(
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
-            if (CanFlowDown(
-                    world,
-                    coordinate,
-                    cell,
-                    parameters.MinimumSpreadAmount,
-                    parameters.MaximumAmount))
-            {
-                Enqueue(world, coordinate.X, coordinate.Y - 1, coordinate.Z);
-                return;
-            }
-
-            Span<FlowCandidate> candidates = stackalloc FlowCandidate[4];
-            var count = BuildHorizontalCandidates(
-                world,
-                state,
-                cellIndex,
-                coordinate,
-                cell,
-                parameters,
-                candidates);
-            var behavior = world.WaterState.GetBehavior(cellIndex);
-            var recipientCount = IsFixedBehavior(behavior) ? count : Math.Min(1, count);
-            for (var index = 0; index < recipientCount; index++)
-            {
-                Enqueue(candidates[index].TargetCellIndex);
-            }
-        }
-
-        private void BuildApplySet(WorldData world)
-        {
-            foreach (var cellIndex in stateChangedCells)
-            {
-                applyCells.Add(cellIndex);
-                var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-                AddIfContained(world, coordinate.X + 1, coordinate.Y, coordinate.Z);
-                AddIfContained(world, coordinate.X - 1, coordinate.Y, coordinate.Z);
-                AddIfContained(world, coordinate.X, coordinate.Y + 1, coordinate.Z);
-                AddIfContained(world, coordinate.X, coordinate.Y - 1, coordinate.Z);
-                AddIfContained(world, coordinate.X, coordinate.Y, coordinate.Z + 1);
-                AddIfContained(world, coordinate.X, coordinate.Y, coordinate.Z - 1);
+                previousVisualStates[cellIndex] =
+                    WaterVisualState.Resolve(world, cellIndex);
             }
         }
 
@@ -687,136 +588,91 @@ namespace MiniCivilization.World.WaterFlow
             WorldData world,
             WaterFlowState state)
         {
-            foreach (var cellIndex in applyCells)
+            foreach (var pair in state.EnumerateResolvedCells())
             {
-                previousVisualStatesByCell[cellIndex] =
-                    WaterVisualState.Resolve(world, cellIndex);
-            }
-
-            foreach (var cellIndex in applyCells)
-            {
-                var previousBehavior = world.WaterState.GetBehavior(cellIndex);
-                var isFixed = IsFixedBehavior(previousBehavior);
-                var targetAmount = state.GetTargetAmount(cellIndex);
-                var targetBehavior = isFixed
-                    ? previousBehavior
-                    : targetAmount > 0
-                        ? WaterCellBehavior.FlowDependent
-                        : WaterCellBehavior.None;
-                var previousAmount = world.WaterState.GetAmount(cellIndex);
-                if (previousAmount != targetAmount
-                    || previousBehavior != targetBehavior)
-                {
-                    world.WaterState.SetCell(
-                        cellIndex,
-                        targetAmount,
-                        targetBehavior,
-                        previousBehavior == WaterCellBehavior.Source
-                            ? world.WaterState.GetSourceGroupId(cellIndex)
-                            : 0);
-                    result.LogicalChangedCellIndices.Add(cellIndex);
-                }
-
-                var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+                var coordinate = WorldIndex.DecodeCell(world, pair.Key);
                 var cell = world.GetCell(
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z);
-                var previousCell = cell;
-                var capacitySteps = WorldGrid.HeightStepsPerCell
-                    - cell.SolidFill;
-                var renderFill = targetAmount == 0
-                    ? (byte)0
-                    : WaterAmountConversion.ToRenderFill(
-                        targetAmount,
-                        state.MaximumAmount,
-                        capacitySteps);
-                cell.WaterFill = renderFill;
-                cell.Water = renderFill > 0
-                    ? state.GetWaterType(cellIndex) != WaterType.None
-                        ? state.GetWaterType(cellIndex)
-                        : WaterType.Fresh
-                    : WaterType.None;
-
-                if (renderFill > 0)
-                {
-                    if (!isFixed)
-                    {
-                        cell.Flags |= CellFlags.River | CellFlags.Generated;
-                    }
-
-                    if (state.GetFlowMode(cellIndex)
-                        == WaterFlowMode.Falling)
-                    {
-                        cell.Flags |= CellFlags.FallingWater;
-                    }
-                    else
-                    {
-                        cell.Flags &= ~CellFlags.FallingWater;
-                    }
-                }
-                else
-                {
-                    cell.Flags &= ~(CellFlags.River | CellFlags.FallingWater);
-                }
-
-                if (cell.Equals(previousCell))
+                var previousWater = cell.Water;
+                if (previousWater.Equals(pair.Value))
                 {
                     continue;
                 }
 
+                cell.Water = pair.Value;
+                cell.Normalize();
                 world.SetCellForEdit(
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z,
                     cell);
-                result.LogicalChangedCellIndices.Add(cellIndex);
-            }
-
-            foreach (var cellIndex in applyCells)
-            {
-                var previousVisual = previousVisualStatesByCell[cellIndex];
-                var nextVisual = WaterVisualState.Resolve(world, cellIndex);
-                if (previousVisual.Equals(nextVisual))
-                {
-                    continue;
-                }
-
-                result.RenderChangedCellIndices.Add(cellIndex);
-                var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+                result.LogicalChangedCellIndices.Add(pair.Key);
                 result.ChangedColumnIndices.Add(WorldIndex.EncodeColumn(
                     world,
                     coordinate.X,
                     coordinate.Z));
-                if (previousVisual.HasWater != nextVisual.HasWater)
+                if (previousWater.HasWater != cell.Water.HasWater)
                 {
-                    result.TopologyChangedCellIndices.Add(cellIndex);
+                    result.TopologyChangedCellIndices.Add(pair.Key);
+                }
+            }
+
+            foreach (var cellIndex in applyCells)
+            {
+                var next = WaterVisualState.Resolve(world, cellIndex);
+                if (!previousVisualStates.TryGetValue(
+                        cellIndex,
+                        out var previous)
+                    || !previous.Equals(next))
+                {
+                    result.RenderChangedCellIndices.Add(cellIndex);
                 }
             }
         }
 
-        private void EnqueueCellAndNeighbors(WorldData world, int cellIndex)
+        private void EnqueueCellAndNeighbors(
+            WorldData world,
+            int cellIndex)
         {
-            if ((uint)cellIndex >= (uint)queuedGenerationByCell.Length)
-            {
-                return;
-            }
-
             Enqueue(cellIndex);
             var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-            Enqueue(world, coordinate.X + 1, coordinate.Y, coordinate.Z);
-            Enqueue(world, coordinate.X - 1, coordinate.Y, coordinate.Z);
-            Enqueue(world, coordinate.X, coordinate.Y + 1, coordinate.Z);
-            Enqueue(world, coordinate.X, coordinate.Y - 1, coordinate.Z);
-            Enqueue(world, coordinate.X, coordinate.Y, coordinate.Z + 1);
-            Enqueue(world, coordinate.X, coordinate.Y, coordinate.Z - 1);
+            EnqueueIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
+            EnqueueIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
+            EnqueueIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
+            EnqueueIfContained(coordinate.X, coordinate.Y - 1, coordinate.Z);
+            EnqueueIfContained(coordinate.X, coordinate.Y, coordinate.Z + 1);
+            EnqueueIfContained(coordinate.X, coordinate.Y, coordinate.Z - 1);
+
+            void EnqueueIfContained(int x, int y, int z)
+            {
+                if (world.Contains(x, y, z))
+                {
+                    Enqueue(WorldIndex.EncodeCell(world, x, y, z));
+                }
+            }
         }
 
-        private void Enqueue(WorldData world, int x, int y, int z)
+        private void AddApplyCellAndNeighbors(
+            WorldData world,
+            int cellIndex)
         {
-            if (world.Contains(x, y, z))
+            applyCells.Add(cellIndex);
+            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+            AddIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
+            AddIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
+            AddIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
+            AddIfContained(coordinate.X, coordinate.Y - 1, coordinate.Z);
+            AddIfContained(coordinate.X, coordinate.Y, coordinate.Z + 1);
+            AddIfContained(coordinate.X, coordinate.Y, coordinate.Z - 1);
+
+            void AddIfContained(int x, int y, int z)
             {
-                Enqueue(WorldIndex.EncodeCell(world, x, y, z));
+                if (world.Contains(x, y, z))
+                {
+                    applyCells.Add(WorldIndex.EncodeCell(world, x, y, z));
+                }
             }
         }
 
@@ -831,270 +687,91 @@ namespace MiniCivilization.World.WaterFlow
             dirtyCells.Enqueue(cellIndex);
         }
 
-        private void AddIfContained(WorldData world, int x, int y, int z)
-        {
-            if (world.Contains(x, y, z))
-            {
-                applyCells.Add(WorldIndex.EncodeCell(world, x, y, z));
-            }
-        }
-
         private void BeginGeneration()
         {
             dirtyCells.Clear();
-            if (generation == int.MaxValue)
+            generation++;
+            if (generation != int.MaxValue)
             {
-                Array.Clear(
-                    queuedGenerationByCell,
-                    0,
-                    queuedGenerationByCell.Length);
-                Array.Clear(
-                    expandedGenerationByCell,
-                    0,
-                    expandedGenerationByCell.Length);
-                generation = 1;
                 return;
             }
 
-            generation++;
-            if (generation == 0)
-            {
-                generation = 1;
-            }
+            Array.Clear(
+                queuedGenerationByCell,
+                0,
+                queuedGenerationByCell.Length);
+            Array.Clear(
+                expandedGenerationByCell,
+                0,
+                expandedGenerationByCell.Length);
+            generation = 1;
         }
 
-        private static bool CanFlowDown(
-            WorldData world,
-            in CellCoordinate coordinate,
-            in CellData cell,
-            ushort minimumSpreadAmount,
-            ushort maximumAmount)
+        private static WaterFlowDirectionMask ToDirection(int x, int z)
         {
-            if (coordinate.Y <= 0 || cell.SolidFill > 0)
-            {
-                return false;
-            }
-
-            var belowIndex = WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y - 1,
-                coordinate.Z);
-            if (IsFixedWater(world, belowIndex))
-            {
-                return false;
-            }
-
-            var below = world.GetCell(
-                coordinate.X,
-                coordinate.Y - 1,
-                coordinate.Z);
-            return GetWaterCapacityAmount(below, maximumAmount)
-                >= minimumSpreadAmount;
+            if (x > 0) return WaterFlowDirectionMask.East;
+            if (x < 0) return WaterFlowDirectionMask.West;
+            if (z > 0) return WaterFlowDirectionMask.North;
+            if (z < 0) return WaterFlowDirectionMask.South;
+            return WaterFlowDirectionMask.None;
         }
+    }
 
-        private static bool IsFixedWater(WorldData world, int cellIndex) =>
-            IsFixedBehavior(world.WaterState.GetBehavior(cellIndex));
+    /// <summary>
+    /// Shared synchronous entry point used by generation and runtime rebuilds.
+    /// Generated river paths provide only persistent sources; every dynamic
+    /// WaterCell is resolved by the same neighbor-based rules used after edits.
+    /// </summary>
+    internal static class WaterFlowSolver
+    {
+        private static readonly int[] EmptyColumns = Array.Empty<int>();
 
-        private static bool IsFixedBehavior(WaterCellBehavior behavior) =>
-            behavior == WaterCellBehavior.Source
-            || behavior == WaterCellBehavior.Reservoir
-            || behavior == WaterCellBehavior.FixedReservoir;
-
-        private static WaterIncomingDirectionMask GetIncomingDirection(
-            int donorOffsetDirectionIndex) =>
-            donorOffsetDirectionIndex switch
-            {
-                0 => WaterIncomingDirectionMask.FromEast,
-                1 => WaterIncomingDirectionMask.FromNorth,
-                2 => WaterIncomingDirectionMask.FromWest,
-                3 => WaterIncomingDirectionMask.FromSouth,
-                _ => WaterIncomingDirectionMask.None
-            };
-
-        private static WaterFlowHeadingMask GetHeadingFromDonorOffset(
-            int donorOffsetDirectionIndex) =>
-            donorOffsetDirectionIndex switch
-            {
-                0 => WaterFlowHeadingMask.West,
-                1 => WaterFlowHeadingMask.South,
-                2 => WaterFlowHeadingMask.East,
-                3 => WaterFlowHeadingMask.North,
-                _ => WaterFlowHeadingMask.None
-            };
-
-        private static WaterFlowMode ResolveFlowMode(
-            WorldData world,
-            in CellCoordinate coordinate,
-            in CellData cell,
-            int amount,
-            WaterIncomingDirectionMask incomingDirections,
-            in WaterFlowParameters parameters)
+        public static void ResolveGeneratedWorld(WorldData world)
         {
-            if (amount < parameters.MinimumSpreadAmount)
+            if (world == null)
             {
-                return WaterFlowMode.None;
+                throw new ArgumentNullException(nameof(world));
             }
 
-            if (CanFlowDown(
-                    world,
-                    coordinate,
-                    cell,
-                    parameters.MinimumSpreadAmount,
-                    parameters.MaximumAmount))
+            if (!world.WaterSources.IsInitialized)
             {
-                return WaterFlowMode.Falling;
+                throw new InvalidOperationException(
+                    "Water sources must be classified before water is resolved.");
             }
 
-            return incomingDirections != WaterIncomingDirectionMask.None
-                ? WaterFlowMode.Flowing
-                : WaterFlowMode.Surface;
-        }
-
-        private static bool IsStraightContinuation(
-            WaterFlowHeadingMask flowHeading,
-            HorizontalFlowDirection outgoingDirection) =>
-            outgoingDirection switch
+            var seedCells = new List<int>();
+            for (var y = 0; y < world.Height; y++)
+            for (var z = 0; z < world.Size; z++)
+            for (var x = 0; x < world.Size; x++)
             {
-                HorizontalFlowDirection.East =>
-                    (flowHeading & WaterFlowHeadingMask.East) != 0,
-                HorizontalFlowDirection.North =>
-                    (flowHeading & WaterFlowHeadingMask.North) != 0,
-                HorizontalFlowDirection.West =>
-                    (flowHeading & WaterFlowHeadingMask.West) != 0,
-                HorizontalFlowDirection.South =>
-                    (flowHeading & WaterFlowHeadingMask.South) != 0,
-                _ => false
-            };
-
-        private static bool IsReverseDirection(
-            WaterFlowHeadingMask flowHeading,
-            HorizontalFlowDirection outgoingDirection) =>
-            outgoingDirection switch
-            {
-                HorizontalFlowDirection.East =>
-                    (flowHeading & WaterFlowHeadingMask.West) != 0,
-                HorizontalFlowDirection.North =>
-                    (flowHeading & WaterFlowHeadingMask.South) != 0,
-                HorizontalFlowDirection.West =>
-                    (flowHeading & WaterFlowHeadingMask.East) != 0,
-                HorizontalFlowDirection.South =>
-                    (flowHeading & WaterFlowHeadingMask.North) != 0,
-                _ => false
-            };
-
-        private static int GetWaterCapacityAmount(
-            in CellData cell,
-            ushort maximumAmount) =>
-            (int)Math.Round(
-                (WorldGrid.HeightStepsPerCell - cell.SolidFill)
-                    * maximumAmount
-                    / (double)WorldGrid.HeightStepsPerCell,
-                MidpointRounding.AwayFromZero);
-
-        private static int GetSolidFillAmount(
-            in CellData cell,
-            ushort maximumAmount) =>
-            (int)Math.Round(
-                cell.SolidFill * maximumAmount
-                    / (double)WorldGrid.HeightStepsPerCell,
-                MidpointRounding.AwayFromZero);
-
-        private static void SortCandidates(
-            int seed,
-            Span<FlowCandidate> candidates,
-            int count)
-        {
-            for (var index = 1; index < count; index++)
-            {
-                var value = candidates[index];
-                var position = index - 1;
-                while (position >= 0
-                       && CompareCandidates(
-                           seed,
-                           value,
-                           candidates[position]) < 0)
+                var cell = world.GetCell(x, y, z);
+                if (!cell.HasWater)
                 {
-                    candidates[position + 1] = candidates[position];
-                    position--;
+                    continue;
                 }
 
-                candidates[position + 1] = value;
-            }
-        }
+                if (cell.Water.Role == WaterCellRole.Dynamic)
+                {
+                    cell.Water = default;
+                    world.SetCellBulk(x, y, z, cell);
+                    continue;
+                }
 
-        private static int CompareCandidates(
-            int seed,
-            in FlowCandidate left,
-            in FlowCandidate right)
-        {
-            var comparison = right.IsStraightContinuation.CompareTo(
-                left.IsStraightContinuation);
-            if (comparison != 0)
-            {
-                return comparison;
+                seedCells.Add(WorldIndex.EncodeCell(world, x, y, z));
             }
 
-            comparison = right.LeadsToFall.CompareTo(left.LeadsToFall);
-            if (comparison != 0)
-            {
-                return comparison;
-            }
-
-            comparison = left.IsReverseDirection.CompareTo(
-                right.IsReverseDirection);
-            if (comparison != 0)
-            {
-                return comparison;
-            }
-
-            comparison = left.TargetFloor.CompareTo(right.TargetFloor);
-            if (comparison != 0)
-            {
-                return comparison;
-            }
-
-            return DeterministicTie(seed, left.TargetCellIndex)
-                .CompareTo(DeterministicTie(seed, right.TargetCellIndex));
-        }
-
-        private static int DeterministicTie(int seed, int cellIndex)
-        {
-            unchecked
-            {
-                return (seed * 397 ^ cellIndex) & int.MaxValue;
-            }
-        }
-
-        private readonly struct FlowCandidate
-        {
-            public readonly int TargetCellIndex;
-            public readonly int TargetFloor;
-            public readonly bool LeadsToFall;
-            public readonly bool IsStraightContinuation;
-            public readonly bool IsReverseDirection;
-
-            public FlowCandidate(
-                int targetCellIndex,
-                int targetFloor,
-                bool leadsToFall,
-                bool isStraightContinuation,
-                bool isReverseDirection)
-            {
-                TargetCellIndex = targetCellIndex;
-                TargetFloor = targetFloor;
-                LeadsToFall = leadsToFall;
-                IsStraightContinuation = isStraightContinuation;
-                IsReverseDirection = isReverseDirection;
-            }
-        }
-
-        private enum HorizontalFlowDirection : byte
-        {
-            East = 0,
-            North = 1,
-            West = 2,
-            South = 3
+            world.RebuildAllSurfaceColumns();
+            var state = new WaterFlowState(
+                world,
+                WaterBodyResolver.Resolve(world));
+            var resolver = new WaterFlowResolver(state.CellCount);
+            resolver.Recalculate(
+                world,
+                state,
+                seedCells,
+                EmptyColumns,
+                new WaterFlowParameters(world.WaterFlowRules));
+            world.RebuildAllSurfaceColumns();
         }
     }
 }

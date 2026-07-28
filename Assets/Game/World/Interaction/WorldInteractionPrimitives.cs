@@ -11,31 +11,19 @@ namespace MiniCivilization.World.Interaction
         Water
     }
 
-    public enum SurfaceTriangleRole : byte
-    {
-        Core,
-        Cliff,
-        GapFill,
-        FallingWater,
-        Bottom = 7
-    }
-
     public readonly struct SurfaceTriangleMetadata
     {
         public static readonly SurfaceTriangleMetadata NotInteractive =
-            new(-1, SurfaceTriangleRole.Core, false);
+            new(-1, false);
 
         public readonly int OwnerCellIndex;
-        public readonly SurfaceTriangleRole Role;
         public readonly bool IsInteractive;
 
         public SurfaceTriangleMetadata(
             int ownerCellIndex,
-            SurfaceTriangleRole role,
             bool isInteractive)
         {
             OwnerCellIndex = ownerCellIndex;
-            Role = role;
             IsInteractive = isInteractive;
         }
     }
@@ -45,20 +33,16 @@ namespace MiniCivilization.World.Interaction
     {
         [SerializeField] private int ownerCellIndex;
         [SerializeField] private SurfaceInteractionType surfaceType;
-        [SerializeField] private SurfaceTriangleRole role;
 
         public readonly int OwnerCellIndex => ownerCellIndex;
         public readonly SurfaceInteractionType SurfaceType => surfaceType;
-        public readonly SurfaceTriangleRole Role => role;
 
         public InteractionTriangleMetadata(
             int ownerCellIndex,
-            SurfaceInteractionType surfaceType,
-            SurfaceTriangleRole role)
+            SurfaceInteractionType surfaceType)
         {
             this.ownerCellIndex = ownerCellIndex;
             this.surfaceType = surfaceType;
-            this.role = role;
         }
     }
 

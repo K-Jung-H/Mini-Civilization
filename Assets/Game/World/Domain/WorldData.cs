@@ -77,8 +77,9 @@ namespace MiniCivilization.World.Domain
         public int ChunkCountY { get; }
         public int ChunkCountZ { get; }
         public int Seed { get; }
+        public WaterFlowRules WaterFlowRules { get; private set; }
         public WorldChangeId CurrentChangeId { get; private set; }
-        public WaterState WaterState { get; }
+        public WaterSourceCollection WaterSources { get; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -103,13 +104,15 @@ namespace MiniCivilization.World.Domain
             ChunkSizeY = chunkSizeY;
             ChunkSizeZ = chunkSizeZ;
             Seed = seed;
+            WaterFlowRules =
+                global::MiniCivilization.World.Domain.WaterFlowRules.Default;
             ChunkCountX = size / chunkSizeX;
             ChunkCountY = height / chunkSizeY;
             ChunkCountZ = size / chunkSizeZ;
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
             surfaceColumnMap = new SurfaceColumnData[size * size];
             columnEnvironmentMap = new ColumnEnvironmentData[size * size];
-            WaterState = new WaterState(checked(size * size * height));
+            WaterSources = new WaterSourceCollection();
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
             for (var chunkZ = 0; chunkZ < ChunkCountZ; chunkZ++)
@@ -127,6 +130,13 @@ namespace MiniCivilization.World.Domain
                 surfaceColumnMap[i].SurfaceCellY = -1;
                 surfaceColumnMap[i].WaterCellY = -1;
             }
+        }
+
+        public void ConfigureWaterFlow(WaterFlowRules rules)
+        {
+            WaterFlowRules = new WaterFlowRules(
+                rules.SpreadAmountLoss,
+                rules.MinimumSpreadAmount);
         }
 
         public bool Contains(int x, int y, int z) => (uint)x < Size && (uint)y < Height && (uint)z < Size;
@@ -258,7 +268,7 @@ namespace MiniCivilization.World.Domain
                 {
                     column.WaterCellY = (short)y;
                     column.WaterLevel = (byte)(cell.SolidFill + cell.WaterFill);
-                    column.Water = cell.Water;
+                    column.Water = cell.Water.Type;
                     waterTopUnits = y * WorldGrid.HeightStepsPerCell + column.WaterLevel;
                 }
 

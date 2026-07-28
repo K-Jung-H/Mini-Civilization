@@ -3,15 +3,6 @@ using System.Collections.Generic;
 
 namespace MiniCivilization.World.Domain
 {
-    public enum WaterCellBehavior : byte
-    {
-        None = 0,
-        Source = 1,
-        FlowDependent = 2,
-        Reservoir = 3,
-        FixedReservoir = 4
-    }
-
     [Serializable]
     public sealed class WaterSourceGroupData
     {
@@ -19,263 +10,61 @@ namespace MiniCivilization.World.Domain
 
         public int Id { get; }
         public WaterType WaterType { get; }
-        public short OutputSurfaceTenths { get; }
-        public ushort SourceAmount { get; }
         public IReadOnlyList<int> CellIndices => cellIndices;
 
         public WaterSourceGroupData(
             int id,
             WaterType waterType,
-            short outputSurfaceTenths,
-            ushort sourceAmount,
             int[] cellIndices)
         {
             Id = id;
             WaterType = waterType;
-            OutputSurfaceTenths = outputSurfaceTenths;
-            SourceAmount = Math.Max((ushort)1, sourceAmount);
             this.cellIndices = cellIndices
                 ?? throw new ArgumentNullException(nameof(cellIndices));
         }
     }
 
-    public static class WaterAmountConversion
-    {
-        public const int UnitsPerAmount = 100;
-        public const ushort DefaultMaximumAmount = UnitsPerAmount;
-        public const float MinimumConfigurableAmount = 0.01f;
-        public const float MaximumConfigurableAmount =
-            ushort.MaxValue / (float)UnitsPerAmount;
-
-        public static ushort ToUnits(float amount)
-        {
-            if (float.IsNaN(amount) || float.IsInfinity(amount))
-            {
-                throw new ArgumentOutOfRangeException(nameof(amount));
-            }
-
-            var clamped = Math.Clamp(
-                amount,
-                MinimumConfigurableAmount,
-                MaximumConfigurableAmount);
-            return checked((ushort)Math.Round(
-                clamped * UnitsPerAmount,
-                MidpointRounding.AwayFromZero));
-        }
-
-        public static float ToAmount(ushort units) =>
-            units / (float)UnitsPerAmount;
-
-        public static ushort FromRenderFill(
-            byte renderFill,
-            ushort maximumAmount)
-        {
-            if (renderFill == 0)
-            {
-                return 0;
-            }
-
-            var clampedFill = Math.Min(
-                WorldGrid.HeightStepsPerCell,
-                (int)renderFill);
-            return checked((ushort)Math.Max(
-                1,
-                (clampedFill * (long)maximumAmount
-                    + WorldGrid.HeightStepsPerCell / 2)
-                / WorldGrid.HeightStepsPerCell));
-        }
-
-        public static byte ToRenderFill(
-            ushort amount,
-            ushort maximumAmount,
-            int capacitySteps)
-        {
-            if (amount == 0 || capacitySteps <= 0)
-            {
-                return 0;
-            }
-
-            var normalizedSteps =
-                (amount * (long)WorldGrid.HeightStepsPerCell
-                    + maximumAmount - 1)
-                / maximumAmount;
-            return checked((byte)Math.Min(
-                capacitySteps,
-                Math.Max(1L, normalizedSteps)));
-        }
-    }
-
     /// <summary>
-    /// Persistent, authoritative water data. Amount uses fixed 0.01 units;
-    /// CellData.WaterFill remains the normalized 0.2-step render representation.
+    /// Sparse persistent metadata for grouped water sources. Per-cell water
+    /// state is stored exclusively in CellData.Water.
     /// </summary>
-    public sealed class WaterState
+    public sealed class WaterSourceCollection
     {
         private static readonly (int x, int z)[] CardinalDirections =
         {
             (1, 0), (0, 1), (-1, 0), (0, -1)
         };
 
-        private readonly ushort[] amountsByCell;
-        private readonly WaterCellBehavior[] behaviorsByCell;
-        private readonly int[] sourceGroupIdsByCell;
-        private readonly List<WaterSourceGroupData> sourceGroups = new();
-        private readonly Dictionary<int, WaterSourceGroupData> sourceGroupsById = new();
+        private readonly List<WaterSourceGroupData> groups = new();
 
-        public int CellCount => amountsByCell.Length;
-        public ushort MaximumAmount { get; private set; } =
-            WaterAmountConversion.DefaultMaximumAmount;
-        public IReadOnlyList<WaterSourceGroupData> SourceGroups => sourceGroups;
+        public IReadOnlyList<WaterSourceGroupData> Groups => groups;
         public bool IsInitialized { get; private set; }
 
-        internal WaterState(int cellCount)
+        internal void ReplaceGroups(IEnumerable<WaterSourceGroupData> values)
         {
-            if (cellCount <= 0)
+            groups.Clear();
+            if (values != null)
             {
-                throw new ArgumentOutOfRangeException(nameof(cellCount));
-            }
-
-            amountsByCell = new ushort[cellCount];
-            behaviorsByCell = new WaterCellBehavior[cellCount];
-            sourceGroupIdsByCell = new int[cellCount];
-        }
-
-        public ushort GetAmount(int cellIndex) => amountsByCell[cellIndex];
-        public WaterCellBehavior GetBehavior(int cellIndex) => behaviorsByCell[cellIndex];
-        public int GetSourceGroupId(int cellIndex) => sourceGroupIdsByCell[cellIndex];
-
-        internal ushort GetSourceAmount(int cellIndex)
-        {
-            var groupId = sourceGroupIdsByCell[cellIndex];
-            if (sourceGroupsById.TryGetValue(groupId, out var group))
-            {
-                return group.SourceAmount;
-            }
-
-            return amountsByCell[cellIndex];
-        }
-
-        internal WaterType GetSourceWaterType(int cellIndex)
-        {
-            var groupId = sourceGroupIdsByCell[cellIndex];
-            if (sourceGroupsById.TryGetValue(groupId, out var group))
-            {
-                return group.WaterType;
-            }
-
-            return WaterType.Fresh;
-        }
-
-        internal void SetCell(
-            int cellIndex,
-            ushort amount,
-            WaterCellBehavior behavior,
-            int sourceGroupId = 0)
-        {
-            amountsByCell[cellIndex] = Math.Min(MaximumAmount, amount);
-            behaviorsByCell[cellIndex] = behavior;
-            sourceGroupIdsByCell[cellIndex] = sourceGroupId;
-        }
-
-        internal void SetAmount(int cellIndex, ushort amount) =>
-            amountsByCell[cellIndex] = Math.Min(MaximumAmount, amount);
-
-        internal void ConfigureMaximumAmount(ushort maximumAmount)
-        {
-            maximumAmount = Math.Max((ushort)1, maximumAmount);
-            if (maximumAmount == MaximumAmount)
-            {
-                return;
-            }
-
-            var previousMaximum = MaximumAmount;
-            for (var index = 0; index < amountsByCell.Length; index++)
-            {
-                amountsByCell[index] = RescaleAmount(
-                    amountsByCell[index],
-                    previousMaximum,
-                    maximumAmount);
-            }
-
-            if (sourceGroups.Count > 0)
-            {
-                var rescaledGroups = new WaterSourceGroupData[sourceGroups.Count];
-                for (var index = 0; index < sourceGroups.Count; index++)
+                foreach (var group in values)
                 {
-                    var group = sourceGroups[index];
-                    var cellIndices = new int[group.CellIndices.Count];
-                    for (var cellIndex = 0;
-                         cellIndex < group.CellIndices.Count;
-                         cellIndex++)
+                    if (group != null)
                     {
-                        cellIndices[cellIndex] = group.CellIndices[cellIndex];
+                        groups.Add(group);
                     }
-
-                    rescaledGroups[index] = new WaterSourceGroupData(
-                        group.Id,
-                        group.WaterType,
-                        group.OutputSurfaceTenths,
-                        RescaleAmount(
-                            group.SourceAmount,
-                            previousMaximum,
-                            maximumAmount),
-                        cellIndices);
-                }
-
-                sourceGroups.Clear();
-                sourceGroupsById.Clear();
-                for (var index = 0; index < rescaledGroups.Length; index++)
-                {
-                    var group = rescaledGroups[index];
-                    sourceGroups.Add(group);
-                    sourceGroupsById[group.Id] = group;
-                }
-            }
-
-            MaximumAmount = maximumAmount;
-        }
-
-        internal void SetBehavior(
-            int cellIndex,
-            WaterCellBehavior behavior,
-            int sourceGroupId = 0)
-        {
-            behaviorsByCell[cellIndex] = behavior;
-            sourceGroupIdsByCell[cellIndex] = sourceGroupId;
-        }
-
-        internal void ReplaceSourceGroups(IEnumerable<WaterSourceGroupData> groups)
-        {
-            sourceGroups.Clear();
-            sourceGroupsById.Clear();
-            if (groups != null)
-            {
-                foreach (var group in groups)
-                {
-                    if (group == null)
-                    {
-                        continue;
-                    }
-
-                    sourceGroups.Add(group);
-                    sourceGroupsById[group.Id] = group;
                 }
             }
 
             IsInitialized = true;
         }
 
-        internal void InitializeFromGeneratedWorld(
-            WorldData world,
-            ushort maximumAmount = WaterAmountConversion.DefaultMaximumAmount)
+        internal void InitializeFromGeneratedWorld(WorldData world)
         {
-            MaximumAmount = Math.Max((ushort)1, maximumAmount);
-            Array.Clear(amountsByCell, 0, amountsByCell.Length);
-            Array.Clear(behaviorsByCell, 0, behaviorsByCell.Length);
-            Array.Clear(sourceGroupIdsByCell, 0, sourceGroupIdsByCell.Length);
-            sourceGroups.Clear();
-            sourceGroupsById.Clear();
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
 
+            groups.Clear();
             for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
@@ -286,24 +75,58 @@ namespace MiniCivilization.World.Domain
                     continue;
                 }
 
-                var behavior = cell.Water == WaterType.Sea
-                    ? WaterCellBehavior.FixedReservoir
-                    : (cell.Flags & CellFlags.River) != 0
-                        ? WaterCellBehavior.FlowDependent
-                        : WaterCellBehavior.Reservoir;
-                SetCell(
-                    WorldIndex.EncodeCell(world, x, y, z),
-                    WaterAmountConversion.FromRenderFill(
-                        cell.WaterFill,
-                        MaximumAmount),
-                    behavior);
+                cell.Water.Role = cell.Water.Type == WaterType.Sea
+                    ? WaterCellRole.Reservoir
+                    : (cell.Water.Flags & WaterCellFlags.River) != 0
+                        ? WaterCellRole.Dynamic
+                        : WaterCellRole.Reservoir;
+                world.SetCellBulk(x, y, z, cell);
             }
 
             ClassifyRiverSources(world);
             IsInitialized = true;
         }
 
-        internal void MarkInitialized() => IsInitialized = true;
+        internal void SynchronizeWithWorld(WorldData world)
+        {
+            for (var groupIndex = groups.Count - 1;
+                 groupIndex >= 0;
+                 groupIndex--)
+            {
+                var group = groups[groupIndex];
+                var validCells = new List<int>(group.CellIndices.Count);
+                for (var index = 0;
+                     index < group.CellIndices.Count;
+                     index++)
+                {
+                    var cellIndex = group.CellIndices[index];
+                    var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+                    var cell = world.GetCell(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z);
+                    if (cell.HasWater
+                        && cell.Water.Role == WaterCellRole.Source)
+                    {
+                        validCells.Add(cellIndex);
+                    }
+                }
+
+                if (validCells.Count == 0)
+                {
+                    groups.RemoveAt(groupIndex);
+                    continue;
+                }
+
+                if (validCells.Count != group.CellIndices.Count)
+                {
+                    groups[groupIndex] = new WaterSourceGroupData(
+                        group.Id,
+                        group.WaterType,
+                        validCells.ToArray());
+                }
+            }
+        }
 
         private void ClassifyRiverSources(WorldData world)
         {
@@ -376,64 +199,44 @@ namespace MiniCivilization.World.Domain
                 }
 
                 var sourceCells = new List<int>();
-                var groupId = sourceGroups.Count + 1;
-                for (var columnIndexPosition = 0;
-                     columnIndexPosition < plateauColumns.Count;
-                     columnIndexPosition++)
+                var groupId = groups.Count + 1;
+                for (var position = 0;
+                     position < plateauColumns.Count;
+                     position++)
                 {
                     WorldIndex.DecodeColumn(
                         world,
-                        plateauColumns[columnIndexPosition],
+                        plateauColumns[position],
                         out var sourceX,
                         out var sourceZ);
                     for (var y = 0; y < world.Height; y++)
                     {
-                        var cellIndex = WorldIndex.EncodeCell(
-                            world,
-                            sourceX,
-                            y,
-                            sourceZ);
-                        if (amountsByCell[cellIndex] == 0
-                            || behaviorsByCell[cellIndex] != WaterCellBehavior.FlowDependent)
+                        var cell = world.GetCell(sourceX, y, sourceZ);
+                        if (!cell.HasWater
+                            || cell.Water.Role != WaterCellRole.Dynamic)
                         {
                             continue;
                         }
 
-                        behaviorsByCell[cellIndex] = WaterCellBehavior.Source;
-                        sourceGroupIdsByCell[cellIndex] = groupId;
-                        sourceCells.Add(cellIndex);
+                        cell.Water.Role = WaterCellRole.Source;
+                        cell.Water.Amount = WaterAmount.Full;
+                        world.SetCellBulk(sourceX, y, sourceZ, cell);
+                        sourceCells.Add(WorldIndex.EncodeCell(
+                            world,
+                            sourceX,
+                            y,
+                            sourceZ));
                     }
                 }
 
                 if (sourceCells.Count > 0)
                 {
-                    var sourceGroup = new WaterSourceGroupData(
+                    groups.Add(new WaterSourceGroupData(
                         groupId,
                         WaterType.Fresh,
-                        checked((short)(plateauHeight * 2)),
-                        MaximumAmount,
-                        sourceCells.ToArray());
-                    sourceGroups.Add(sourceGroup);
-                    sourceGroupsById[sourceGroup.Id] = sourceGroup;
+                        sourceCells.ToArray()));
                 }
             }
-        }
-
-        private static ushort RescaleAmount(
-            ushort amount,
-            ushort previousMaximum,
-            ushort nextMaximum)
-        {
-            if (amount == 0)
-            {
-                return 0;
-            }
-
-            return checked((ushort)Math.Clamp(
-                (amount * (long)nextMaximum + previousMaximum / 2)
-                    / previousMaximum,
-                1,
-                nextMaximum));
         }
 
         private static bool IsRiverColumn(
@@ -448,7 +251,7 @@ namespace MiniCivilization.World.Domain
             }
 
             var cell = world.GetCell(x, column.WaterCellY, z);
-            return (cell.Flags & CellFlags.River) != 0;
+            return (cell.Water.Flags & WaterCellFlags.River) != 0;
         }
     }
 }

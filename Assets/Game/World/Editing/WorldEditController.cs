@@ -116,7 +116,7 @@ namespace MiniCivilization.World.Editing
             int z,
             int waterSurfaceUnits,
             WaterType water,
-            CellFlags flags = CellFlags.None)
+            WaterCellFlags flags = WaterCellFlags.None)
         {
             var transaction = BeginTransaction();
             transaction.SetWaterLevel(
@@ -540,11 +540,7 @@ namespace MiniCivilization.World.Editing
                     | WorldChangeType.Navigation;
             }
 
-            const CellFlags waterFlags =
-                CellFlags.River | CellFlags.FallingWater;
-            if (previous.Water != current.Water
-                || previous.WaterFill != current.WaterFill
-                || (previous.Flags & waterFlags) != (current.Flags & waterFlags))
+            if (!previous.Water.Equals(current.Water))
             {
                 types |= WorldChangeType.WaterTopology
                     | WorldChangeType.Surface
@@ -711,7 +707,6 @@ namespace MiniCivilization.World.Editing
                 lowestSolidY,
                 z,
                 lowestTerrain.CreateFoundation());
-            RemoveUnsupportedWater(x, z);
             return true;
         }
 
@@ -746,7 +741,6 @@ namespace MiniCivilization.World.Editing
                 highestSolidY,
                 z,
                 default);
-            RemoveUnsupportedWater(x, z);
             return true;
         }
 
@@ -798,10 +792,6 @@ namespace MiniCivilization.World.Editing
                     WorldGrid.HeightStepsPerCell);
                 var cell = GetPendingCell(x, y, z);
                 cell.SolidFill = fill;
-                cell.WaterFill = (byte)Math.Min(
-                    cell.WaterFill,
-                    WorldGrid.HeightStepsPerCell - fill);
-
                 if (fill > 0)
                 {
                     cell.Material =
@@ -834,7 +824,7 @@ namespace MiniCivilization.World.Editing
             int z,
             int waterSurfaceUnits,
             WaterType water,
-            CellFlags flags = CellFlags.None)
+            WaterCellFlags flags = WaterCellFlags.None)
         {
             EnsureColumn(x, z);
             waterSurfaceUnits = Math.Clamp(
@@ -852,14 +842,27 @@ namespace MiniCivilization.World.Editing
                     waterSurfaceUnits - baseUnits,
                     0,
                     WorldGrid.HeightStepsPerCell);
-                cell.WaterFill = (byte)Math.Clamp(
+                var waterFill = (byte)Math.Clamp(
                     desiredTop - cell.SolidFill,
                     0,
                     available);
-                cell.Water = cell.WaterFill > 0 ? water : WaterType.None;
-                cell.Flags = cell.WaterFill > 0
-                    ? cell.Flags | flags | CellFlags.Generated
-                    : cell.Flags & ~(CellFlags.River | CellFlags.FallingWater);
+                cell.Water = waterFill > 0
+                    ? new WaterCellData
+                    {
+                        Amount = WaterAmount.FromRenderFill(
+                            waterFill,
+                            available),
+                        Type = water,
+                        Role = (flags & WaterCellFlags.River) != 0
+                            ? WaterCellRole.Dynamic
+                            : WaterCellRole.Reservoir,
+                        Flags = flags
+                    }
+                    : default;
+                if (waterFill > 0)
+                {
+                    cell.Flags |= CellFlags.Generated;
+                }
                 SetCell(x, y, z, cell);
             }
         }
@@ -1029,33 +1032,9 @@ namespace MiniCivilization.World.Editing
             SetCell(x, y, z, cell);
         }
 
-        private void RemoveUnsupportedWater(int x, int z)
-        {
-            for (var y = 1; y < world.Height; y++)
-            {
-                var cell = GetPendingCell(x, y, z);
-                if (!cell.HasWater || cell.HasSolid)
-                {
-                    continue;
-                }
-
-                var below = GetPendingCell(x, y - 1, z);
-                if (below.SolidFill + below.WaterFill
-                    >= WorldGrid.HeightStepsPerCell)
-                {
-                    continue;
-                }
-
-                ClearWater(ref cell);
-                SetCell(x, y, z, cell);
-            }
-        }
-
         private static void ClearWater(ref CellData cell)
         {
-            cell.Water = WaterType.None;
-            cell.WaterFill = 0;
-            cell.Flags &= ~(CellFlags.River | CellFlags.FallingWater);
+            cell.Water = default;
         }
 
         private readonly struct TerrainCellState
@@ -1110,11 +1089,7 @@ namespace MiniCivilization.World.Editing
                 cell.Geology = geology;
                 cell.DepositIndex = depositIndex;
                 cell.SolidFill = solidFill;
-                cell.Flags = (cell.Flags
-                    & (CellFlags.Generated
-                        | CellFlags.River
-                        | CellFlags.FallingWater))
-                    | flags;
+                cell.Flags = (cell.Flags & CellFlags.Generated) | flags;
 
                 if (HasSolid)
                 {

@@ -8,21 +8,6 @@ namespace MiniCivilization.World.WaterFlow
     [DisallowMultipleComponent]
     public sealed class WorldWaterFlowController : MonoBehaviour
     {
-        [Header("Water Flow Resolution")]
-        [SerializeField, Min(WaterAmountConversion.MinimumConfigurableAmount),
-         Tooltip("WaterSource와 WaterCell이 가질 수 있는 최대 WaterAmount입니다. " +
-                 "수면 높이는 이 값에 대한 비율을 0.2 단위로 양자화합니다.")]
-        private float maximumAmount = 1f;
-
-        [SerializeField, Min(WaterAmountConversion.MinimumConfigurableAmount),
-         Tooltip("물의 수평 확산 한 칸마다 감소하는 WaterAmount입니다. " +
-                 "아래 방향 확산에는 적용되지 않습니다.")]
-        private float spreadAmountLoss = 0.05f;
-
-        [SerializeField, Min(WaterAmountConversion.MinimumConfigurableAmount),
-         Tooltip("확산 결과가 이 값보다 작으면 새로운 WaterCell을 생성하지 않습니다.")]
-        private float minimumSpreadAmount = 0.1f;
-
         private readonly HashSet<int> pendingCellIndices = new();
         private readonly HashSet<int> pendingColumnIndices = new();
         private readonly HashSet<int> affectedWaterBodyIds = new();
@@ -39,10 +24,6 @@ namespace MiniCivilization.World.WaterFlow
         public bool HasPendingRecalculation => recalculationRequested;
         public int PendingChangeCount =>
             pendingCellIndices.Count + pendingColumnIndices.Count;
-        public float MaximumAmount => maximumAmount;
-        public float SpreadAmountLoss => spreadAmountLoss;
-        public float MinimumSpreadAmount => minimumSpreadAmount;
-
         public event Action<WaterFlowState> StateChanged;
         public event Action<WorldChangeSet> ChangeCommitted;
 
@@ -101,16 +82,9 @@ namespace MiniCivilization.World.WaterFlow
 
             boundWorld = world;
             activeParameters = CreateParameters();
-            if (!world.WaterState.IsInitialized)
+            if (!world.WaterSources.IsInitialized)
             {
-                world.WaterState.InitializeFromGeneratedWorld(
-                    world,
-                    activeParameters.MaximumAmount);
-            }
-            else
-            {
-                world.WaterState.ConfigureMaximumAmount(
-                    activeParameters.MaximumAmount);
+                world.WaterSources.InitializeFromGeneratedWorld(world);
             }
 
             State = new WaterFlowState(
@@ -119,8 +93,7 @@ namespace MiniCivilization.World.WaterFlow
             resolver = new WaterFlowResolver(State.CellCount);
             pendingCellIndices.Clear();
             pendingColumnIndices.Clear();
-            QueueInitialFlowCells();
-            recalculationRequested = pendingCellIndices.Count > 0;
+            recalculationRequested = false;
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
             LastAppliedChangeId = world.CurrentChangeId;
@@ -181,81 +154,6 @@ namespace MiniCivilization.World.WaterFlow
             LastAppliedChangeId = changeSet.ChangeId;
         }
 
-        public void RebuildAll()
-        {
-            if (boundWorld == null)
-            {
-                State = null;
-                return;
-            }
-
-            activeParameters = CreateParameters();
-            boundWorld.WaterState.ConfigureMaximumAmount(
-                activeParameters.MaximumAmount);
-
-            State = new WaterFlowState(
-                boundWorld,
-                WaterBodyResolver.Resolve(boundWorld));
-            resolver = new WaterFlowResolver(State.CellCount);
-            pendingCellIndices.Clear();
-            pendingColumnIndices.Clear();
-            QueueAllPersistentWaterCells();
-
-            recalculationRequested = true;
-            waterBodyTopologyRefreshRequested = false;
-            waterBodyMetricsRefreshRequested = false;
-            StateChanged?.Invoke(State);
-        }
-
-        private void QueueAllPersistentWaterCells()
-        {
-            if (boundWorld == null)
-            {
-                return;
-            }
-
-            for (var cellIndex = 0;
-                 cellIndex < boundWorld.WaterState.CellCount;
-                 cellIndex++)
-            {
-                if (boundWorld.WaterState.GetBehavior(cellIndex)
-                    != WaterCellBehavior.None)
-                {
-                    pendingCellIndices.Add(cellIndex);
-                }
-            }
-        }
-
-        private void QueueInitialFlowCells()
-        {
-            if (boundWorld == null)
-            {
-                return;
-            }
-
-            for (var cellIndex = 0;
-                 cellIndex < boundWorld.WaterState.CellCount;
-                 cellIndex++)
-            {
-                var behavior = boundWorld.WaterState.GetBehavior(cellIndex);
-                if (behavior == WaterCellBehavior.Source)
-                {
-                    pendingCellIndices.Add(cellIndex);
-                    continue;
-                }
-
-                var coordinate = WorldIndex.DecodeCell(boundWorld, cellIndex);
-                var cell = boundWorld.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if ((cell.Flags & CellFlags.FallingWater) != 0)
-                {
-                    pendingCellIndices.Add(cellIndex);
-                }
-            }
-        }
-
         private void AddPendingChanges(WorldChangeSet changeSet)
         {
             for (var index = 0;
@@ -284,39 +182,30 @@ namespace MiniCivilization.World.WaterFlow
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z);
-                var behavior = boundWorld.WaterState.GetBehavior(cellIndex);
-                boundWorld.WaterState.SetAmount(
-                    cellIndex,
-                    WaterAmountConversion.FromRenderFill(
-                        cell.WaterFill,
-                        activeParameters.MaximumAmount));
-
                 if (!cell.HasWater)
                 {
-                    if (behavior != WaterCellBehavior.Source)
-                    {
-                        boundWorld.WaterState.SetCell(
-                            cellIndex,
-                            0,
-                            WaterCellBehavior.None);
-                    }
-
-                    State.SynchronizeFromPersistent(boundWorld, cellIndex);
+                    State.SynchronizeFromPersistent(cellIndex);
                     continue;
                 }
 
-                if (behavior == WaterCellBehavior.None)
+                if (cell.Water.Role == WaterCellRole.None)
                 {
-                    behavior = cell.Water == WaterType.Sea
-                        ? WaterCellBehavior.FixedReservoir
-                        : (cell.Flags & CellFlags.River) != 0
-                            ? WaterCellBehavior.FlowDependent
-                            : WaterCellBehavior.Reservoir;
-                    boundWorld.WaterState.SetBehavior(cellIndex, behavior);
+                    cell.Water.Role = cell.Water.Type == WaterType.Sea
+                        ? WaterCellRole.Reservoir
+                        : (cell.Water.Flags & WaterCellFlags.River) != 0
+                            ? WaterCellRole.Dynamic
+                            : WaterCellRole.Reservoir;
+                    boundWorld.SetCellForEdit(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z,
+                        cell);
                 }
 
-                State.SynchronizeFromPersistent(boundWorld, cellIndex);
+                State.SynchronizeFromPersistent(cellIndex);
             }
+
+            boundWorld.WaterSources.SynchronizeWithWorld(boundWorld);
         }
 
         private void CommitResolvedChanges(
@@ -450,25 +339,7 @@ namespace MiniCivilization.World.WaterFlow
             return result;
         }
 
-        private WaterFlowParameters CreateParameters() => new(
-            maximumAmount,
-            spreadAmountLoss,
-            minimumSpreadAmount);
-
-        private void OnValidate()
-        {
-            maximumAmount = Mathf.Clamp(
-                maximumAmount,
-                WaterAmountConversion.MinimumConfigurableAmount,
-                WaterAmountConversion.MaximumConfigurableAmount);
-            spreadAmountLoss = Mathf.Clamp(
-                spreadAmountLoss,
-                WaterAmountConversion.MinimumConfigurableAmount,
-                maximumAmount);
-            minimumSpreadAmount = Mathf.Clamp(
-                minimumSpreadAmount,
-                WaterAmountConversion.MinimumConfigurableAmount,
-                maximumAmount);
-        }
+        private WaterFlowParameters CreateParameters() =>
+            new(boundWorld.WaterFlowRules);
     }
 }

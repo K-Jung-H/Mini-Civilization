@@ -30,95 +30,6 @@ namespace MiniCivilization.World.Editor
         private const string WireframeMaterialPath = SettingsDirectory + "/WorldEditWireframe.mat";
         private const int InteractionLayer = 8;
 
-        [InitializeOnLoadMethod]
-        private static void QueueRequiredSceneMigration()
-        {
-            EditorApplication.delayCall += TryRequiredSceneMigration;
-            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
-            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
-        }
-
-        private static void OnPlayModeStateChanged(PlayModeStateChange state)
-        {
-            if (state == PlayModeStateChange.EnteredEditMode)
-            {
-                EditorApplication.delayCall += TryRequiredSceneMigration;
-            }
-        }
-
-        private static void TryRequiredSceneMigration()
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode
-                || SceneManager.GetActiveScene().path != ScenePath)
-            {
-                return;
-            }
-
-            var root = GameObject.Find("World System");
-            var toolbarView = root != null
-                ? root.GetComponentInChildren<WorldEditToolbarView>(true)
-                : null;
-            if (root == null
-                || (root.transform.Find("World Management") != null
-                    && root.transform.Find("World Editing") != null
-                    && root.transform.Find("World Editing")
-                        ?.GetComponent<WorldEditToolState>() != null
-                    && root.transform.Find("World Editing")
-                        ?.GetComponent<WorldEditInputController>() != null
-                    && root.transform.Find("World Editing")
-                        ?.GetComponent<WorldEditApplyController>() != null
-                    && root.transform.Find("World Editing/Selection Preview")
-                        ?.GetComponent<WorldEditWireframeRenderer>() != null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Highlight")
-                        ?.GetComponent<MeshFilter>() != null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Highlight")
-                        ?.GetComponent<MeshRenderer>() != null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Hover Highlight") == null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Selected Highlight") == null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Edit Hover Highlight") == null
-                    && root.transform.Find(
-                        "World Interaction/Highlight Root/Edit Selected Highlight") == null
-                    && root.transform.Find("World Water Flow") != null
-                    && root.transform.Find("World Save") != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Toolbar/Expanded Content")
-                        != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Toolbar/Expanded Content/Background Image")
-                        != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Toolbar/Main Button Background")
-                        != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Toolbar/Expanded Content/Main Property Divider")
-                        != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Property Detail Panel/Brush Size Details")
-                        != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Property Detail Panel/History Details/Undo")
-                        ?.GetComponent<Button>() != null
-                    && root.transform.Find(
-                        "World UI/Canvas/World Edit UI/Property Detail Panel/History Details/Redo")
-                        ?.GetComponent<Button>() != null
-                    && root.transform.Find(
-                            "World UI/Canvas/World Edit UI/Toolbar/Main Button/Label")
-                        ?.GetComponent<TextMeshProUGUI>() != null
-                    && toolbarView != null
-                    && toolbarView.LayoutVersion
-                        >= WorldEditToolbarView.CurrentLayoutVersion))
-            {
-                return;
-            }
-
-            Setup();
-        }
-
         [MenuItem("Mini Civilization/Setup World Scene")]
         public static void Setup()
         {
@@ -161,7 +72,6 @@ namespace MiniCivilization.World.Editor
                 ? activeScene
                 : EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
             var worldObject = GameObject.Find("World System")
-                ?? GameObject.Find("World Generator")
                 ?? new GameObject("World System");
             worldObject.name = "World System";
 
@@ -172,84 +82,58 @@ namespace MiniCivilization.World.Editor
                 worldObject,
                 "World Water Flow");
             var renderingObject = EnsureRoleObject(worldObject, "World Rendering");
-            var saveObject = EnsureRenamedRoleObject(
-                worldObject,
-                "World Save",
-                "World Persistence");
+            var saveObject = EnsureRoleObject(worldObject, "World Save");
             var interactionObject = EnsureRoleObject(worldObject, "World Interaction");
             var uiObject = EnsureRoleObject(worldObject, "World UI");
 
-            var manager = MoveOrAdd<WorldManager>(
-                worldObject,
-                managementObject,
-                out _);
-            var generator = MoveOrAdd<WorldGenerationController>(
-                worldObject,
+            var manager = GetOrAdd<WorldManager>(managementObject, out _);
+            var generator = GetOrAdd<WorldGenerationController>(
                 generationObject,
                 out var generatorCreated);
-            var editController = MoveOrAdd<WorldEditController>(
-                worldObject,
+            var editController = GetOrAdd<WorldEditController>(
                 editingObject,
                 out _);
-            var editToolState = MoveOrAdd<WorldEditToolState>(
-                worldObject,
+            var editToolState = GetOrAdd<WorldEditToolState>(
                 editingObject,
                 out _);
-            var editInputController = MoveOrAdd<WorldEditInputController>(
-                worldObject,
+            var editInputController = GetOrAdd<WorldEditInputController>(
                 editingObject,
                 out _);
-            var editApplyController = MoveOrAdd<WorldEditApplyController>(
-                worldObject,
+            var editApplyController = GetOrAdd<WorldEditApplyController>(
                 editingObject,
                 out _);
-            var waterFlowController = MoveOrAdd<WorldWaterFlowController>(
-                worldObject,
+            var waterFlowController = GetOrAdd<WorldWaterFlowController>(
                 waterFlowObject,
                 out _);
-            var renderer = MoveOrAdd<WorldRenderer>(
-                worldObject,
-                renderingObject,
-                out _);
-            var saveController = MoveOrAdd<WorldSaveController>(
-                worldObject,
+            var renderer = GetOrAdd<WorldRenderer>(renderingObject, out _);
+            var saveController = GetOrAdd<WorldSaveController>(
                 saveObject,
                 out _);
-            var selectionState = MoveOrAdd<WorldTileSelectionState>(
-                worldObject,
+            var selectionState = GetOrAdd<WorldTileSelectionState>(
                 interactionObject,
                 out _);
-            var interactionController = MoveOrAdd<WorldInteractionController>(
-                worldObject,
+            var interactionController = GetOrAdd<WorldInteractionController>(
                 interactionObject,
                 out _);
-            var highlighter = MoveOrAdd<WorldTileHighlighter>(
-                worldObject,
+            var highlighter = GetOrAdd<WorldTileHighlighter>(
                 interactionObject,
                 out _);
-            var infoProvider = MoveOrAdd<WorldCellInfoProvider>(
-                worldObject,
+            var infoProvider = GetOrAdd<WorldCellInfoProvider>(
                 interactionObject,
                 out _);
-            var infoPresenter = MoveOrAdd<WorldTileInfoPresenter>(
-                worldObject,
+            var infoPresenter = GetOrAdd<WorldTileInfoPresenter>(
                 uiObject,
                 out _);
 
             var renderRoot = EnsureChildTransform(
                 renderingObject.transform,
-                worldObject.transform,
                 "Render Root");
             var highlightRoot = EnsureChildTransform(
                 interactionObject.transform,
-                worldObject.transform,
                 "Highlight Root");
             var editPreviewRoot = EnsureChildTransform(
                 editingObject.transform,
-                worldObject.transform,
                 "Selection Preview");
-
-            RemoveLegacyHighlightChildren(highlightRoot);
             var highlight = EnsureHighlightChild(highlightRoot, "Highlight");
             var previewFilter = GetOrAdd<MeshFilter>(
                 editPreviewRoot.gameObject,
@@ -424,68 +308,17 @@ namespace MiniCivilization.World.Editor
             return roleObject;
         }
 
-        private static GameObject EnsureRenamedRoleObject(
-            GameObject worldRoot,
-            string roleName,
-            string legacyRoleName)
-        {
-            var current = worldRoot.transform.Find(roleName);
-            if (current != null)
-            {
-                return current.gameObject;
-            }
-
-            var legacy = worldRoot.transform.Find(legacyRoleName);
-            if (legacy != null)
-            {
-                legacy.name = roleName;
-                return legacy.gameObject;
-            }
-
-            return EnsureRoleObject(worldRoot, roleName);
-        }
-
-        private static T MoveOrAdd<T>(
-            GameObject legacyOwner,
-            GameObject target,
-            out bool created)
-            where T : Component
-        {
-            var component = target.GetComponent<T>();
-            if (component != null)
-            {
-                created = false;
-                return component;
-            }
-
-            var legacy = legacyOwner.GetComponent<T>();
-            if (legacy != null)
-            {
-                UnityEditorInternal.ComponentUtility.CopyComponent(legacy);
-                UnityEditorInternal.ComponentUtility.PasteComponentAsNew(target);
-                Object.DestroyImmediate(legacy);
-                created = false;
-                return target.GetComponent<T>();
-            }
-
-            created = true;
-            return target.AddComponent<T>();
-        }
-
         private static Transform EnsureChildTransform(
-            Transform expectedParent,
-            Transform legacyParent,
+            Transform parent,
             string childName)
         {
-            var child = expectedParent.Find(childName)
-                ?? legacyParent.Find(childName);
+            var child = parent.Find(childName);
             if (child == null)
             {
                 var childObject = new GameObject(childName);
                 child = childObject.transform;
+                child.SetParent(parent, false);
             }
-
-            child.SetParent(expectedParent, false);
             return child;
         }
 
@@ -1422,12 +1255,6 @@ namespace MiniCivilization.World.Editor
             FontStyles fontStyle)
         {
             var rect = EnsureUiRect(parent, objectName);
-            var legacyText = rect.GetComponent<Text>();
-            if (legacyText != null)
-            {
-                Object.DestroyImmediate(legacyText);
-            }
-
             var text = rect.GetComponent<TextMeshProUGUI>();
             if (text == null)
             {
@@ -1601,35 +1428,6 @@ namespace MiniCivilization.World.Editor
             renderer.receiveShadows = false;
             renderer.enabled = false;
             return (filter, renderer);
-        }
-
-        private static void RemoveLegacyHighlightChildren(Transform parent)
-        {
-            var legacyNames = new[]
-            {
-                "Hover Highlight",
-                "Selected Highlight",
-                "Edit Hover Highlight",
-                "Edit Selected Highlight"
-            };
-            foreach (var legacyName in legacyNames)
-            {
-                var child = parent.Find(legacyName);
-                if (child == null)
-                {
-                    continue;
-                }
-
-                var filter = child.GetComponent<MeshFilter>();
-                if (filter != null
-                    && filter.sharedMesh != null
-                    && !AssetDatabase.Contains(filter.sharedMesh))
-                {
-                    Object.DestroyImmediate(filter.sharedMesh);
-                }
-
-                Object.DestroyImmediate(child.gameObject);
-            }
         }
 
         private static void ConfigureInteractionLayer()

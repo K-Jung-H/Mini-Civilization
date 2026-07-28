@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: WorldGenerationSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationSettings
   worldSize: 64
-  worldHeight: 64
+  worldHeight: 32
   chunkSizeXZ: 8
   chunkHeight: 4
   renderPatchSizeXZ: 8
@@ -22,10 +22,10 @@ MonoBehaviour:
   terrainLacunarity: 2
   terrainPersistence: 0.5
   baseTerrainHeightCells: 3
-  terrainAmplitudeCells: 32
+  terrainAmplitudeCells: 3
   islandFalloff: 0.14
   mountainNoiseScale: 0.025
-  mountainStrengthCells: 5
+  mountainStrengthCells: 31
   mountainThreshold: 0.42
   mountainSharpness: 2.2
   seaLevelCell: 3
@@ -34,6 +34,8 @@ MonoBehaviour:
   riverDepthSteps: 2
   lakeCount: 2
   lakeRadius: 2
+  spreadAmountLoss: 0.05
+  minimumSpreadAmount: 0.1
   desertMoistureThreshold: 0.28
   wetlandMoistureThreshold: 0.72
   snowTemperatureThreshold: 0.24

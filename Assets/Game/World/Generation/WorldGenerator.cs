@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Generation
 {
@@ -32,20 +33,37 @@ namespace MiniCivilization.World.Generation
                 settings.ChunkHeight,
                 settings.ChunkSizeXZ,
                 seed);
+            world.ConfigureWaterFlow(settings.WaterFlowRules);
 
             var columnCount = settings.WorldSize * settings.WorldSize;
             var solidHeights = new int[columnCount];
             var waterSurfaces = new int[columnCount];
             var waterTypes = new WaterType[columnCount];
-            var waterFlags = new CellFlags[columnCount];
+            var waterFlags = new WaterCellFlags[columnCount];
+            var waterDirections = new WaterFlowDirectionMask[columnCount];
 
             GenerateBaseTerrain(world, settings, seed, solidHeights);
             InitializeSea(world, settings, solidHeights, waterSurfaces, waterTypes);
             GenerateLakes(world, settings, seed, solidHeights, waterSurfaces, waterTypes);
-            GenerateRivers(world, settings, seed, solidHeights, waterSurfaces, waterTypes, waterFlags);
-            ApplyColumns(world, solidHeights, waterSurfaces, waterTypes, waterFlags);
+            GenerateRivers(
+                world,
+                settings,
+                seed,
+                solidHeights,
+                waterSurfaces,
+                waterTypes,
+                waterFlags,
+                waterDirections);
+            ApplyColumns(
+                world,
+                solidHeights,
+                waterSurfaces,
+                waterTypes,
+                waterFlags,
+                waterDirections);
+            world.WaterSources.InitializeFromGeneratedWorld(world);
+            WaterFlowSolver.ResolveGeneratedWorld(world);
             ApplyBiomes(world, settings, seed);
-            world.WaterState.InitializeFromGeneratedWorld(world);
 
             return world;
         }
@@ -58,17 +76,22 @@ namespace MiniCivilization.World.Generation
             hash = Mix(hash, world.Size, prime);
             hash = Mix(hash, world.Height, prime);
             hash = Mix(hash, world.Seed, prime);
+            hash = Mix(hash, world.WaterFlowRules.SpreadAmountLoss, prime);
+            hash = Mix(hash, world.WaterFlowRules.MinimumSpreadAmount, prime);
             foreach (var chunk in world.EnumerateChunks())
             {
                 foreach (var cell in chunk.AsSpan())
                 {
                     hash = Mix(hash, (ushort)cell.Material, prime);
                     hash = Mix(hash, (ushort)cell.Surface, prime);
-                    hash = Mix(hash, (ushort)cell.Water, prime);
+                    hash = Mix(hash, cell.Water.Amount, prime);
+                    hash = Mix(hash, (byte)cell.Water.Type, prime);
+                    hash = Mix(hash, (byte)cell.Water.Role, prime);
+                    hash = Mix(hash, (byte)cell.Water.Direction, prime);
+                    hash = Mix(hash, (byte)cell.Water.Flags, prime);
                     hash = Mix(hash, (ushort)cell.Geology, prime);
                     hash = Mix(hash, cell.DepositIndex, prime);
                     hash = Mix(hash, cell.SolidFill, prime);
-                    hash = Mix(hash, cell.WaterFill, prime);
                     hash = Mix(hash, (ushort)cell.Flags, prime);
                 }
             }
@@ -357,7 +380,8 @@ namespace MiniCivilization.World.Generation
             int[] solidHeights,
             int[] waterSurfaces,
             WaterType[] waterTypes,
-            CellFlags[] waterFlags)
+            WaterCellFlags[] waterFlags,
+            WaterFlowDirectionMask[] waterDirections)
         {
             if (settings.RiverCount <= 0)
             {
@@ -382,7 +406,15 @@ namespace MiniCivilization.World.Generation
                     continue;
                 }
 
-                CarveRiver(world, settings, path, solidHeights, waterSurfaces, waterTypes, waterFlags);
+                CarveRiver(
+                    world,
+                    settings,
+                    path,
+                    solidHeights,
+                    waterSurfaces,
+                    waterTypes,
+                    waterFlags,
+                    waterDirections);
             }
         }
 
@@ -493,7 +525,8 @@ namespace MiniCivilization.World.Generation
             int[] solidHeights,
             int[] waterSurfaces,
             WaterType[] waterTypes,
-            CellFlags[] waterFlags)
+            WaterCellFlags[] waterFlags,
+            WaterFlowDirectionMask[] waterDirections)
         {
             var pathIndices = new HashSet<int>();
             for (var i = 0; i < path.Count; i++)
@@ -549,11 +582,18 @@ namespace MiniCivilization.World.Generation
                     waterLevel - riverDepth);
                 waterSurfaces[index] = Math.Max(waterSurfaces[index], waterLevel);
                 waterTypes[index] = WaterType.Fresh;
-                waterFlags[index] |= CellFlags.River;
+                waterFlags[index] |= WaterCellFlags.River;
 
-                if (i + 1 < path.Count && levels[i] - levels[i + 1] >= 2)
+                if (i + 1 < path.Count)
                 {
-                    waterFlags[index] |= CellFlags.FallingWater;
+                    var next = path[i + 1];
+                    waterDirections[index] |= ToWaterDirection(
+                        next.x - point.x,
+                        next.z - point.z);
+                    if (levels[i] > levels[i + 1])
+                    {
+                        waterDirections[index] |= WaterFlowDirectionMask.Down;
+                    }
                 }
 
                 for (var directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
@@ -581,12 +621,22 @@ namespace MiniCivilization.World.Generation
             return ((heightUnits + steps - 1) / steps) * steps;
         }
 
+        private static WaterFlowDirectionMask ToWaterDirection(int dx, int dz)
+        {
+            if (dx > 0) return WaterFlowDirectionMask.East;
+            if (dx < 0) return WaterFlowDirectionMask.West;
+            if (dz > 0) return WaterFlowDirectionMask.North;
+            if (dz < 0) return WaterFlowDirectionMask.South;
+            return WaterFlowDirectionMask.None;
+        }
+
         private static void ApplyColumns(
             WorldData world,
             int[] solidHeights,
             int[] waterSurfaces,
             WaterType[] waterTypes,
-            CellFlags[] waterFlags)
+            WaterCellFlags[] waterFlags,
+            WaterFlowDirectionMask[] waterDirections)
         {
             var writer = new WorldBulkWriter(world);
             for (var z = 0; z < world.Size; z++)
@@ -603,7 +653,8 @@ namespace MiniCivilization.World.Generation
                     SurfaceType.Ground,
                     waterSurface,
                     waterTypes[index],
-                    waterFlags[index]);
+                    waterFlags[index],
+                    waterDirections[index]);
             }
 
             writer.Complete();
@@ -667,7 +718,7 @@ namespace MiniCivilization.World.Generation
                     {
                         surface = SurfaceType.Seabed;
                     }
-                    else if ((waterCell.Flags & CellFlags.River) != 0)
+                    else if ((waterCell.Water.Flags & WaterCellFlags.River) != 0)
                     {
                         surface = SurfaceType.Riverbed;
                     }
@@ -798,7 +849,8 @@ namespace MiniCivilization.World.Generation
             SurfaceType surface,
             int waterSurfaceUnits,
             WaterType water,
-            CellFlags waterFlags)
+            WaterCellFlags waterFlags,
+            WaterFlowDirectionMask waterDirection)
         {
             if (completed)
             {
@@ -847,14 +899,22 @@ namespace MiniCivilization.World.Generation
                     waterSurfaceUnits - baseUnits,
                     0,
                     WorldGrid.HeightStepsPerCell);
-                cell.WaterFill = (byte)Math.Clamp(
+                var waterFill = (byte)Math.Clamp(
                     desiredTop - solidFill,
                     0,
                     available);
-                if (cell.WaterFill > 0)
+                if (waterFill > 0)
                 {
-                    cell.Water = water;
-                    cell.Flags |= waterFlags | CellFlags.Generated;
+                    cell.Water = new WaterCellData
+                    {
+                        Amount = WaterAmount.FromRenderFill(
+                            waterFill,
+                            available),
+                        Type = water,
+                        Direction = waterDirection,
+                        Flags = waterFlags
+                    };
+                    cell.Flags |= CellFlags.Generated;
                 }
 
                 world.SetCellBulk(x, y, z, cell);

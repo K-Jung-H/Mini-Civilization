@@ -55,6 +55,12 @@ namespace MiniCivilization.World.Generation
         [SerializeField, Range(0, 8)] private int lakeCount = 2;
         [Tooltip("호수를 깎고 물을 채우는 수평 반지름입니다. 단위는 타일입니다.")]
         [SerializeField, Range(1, 5)] private int lakeRadius = 2;
+        [Tooltip("WaterAmount lost whenever water spreads to a horizontal Cell. Downward spread does not lose Amount.")]
+        [SerializeField, Range(WaterAmount.Unit, 1f)]
+        private float spreadAmountLoss = 0.05f;
+        [Tooltip("A horizontal spread candidate below this WaterAmount is not created.")]
+        [SerializeField, Range(WaterAmount.Unit, 1f)]
+        private float minimumSpreadAmount = 0.1f;
 
         [Header("Biome")]
         [Tooltip("수분 값이 이 값 이하인 육지를 사막으로 판정합니다.")]
@@ -87,6 +93,11 @@ namespace MiniCivilization.World.Generation
         public int RiverDepthSteps => riverDepthSteps;
         public int LakeCount => lakeCount;
         public int LakeRadius => lakeRadius;
+        public float SpreadAmountLoss => spreadAmountLoss;
+        public float MinimumSpreadAmount => minimumSpreadAmount;
+        public WaterFlowRules WaterFlowRules => new(
+            spreadAmountLoss,
+            minimumSpreadAmount);
         public float DesertMoistureThreshold => desertMoistureThreshold;
         public float WetlandMoistureThreshold => wetlandMoistureThreshold;
         public float SnowTemperatureThreshold => snowTemperatureThreshold;
@@ -159,6 +170,14 @@ namespace MiniCivilization.World.Generation
             terrainAmplitudeCells = Math.Clamp(terrainAmplitudeCells, 1, worldHeight - 1);
             mountainStrengthCells = Math.Clamp(mountainStrengthCells, 0, worldHeight - 1);
             seaLevelCell = Math.Clamp(seaLevelCell, 0, worldHeight - 1);
+            spreadAmountLoss = Math.Clamp(
+                spreadAmountLoss,
+                WaterAmount.Unit,
+                1f);
+            minimumSpreadAmount = Math.Clamp(
+                minimumSpreadAmount,
+                WaterAmount.Unit,
+                1f);
         }
     }
 }

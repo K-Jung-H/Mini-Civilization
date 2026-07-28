@@ -65,21 +65,6 @@ namespace MiniCivilization.World.Meshing
             return mesh;
         }
 
-        internal void AppendTo(ChunkInteractionMeshData target)
-        {
-            for (var triangleIndex = 0;
-                 triangleIndex < metadata.Count;
-                 triangleIndex++)
-            {
-                var indexStart = triangleIndex * 3;
-                target.AddTriangle(
-                    positions[indices[indexStart]],
-                    positions[indices[indexStart + 1]],
-                    positions[indices[indexStart + 2]],
-                    metadata[triangleIndex]);
-            }
-        }
-
         private int AddVertex(Vector3 position)
         {
             if (vertexLookup.TryGetValue(position, out var existingIndex))
@@ -96,8 +81,9 @@ namespace MiniCivilization.World.Meshing
 
     internal static class ChunkInteractionMeshBuilder
     {
-        internal static void BuildTerrainCache(
+        internal static ChunkInteractionMeshData Build(
             MeshBuffers terrain,
+            MeshBuffers water,
             ChunkInteractionMeshData target)
         {
             target.Clear();
@@ -105,20 +91,11 @@ namespace MiniCivilization.World.Meshing
                 terrain,
                 SurfaceInteractionType.Terrain,
                 target);
-        }
-
-        internal static ChunkInteractionMeshData BuildFromTerrainCache(
-            ChunkInteractionMeshData terrain,
-            MeshBuffers water,
-            ChunkInteractionMeshData reusableData)
-        {
-            reusableData.Clear();
-            terrain.AppendTo(reusableData);
             Append(
                 water,
                 SurfaceInteractionType.Water,
-                reusableData);
-            return reusableData;
+                target);
+            return target;
         }
 
         private static void Append(
@@ -142,8 +119,7 @@ namespace MiniCivilization.World.Meshing
 
                 var metadata = new InteractionTriangleMetadata(
                     sourceMetadata.OwnerCellIndex,
-                    surfaceType,
-                    sourceMetadata.Role);
+                    surfaceType);
                 target.AddTriangle(a, b, c, metadata);
             }
         }

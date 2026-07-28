@@ -4,81 +4,36 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.WaterFlow
 {
-    [Flags]
-    public enum WaterIncomingDirectionMask : byte
-    {
-        None = 0,
-        FromAbove = 1 << 0,
-        FromEast = 1 << 1,
-        FromNorth = 1 << 2,
-        FromWest = 1 << 3,
-        FromSouth = 1 << 4
-    }
-
-    [Flags]
-    public enum WaterFlowHeadingMask : byte
-    {
-        None = 0,
-        East = 1 << 0,
-        North = 1 << 1,
-        West = 1 << 2,
-        South = 1 << 3
-    }
-
-    public enum WaterFlowMode : byte
-    {
-        None = 0,
-        Surface = 1,
-        Falling = 2,
-        Flowing = 3
-    }
-
     /// <summary>
-    /// Runtime-only water amount cache. Flow cells do not belong to a source
-    /// and do not retain parent/child routing relationships.
+    /// Runtime overlay used only while a queued water recalculation is in
+    /// progress. Stable water state remains authoritative in CellData.Water.
     /// </summary>
     public sealed class WaterFlowState
     {
+        private readonly WorldData world;
         private readonly int worldSize;
         private readonly int worldHeight;
-        private readonly int cellCount;
-        private readonly ushort maximumAmount;
         private readonly int[] waterBodyIdsByColumn;
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
-        private readonly ushort[] targetAmountsByCell;
-        private readonly WaterType[] waterTypesByCell;
-        private readonly WaterIncomingDirectionMask[] incomingDirectionsByCell;
-        private readonly WaterFlowHeadingMask[] flowHeadingsByCell;
-        private readonly WaterFlowMode[] flowModesByCell;
+        private readonly Dictionary<int, WaterCellData> resolvedCells = new();
+        private readonly Dictionary<int, WaterCellData> nextResolvedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
-        private int resolvedCellCount;
 
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
-        public int ResolvedCellCount => resolvedCellCount;
         public bool IsRecalculating { get; internal set; }
-        public bool IsStable => !IsRecalculating;
 
-        internal int CellCount => cellCount;
-        internal ushort MaximumAmount => maximumAmount;
+        internal int CellCount => checked(
+            worldSize * worldSize * worldHeight);
 
-        internal WaterFlowState(WorldData world, IReadOnlyList<WaterBody> bodies)
+        internal WaterFlowState(
+            WorldData world,
+            IReadOnlyList<WaterBody> bodies)
         {
-            if (world == null)
-            {
-                throw new ArgumentNullException(nameof(world));
-            }
-
+            this.world = world
+                ?? throw new ArgumentNullException(nameof(world));
             worldSize = world.Size;
             worldHeight = world.Height;
-            cellCount = checked(world.Size * world.Size * world.Height);
-            maximumAmount = world.WaterState.MaximumAmount;
             waterBodyIdsByColumn = new int[checked(world.Size * world.Size)];
-            targetAmountsByCell = new ushort[cellCount];
-            waterTypesByCell = new WaterType[cellCount];
-            incomingDirectionsByCell = new WaterIncomingDirectionMask[cellCount];
-            flowHeadingsByCell = new WaterFlowHeadingMask[cellCount];
-            flowModesByCell = new WaterFlowMode[cellCount];
-            InitializeFromPersistent(world);
             ReplaceWaterBodies(bodies);
         }
 
@@ -107,159 +62,91 @@ namespace MiniCivilization.World.WaterFlow
         internal bool TryGetWaterBody(int id, out WaterBody waterBody) =>
             waterBodiesById.TryGetValue(id, out waterBody);
 
-        public ushort GetTargetAmount(int x, int y, int z) =>
-            ContainsCell(x, y, z)
-                ? targetAmountsByCell[EncodeCell(x, y, z)]
-                : (ushort)0;
-
-        public WaterIncomingDirectionMask GetIncomingDirections(
+        public WaterFlowDirectionMask GetFlowDirection(
             int x,
             int y,
             int z) =>
             ContainsCell(x, y, z)
-                ? incomingDirectionsByCell[EncodeCell(x, y, z)]
-                : WaterIncomingDirectionMask.None;
+                ? GetWater(WorldIndex.EncodeCell(world, x, y, z)).Direction
+                : WaterFlowDirectionMask.None;
 
-        public WaterFlowHeadingMask GetFlowHeading(int x, int y, int z) =>
-            ContainsCell(x, y, z)
-                ? flowHeadingsByCell[EncodeCell(x, y, z)]
-                : WaterFlowHeadingMask.None;
-
-        public WaterFlowMode GetFlowMode(int x, int y, int z) =>
-            ContainsCell(x, y, z)
-                ? flowModesByCell[EncodeCell(x, y, z)]
-                : WaterFlowMode.None;
-
-        internal ushort GetTargetAmount(int cellIndex) =>
-            targetAmountsByCell[cellIndex];
-
-        internal WaterType GetWaterType(int cellIndex) =>
-            waterTypesByCell[cellIndex];
-
-        internal WaterIncomingDirectionMask GetIncomingDirections(int cellIndex) =>
-            incomingDirectionsByCell[cellIndex];
-
-        internal WaterFlowHeadingMask GetFlowHeading(int cellIndex) =>
-            flowHeadingsByCell[cellIndex];
-
-        internal WaterFlowMode GetFlowMode(int cellIndex) =>
-            flowModesByCell[cellIndex];
-
-        internal bool SetResolvedCell(
-            int cellIndex,
-            ushort targetAmount,
-            WaterType waterType,
-            WaterIncomingDirectionMask incomingDirections,
-            WaterFlowHeadingMask flowHeading,
-            WaterFlowMode flowMode)
+        internal WaterCellData GetWater(int cellIndex)
         {
-            targetAmount = Math.Min(
-                maximumAmount,
-                targetAmount);
-            if (targetAmount == 0)
+            if (resolvedCells.TryGetValue(cellIndex, out var water))
             {
-                waterType = WaterType.None;
-                incomingDirections = WaterIncomingDirectionMask.None;
-                flowHeading = WaterFlowHeadingMask.None;
-                flowMode = WaterFlowMode.None;
+                return water;
             }
 
-            if (targetAmountsByCell[cellIndex] == targetAmount
-                && waterTypesByCell[cellIndex] == waterType
-                && incomingDirectionsByCell[cellIndex] == incomingDirections
-                && flowHeadingsByCell[cellIndex] == flowHeading
-                && flowModesByCell[cellIndex] == flowMode)
+            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+            return world.GetCell(
+                coordinate.X,
+                coordinate.Y,
+                coordinate.Z).Water;
+        }
+
+        internal WaterFlowDirectionMask GetFlowDirection(int cellIndex) =>
+            GetWater(cellIndex).Direction;
+
+        internal bool StageResolvedCell(int cellIndex, WaterCellData water)
+        {
+            water.Normalize();
+            if (GetWater(cellIndex).Equals(water))
             {
                 return false;
             }
 
-            if (targetAmountsByCell[cellIndex] == 0 && targetAmount > 0)
-            {
-                resolvedCellCount++;
-            }
-            else if (targetAmountsByCell[cellIndex] > 0 && targetAmount == 0)
-            {
-                resolvedCellCount--;
-            }
-
-            targetAmountsByCell[cellIndex] = targetAmount;
-            waterTypesByCell[cellIndex] = targetAmount > 0
-                ? waterType
-                : WaterType.None;
-            incomingDirectionsByCell[cellIndex] = incomingDirections;
-            flowHeadingsByCell[cellIndex] = flowHeading;
-            flowModesByCell[cellIndex] = flowMode;
+            nextResolvedCells[cellIndex] = water;
             return true;
         }
 
-        internal void SynchronizeFromPersistent(WorldData world, int cellIndex)
+        internal void ApplyResolutionPass()
         {
-            var amount = world.WaterState.GetAmount(cellIndex);
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-            var cell = world.GetCell(
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
-            var waterType = amount > 0
-                ? cell.Water != WaterType.None
-                    ? cell.Water
-                    : world.WaterState.GetSourceWaterType(cellIndex)
-                : WaterType.None;
-            SetResolvedCell(
-                cellIndex,
-                amount,
-                waterType,
-                WaterIncomingDirectionMask.None,
-                WaterFlowHeadingMask.None,
-                amount > 0 ? WaterFlowMode.Surface : WaterFlowMode.None);
+            foreach (var pair in nextResolvedCells)
+            {
+                resolvedCells[pair.Key] = pair.Value;
+            }
+
+            nextResolvedCells.Clear();
+        }
+
+        internal void CancelResolutionPass() => nextResolvedCells.Clear();
+
+        internal void SynchronizeFromPersistent(int cellIndex) =>
+            resolvedCells.Remove(cellIndex);
+
+        internal IEnumerable<KeyValuePair<int, WaterCellData>>
+            EnumerateResolvedCells() => resolvedCells;
+
+        internal void ClearResolvedCells()
+        {
+            resolvedCells.Clear();
+            nextResolvedCells.Clear();
         }
 
         internal void ReplaceWaterBodies(IReadOnlyList<WaterBody> bodies)
         {
             waterBodies = bodies ?? Array.Empty<WaterBody>();
-            Array.Clear(waterBodyIdsByColumn, 0, waterBodyIdsByColumn.Length);
+            Array.Clear(
+                waterBodyIdsByColumn,
+                0,
+                waterBodyIdsByColumn.Length);
             waterBodiesById.Clear();
-            for (var bodyIndex = 0; bodyIndex < waterBodies.Count; bodyIndex++)
+            for (var bodyIndex = 0;
+                 bodyIndex < waterBodies.Count;
+                 bodyIndex++)
             {
                 var body = waterBodies[bodyIndex];
                 waterBodiesById[body.Id] = body;
-                for (var cellIndex = 0; cellIndex < body.Cells.Count; cellIndex++)
+                for (var cellIndex = 0;
+                     cellIndex < body.Cells.Count;
+                     cellIndex++)
                 {
                     var cell = body.Cells[cellIndex];
-                    waterBodyIdsByColumn[cell.X + worldSize * cell.Z] = body.Id;
+                    waterBodyIdsByColumn[
+                        cell.X + worldSize * cell.Z] = body.Id;
                 }
             }
         }
-
-        private void InitializeFromPersistent(WorldData world)
-        {
-            for (var cellIndex = 0; cellIndex < cellCount; cellIndex++)
-            {
-                var amount = world.WaterState.GetAmount(cellIndex);
-                if (amount == 0)
-                {
-                    continue;
-                }
-
-                var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-                var cell = world.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                targetAmountsByCell[cellIndex] = amount;
-                waterTypesByCell[cellIndex] = cell.Water != WaterType.None
-                    ? cell.Water
-                    : world.WaterState.GetSourceWaterType(cellIndex);
-                flowModesByCell[cellIndex] =
-                    (cell.Flags & CellFlags.FallingWater) != 0
-                        ? WaterFlowMode.Falling
-                        : WaterFlowMode.Surface;
-                resolvedCellCount++;
-            }
-        }
-
-        private int EncodeCell(int x, int y, int z) =>
-            x + worldSize * (z + worldSize * y);
 
         private bool ContainsColumn(int x, int z) =>
             (uint)x < worldSize && (uint)z < worldSize;

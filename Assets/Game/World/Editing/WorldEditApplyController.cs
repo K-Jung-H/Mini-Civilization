@@ -378,9 +378,7 @@ namespace MiniCivilization.World.Editing
                 ? current.Geology
                 : CellMaterialType.Rock;
             current.SolidFill = (byte)WorldGrid.HeightStepsPerCell;
-            current.Water = WaterType.None;
-            current.WaterFill = 0;
-            current.Flags &= ~(CellFlags.River | CellFlags.FallingWater);
+            current.Water = default;
             current.Flags |= CellFlags.Generated;
             return current;
         }

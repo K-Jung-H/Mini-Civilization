@@ -19,6 +19,7 @@ namespace MiniCivilization.World.Meshing
             int patchZ,
             int patchSize,
             WorldSurfaceCatalog catalog,
+            WorldSurfaceTopology topology,
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
             List<ExposedCell> cells)
@@ -45,19 +46,13 @@ namespace MiniCivilization.World.Meshing
                 var cell = world.GetCell(x, y, z);
                 var exposure = cells[index].Exposure;
                 var ownerCellIndex = WorldCellIndex.Encode(world, x, y, z);
-                CellSurfaceProfile profile = default;
+                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
+                    ownerCellIndex,
+                    true);
+                SolidSurfaceProfile profile = default;
                 if ((exposure & CellExposureFlags.SolidTop) != 0)
                 {
-                    profile = CellSurfaceShapeResolver.Resolve(
-                        world,
-                        x,
-                        y,
-                        z);
-                    buffers.CurrentTriangleMetadata =
-                        new SurfaceTriangleMetadata(
-                            ownerCellIndex,
-                            SurfaceTriangleRole.Core,
-                            true);
+                    profile = topology.ResolveSolid(x, y, z);
                     AddVolumeTop(
                         world,
                         catalog,
@@ -70,10 +65,6 @@ namespace MiniCivilization.World.Meshing
                         profile);
                 }
 
-                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
-                    ownerCellIndex,
-                    SurfaceTriangleRole.Cliff,
-                    true);
                 AddVolumeSides(
                     world,
                     catalog,
@@ -85,15 +76,11 @@ namespace MiniCivilization.World.Meshing
                     startZ,
                     cell,
                     exposure,
+                    topology,
                     profile);
 
                 if ((exposure & CellExposureFlags.SolidBottom) != 0)
                 {
-                    buffers.CurrentTriangleMetadata =
-                        new SurfaceTriangleMetadata(
-                            ownerCellIndex,
-                            SurfaceTriangleRole.Bottom,
-                            true);
                     AddVolumeBottom(
                         world,
                         catalog,
@@ -118,9 +105,9 @@ namespace MiniCivilization.World.Meshing
             int z,
             int startX,
             int startZ,
-            in CellSurfaceProfile profile)
+            in SolidSurfaceProfile profile)
         {
-            var height = profile.CurrentHeightUnits;
+            var height = profile.CenterHeightUnits;
             AddSurfaceQuad(
                 buffers,
                 CreateCellVertex(world, catalog, x, y, z, startX, startZ, CoreMin, CoreMin, height),
@@ -150,9 +137,9 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             int directionX,
             int directionZ,
-            in CellSurfaceProfile profile)
+            in SolidSurfaceProfile profile)
         {
-            var current = profile.CurrentHeightUnits;
+            var current = profile.CenterHeightUnits;
             var outerStart = profile.GetBoundaryHeight(
                 directionX,
                 directionZ,
@@ -213,7 +200,7 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             float cornerX,
             float cornerZ,
-            in CellSurfaceProfile profile)
+            in SolidSurfaceProfile profile)
         {
             var inwardX = cornerX <= 0f ? 1f : -1f;
             var inwardZ = cornerZ <= 0f ? 1f : -1f;
@@ -239,12 +226,12 @@ namespace MiniCivilization.World.Meshing
                 cornerX, shoulderZ, edgeXHeight);
             var inner = CreateCellVertex(
                 world, catalog, x, y, z, startX, startZ,
-                shoulderX, shoulderZ, profile.CurrentHeightUnits);
+                shoulderX, shoulderZ, profile.CenterHeightUnits);
             var corner = CreateCellVertex(
                 world, catalog, x, y, z, startX, startZ,
                 cornerX, cornerZ, cornerHeight);
 
-            if (cornerHeight > profile.CurrentHeightUnits)
+            if (cornerHeight > profile.CenterHeightUnits)
             {
                 buffers.AddTriangleFacing(corner, topAlongX, topAlongZ, Vector3.up);
                 buffers.AddTriangleFacing(topAlongX, inner, topAlongZ, Vector3.up);
@@ -266,22 +253,23 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             in CellData cell,
             CellExposureFlags exposure,
-            in CellSurfaceProfile topProfile)
+            WorldSurfaceTopology topology,
+            in SolidSurfaceProfile topProfile)
         {
-            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topProfile, -1, 0, CellExposureFlags.SolidNegativeX);
-            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topProfile, 1, 0, CellExposureFlags.SolidPositiveX);
-            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topProfile, 0, -1, CellExposureFlags.SolidNegativeZ);
-            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topProfile, 0, 1, CellExposureFlags.SolidPositiveZ);
+            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topology, topProfile, -1, 0, CellExposureFlags.SolidNegativeX);
+            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topology, topProfile, 1, 0, CellExposureFlags.SolidPositiveX);
+            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topology, topProfile, 0, -1, CellExposureFlags.SolidNegativeZ);
+            AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topology, topProfile, 0, 1, CellExposureFlags.SolidPositiveZ);
 
             if ((exposure & CellExposureFlags.SolidTop) == 0)
             {
                 return;
             }
 
-            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topProfile, -1, -1);
-            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topProfile, 1, -1);
-            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topProfile, -1, 1);
-            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topProfile, 1, 1);
+            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topology, topProfile, -1, -1);
+            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topology, topProfile, 1, -1);
+            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topology, topProfile, -1, 1);
+            AddVolumeCornerClosure(world, catalog, buffers, x, y, z, startX, startZ, cell, topology, topProfile, 1, 1);
         }
 
         private static void AddVolumeCornerClosure(
@@ -294,7 +282,8 @@ namespace MiniCivilization.World.Meshing
             int startX,
             int startZ,
             in CellData cell,
-            in CellSurfaceProfile topProfile,
+            WorldSurfaceTopology topology,
+            in SolidSurfaceProfile topProfile,
             int directionX,
             int directionZ)
         {
@@ -307,34 +296,34 @@ namespace MiniCivilization.World.Meshing
             }
 
             ResolveSolidSideBottomProfile(
-                world,
                 x,
                 z,
                 directionX,
                 0,
+                topology,
                 xInterval.BottomUnits,
                 out var xStart,
                 out var xShoulderStart,
                 out var xShoulderEnd,
                 out var xEnd);
             ResolveSolidSideBottomProfile(
-                world,
                 x,
                 z,
                 0,
                 directionZ,
+                topology,
                 zInterval.BottomUnits,
                 out var zStart,
                 out var zShoulderStart,
                 out var zShoulderEnd,
                 out var zEnd);
 
-            var xBoundary = new CellSurfaceBoundary(
+            var xBoundary = new SurfaceBoundaryProfile(
                 xStart,
                 xShoulderStart,
                 xShoulderEnd,
                 xEnd);
-            var zBoundary = new CellSurfaceBoundary(
+            var zBoundary = new SurfaceBoundaryProfile(
                 zStart,
                 zShoulderStart,
                 zShoulderEnd,
@@ -346,46 +335,37 @@ namespace MiniCivilization.World.Meshing
             var cellBottom = y * WorldGrid.HeightStepsPerCell;
             var cellCeiling = (y + 1) * WorldGrid.HeightStepsPerCell;
 
-            var xCornerBottom = ClampSideBottom(
-                xBoundary.GetHeight(cornerZ),
-                topProfile.GetBoundaryHeight(directionX, 0, cornerZ),
-                cellBottom,
-                cellCeiling);
-            var xShoulderBottom = ClampSideBottom(
-                xBoundary.GetHeight(shoulderZ),
-                topProfile.GetBoundaryHeight(directionX, 0, shoulderZ),
-                cellBottom,
-                cellCeiling);
-            var zCornerBottom = ClampSideBottom(
-                zBoundary.GetHeight(cornerX),
-                topProfile.GetBoundaryHeight(0, directionZ, cornerX),
-                cellBottom,
-                cellCeiling);
-            var zShoulderBottom = ClampSideBottom(
-                zBoundary.GetHeight(shoulderX),
-                topProfile.GetBoundaryHeight(0, directionZ, shoulderX),
-                cellBottom,
-                cellCeiling);
-
-            if (ApproximatelyEqual(xCornerBottom, xShoulderBottom)
-                && ApproximatelyEqual(xCornerBottom, zCornerBottom)
-                && ApproximatelyEqual(xCornerBottom, zShoulderBottom))
+            if (!SurfaceBoundaryClosure.TryResolve(
+                    xBoundary,
+                    zBoundary,
+                    topProfile.GetBoundary(directionX, 0),
+                    topProfile.GetBoundary(0, directionZ),
+                    directionX,
+                    directionZ,
+                    Shoulder,
+                    cellBottom,
+                    cellCeiling,
+                    out var closure))
             {
                 return;
             }
 
             var xCorner = CreateCornerClosureVertex(
                 world, catalog, x, y, z, startX, startZ,
-                directionX, directionZ, cornerX, cornerZ, xCornerBottom);
+                directionX, directionZ, cornerX, cornerZ,
+                closure.XCornerHeightUnits);
             var alongXSide = CreateCornerClosureVertex(
                 world, catalog, x, y, z, startX, startZ,
-                directionX, directionZ, cornerX, shoulderZ, xShoulderBottom);
+                directionX, directionZ, cornerX, shoulderZ,
+                closure.XShoulderHeightUnits);
             var alongZSide = CreateCornerClosureVertex(
                 world, catalog, x, y, z, startX, startZ,
-                directionX, directionZ, shoulderX, cornerZ, zShoulderBottom);
+                directionX, directionZ, shoulderX, cornerZ,
+                closure.ZShoulderHeightUnits);
             var zCorner = CreateCornerClosureVertex(
                 world, catalog, x, y, z, startX, startZ,
-                directionX, directionZ, cornerX, cornerZ, zCornerBottom);
+                directionX, directionZ, cornerX, cornerZ,
+                closure.ZCornerHeightUnits);
             var outward = new Vector3(directionX, 0f, directionZ).normalized;
 
             buffers.AddTriangleFacing(
@@ -400,16 +380,6 @@ namespace MiniCivilization.World.Meshing
                 outward);
         }
 
-        private static bool ApproximatelyEqual(float a, float b) =>
-            Mathf.Abs(a - b) <= 0.0001f;
-
-        private static float ClampSideBottom(
-            float bottom,
-            float top,
-            int cellBottom,
-            int cellCeiling) =>
-            Math.Min(Mathf.Clamp(bottom, cellBottom, cellCeiling), top);
-
         private static void AddVolumeSide(
             WorldData world,
             WorldSurfaceCatalog catalog,
@@ -421,7 +391,8 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             in CellData cell,
             CellExposureFlags exposure,
-            in CellSurfaceProfile topProfile,
+            WorldSurfaceTopology topology,
+            in SolidSurfaceProfile topProfile,
             int directionX,
             int directionZ,
             CellExposureFlags requiredFlag)
@@ -454,11 +425,11 @@ namespace MiniCivilization.World.Meshing
                 ? topProfile.GetBoundaryHeight(directionX, directionZ, 1f)
                 : interval.TopUnits;
             ResolveSolidSideBottomProfile(
-                world,
                 x,
                 z,
                 directionX,
                 directionZ,
+                topology,
                 interval.BottomUnits,
                 out var startBottom,
                 out var shoulderStartBottom,
@@ -534,11 +505,11 @@ namespace MiniCivilization.World.Meshing
         }
 
         private static void ResolveSolidSideBottomProfile(
-            WorldData world,
             int x,
             int z,
             int directionX,
             int directionZ,
+            WorldSurfaceTopology topology,
             int fallbackHeight,
             out float startHeight,
             out float shoulderStartHeight,
@@ -549,8 +520,7 @@ namespace MiniCivilization.World.Meshing
             shoulderStartHeight = fallbackHeight;
             shoulderEndHeight = fallbackHeight;
             endHeight = fallbackHeight;
-            if (!CellSurfaceShapeResolver.TryResolveSurfaceAtHeight(
-                    world,
+            if (!topology.TryResolveSolidAtHeight(
                     x + directionX,
                     z + directionZ,
                     fallbackHeight,

@@ -8,11 +8,11 @@ namespace MiniCivilization.World.Persistence
 {
     public static class WorldSaveCodec
     {
-        private const uint Magic = 0x3157434D; // "MCW1"
+        private const uint Magic = 0x3257434D; // "MCW2"
         private const uint Footer = 0x444E454D; // "MEND"
-        private const uint WaterStateMarker = 0x32544157; // "WAT2"
-        private const ushort CurrentVersion = 1;
-        private const int CellByteSize = 14;
+        private const uint WaterSourcesMarker = 0x31435357; // "WSC1"
+        private const ushort CurrentVersion = 2;
+        private const int CellByteSize = 16;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -74,6 +74,8 @@ namespace MiniCivilization.World.Persistence
             writer.Write(world.ChunkSizeY);
             writer.Write(world.ChunkSizeZ);
             writer.Write(world.Seed);
+            writer.Write(world.WaterFlowRules.SpreadAmountLoss);
+            writer.Write(world.WaterFlowRules.MinimumSpreadAmount);
 
             var chunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
             writer.Write(chunkCount);
@@ -95,7 +97,7 @@ namespace MiniCivilization.World.Persistence
                 WriteEnvironmentSection(writer, world, chunkX, chunkZ);
             }
 
-            WriteWaterState(writer, world.WaterState);
+            WriteWaterSources(writer, world.WaterSources);
             writer.Write(Footer);
             writer.Flush();
         }
@@ -139,9 +141,13 @@ namespace MiniCivilization.World.Persistence
             var chunkSizeY = ReadPositiveDimension(reader, "chunk size Y");
             var chunkSizeZ = ReadPositiveDimension(reader, "chunk size Z");
             var seed = reader.ReadInt32();
+            var waterFlowRules = new WaterFlowRules(
+                reader.ReadByte(),
+                reader.ReadByte());
             ValidateDimensions(size, height, chunkSizeX, chunkSizeY, chunkSizeZ);
 
             var world = new WorldData(size, height, chunkSizeX, chunkSizeY, chunkSizeZ, seed);
+            world.ConfigureWaterFlow(waterFlowRules);
             var expectedChunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
             var chunkCount = reader.ReadInt32();
             if (chunkCount != expectedChunkCount)
@@ -200,19 +206,15 @@ namespace MiniCivilization.World.Persistence
                 ReadEnvironmentSection(reader, world, chunkX, chunkZ);
             }
 
-            var trailingMarker = reader.ReadUInt32();
-            if (trailingMarker == WaterStateMarker)
-            {
-                ReadWaterState(reader, world.WaterState);
-                trailingMarker = reader.ReadUInt32();
-            }
-            else
+            if (reader.ReadUInt32() != WaterSourcesMarker)
             {
                 throw new InvalidDataException(
-                    "The world save does not contain the current water state section.");
+                    "The world save does not contain its water source section.");
             }
 
-            if (trailingMarker != Footer)
+            ReadWaterSources(reader, world.WaterSources, world);
+
+            if (reader.ReadUInt32() != Footer)
             {
                 throw new InvalidDataException("The world save footer is missing or corrupt.");
             }
@@ -221,53 +223,19 @@ namespace MiniCivilization.World.Persistence
             return world;
         }
 
-        private static void WriteWaterState(
+        private static void WriteWaterSources(
             BinaryWriter writer,
-            WaterState waterState)
+            WaterSourceCollection waterSources)
         {
-            writer.Write(WaterStateMarker);
-            writer.Write(waterState.IsInitialized);
-            writer.Write(waterState.MaximumAmount);
-            var populatedCount = 0;
-            for (var index = 0; index < waterState.CellCount; index++)
-            {
-                if (waterState.GetAmount(index) != 0
-                    || waterState.GetBehavior(index) != WaterCellBehavior.None
-                    || waterState.GetSourceGroupId(index) != 0)
-                {
-                    populatedCount++;
-                }
-            }
-
-            writer.Write(populatedCount);
-            for (var index = 0; index < waterState.CellCount; index++)
-            {
-                var amount = waterState.GetAmount(index);
-                var behavior = waterState.GetBehavior(index);
-                var sourceGroupId = waterState.GetSourceGroupId(index);
-                if (amount == 0
-                    && behavior == WaterCellBehavior.None
-                    && sourceGroupId == 0)
-                {
-                    continue;
-                }
-
-                writer.Write(index);
-                writer.Write(amount);
-                writer.Write((byte)behavior);
-                writer.Write(sourceGroupId);
-            }
-
-            writer.Write(waterState.SourceGroups.Count);
+            writer.Write(WaterSourcesMarker);
+            writer.Write(waterSources.Groups.Count);
             for (var groupIndex = 0;
-                 groupIndex < waterState.SourceGroups.Count;
+                 groupIndex < waterSources.Groups.Count;
                  groupIndex++)
             {
-                var group = waterState.SourceGroups[groupIndex];
+                var group = waterSources.Groups[groupIndex];
                 writer.Write(group.Id);
-                writer.Write((ushort)group.WaterType);
-                writer.Write(group.OutputSurfaceTenths);
-                writer.Write(group.SourceAmount);
+                writer.Write((byte)group.WaterType);
                 writer.Write(group.CellIndices.Count);
                 for (var cellIndex = 0;
                      cellIndex < group.CellIndices.Count;
@@ -278,35 +246,14 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
-        private static void ReadWaterState(
+        private static void ReadWaterSources(
             BinaryReader reader,
-            WaterState waterState)
+            WaterSourceCollection waterSources,
+            WorldData world)
         {
-            var initialized = reader.ReadBoolean();
-            waterState.ConfigureMaximumAmount(
-                Math.Max((ushort)1, reader.ReadUInt16()));
-            var entryCount = reader.ReadInt32();
-            if (entryCount < 0 || entryCount > waterState.CellCount)
-            {
-                throw new InvalidDataException("The water state entry count is invalid.");
-            }
-
-            for (var entryIndex = 0; entryIndex < entryCount; entryIndex++)
-            {
-                var cellIndex = reader.ReadInt32();
-                if ((uint)cellIndex >= waterState.CellCount)
-                {
-                    throw new InvalidDataException("A water state Cell index is outside the world.");
-                }
-
-                var amount = reader.ReadUInt16();
-                var behavior = (WaterCellBehavior)reader.ReadByte();
-                var sourceGroupId = reader.ReadInt32();
-                waterState.SetCell(cellIndex, amount, behavior, sourceGroupId);
-            }
-
             var groupCount = reader.ReadInt32();
-            if (groupCount < 0 || groupCount > waterState.CellCount)
+            var cellCapacity = checked(world.Size * world.Size * world.Height);
+            if (groupCount < 0 || groupCount > cellCapacity)
             {
                 throw new InvalidDataException("The water source group count is invalid.");
             }
@@ -315,11 +262,9 @@ namespace MiniCivilization.World.Persistence
             for (var groupIndex = 0; groupIndex < groupCount; groupIndex++)
             {
                 var id = reader.ReadInt32();
-                var waterType = (WaterType)reader.ReadUInt16();
-                var outputSurfaceTenths = reader.ReadInt16();
-                var sourceAmount = reader.ReadUInt16();
+                var waterType = (WaterType)reader.ReadByte();
                 var cellCount = reader.ReadInt32();
-                if (cellCount < 0 || cellCount > waterState.CellCount)
+                if (cellCount < 0 || cellCount > cellCapacity)
                 {
                     throw new InvalidDataException("A water source group size is invalid.");
                 }
@@ -328,7 +273,7 @@ namespace MiniCivilization.World.Persistence
                 for (var cellIndex = 0; cellIndex < cellCount; cellIndex++)
                 {
                     cellIndices[cellIndex] = reader.ReadInt32();
-                    if ((uint)cellIndices[cellIndex] >= waterState.CellCount)
+                    if ((uint)cellIndices[cellIndex] >= cellCapacity)
                     {
                         throw new InvalidDataException("A source Cell index is outside the world.");
                     }
@@ -337,16 +282,10 @@ namespace MiniCivilization.World.Persistence
                 groups[groupIndex] = new WaterSourceGroupData(
                     id,
                     waterType,
-                    outputSurfaceTenths,
-                    sourceAmount,
                     cellIndices);
             }
 
-            waterState.ReplaceSourceGroups(groups);
-            if (initialized)
-            {
-                waterState.MarkInitialized();
-            }
+            waterSources.ReplaceGroups(groups);
         }
 
         private static void WriteCellSection(BinaryWriter writer, ReadOnlySpan<CellData> cells)
@@ -702,12 +641,15 @@ namespace MiniCivilization.World.Persistence
         {
             writer.Write((ushort)cell.Material);
             writer.Write((ushort)cell.Surface);
-            writer.Write((ushort)cell.Water);
             writer.Write((ushort)cell.Geology);
             writer.Write(cell.DepositIndex);
             writer.Write(cell.SolidFill);
-            writer.Write(cell.WaterFill);
             writer.Write((ushort)cell.Flags);
+            writer.Write(cell.Water.Amount);
+            writer.Write((byte)cell.Water.Type);
+            writer.Write((byte)cell.Water.Role);
+            writer.Write((byte)cell.Water.Direction);
+            writer.Write((byte)cell.Water.Flags);
         }
 
         private static CellData ReadCell(BinaryReader reader)
@@ -716,12 +658,18 @@ namespace MiniCivilization.World.Persistence
             {
                 Material = (CellMaterialType)reader.ReadUInt16(),
                 Surface = (SurfaceType)reader.ReadUInt16(),
-                Water = (WaterType)reader.ReadUInt16(),
                 Geology = (CellMaterialType)reader.ReadUInt16(),
                 DepositIndex = reader.ReadUInt16(),
                 SolidFill = reader.ReadByte(),
-                WaterFill = reader.ReadByte(),
-                Flags = (CellFlags)reader.ReadUInt16()
+                Flags = (CellFlags)reader.ReadUInt16(),
+                Water = new WaterCellData
+                {
+                    Amount = reader.ReadByte(),
+                    Type = (WaterType)reader.ReadByte(),
+                    Role = (WaterCellRole)reader.ReadByte(),
+                    Direction = (WaterFlowDirectionMask)reader.ReadByte(),
+                    Flags = (WaterCellFlags)reader.ReadByte()
+                }
             };
         }
 

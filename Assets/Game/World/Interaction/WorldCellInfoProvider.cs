@@ -35,7 +35,15 @@ namespace MiniCivilization.World.Interaction
             text.AppendLine(
                 $"Solid: {Cell.SolidFill}/{WorldGrid.HeightStepsPerCell} ({Cell.Material}, {Cell.Surface})");
             text.AppendLine(
-                $"Water: {Cell.WaterFill}/{WorldGrid.HeightStepsPerCell} ({Cell.Water})");
+                $"Water: amount {Cell.Water.Amount}/{WaterAmount.Full}, " +
+                $"fill {Cell.WaterFill}/{WorldGrid.HeightStepsPerCell}, " +
+                $"capacity {WorldGrid.HeightStepsPerCell - Cell.SolidFill}/" +
+                $"{WorldGrid.HeightStepsPerCell} ({Cell.Water.Type})");
+            if (Cell.HasWater)
+            {
+                text.AppendLine(
+                    $"Water role: {Cell.Water.Role}, flow: {Cell.Water.Direction}");
+            }
             text.AppendLine($"Geology: {Cell.Geology}, Deposit: {Cell.DepositIndex}");
             text.AppendLine($"Flags: {Cell.Flags}");
             text.AppendLine(

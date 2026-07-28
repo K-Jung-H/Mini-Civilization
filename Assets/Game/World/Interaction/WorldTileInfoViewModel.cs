@@ -35,8 +35,14 @@ namespace MiniCivilization.World.Interaction
             var environment = snapshot.Environment;
             var waterBody = snapshot.WaterBody;
             var waterText = cell.HasWater
-                ? $"Type: {cell.Water}\n" +
+                ? $"Type: {cell.Water.Type}\n" +
+                  $"Amount: {cell.Water.Amount * WaterAmount.Unit:0.00} " +
+                  $"({cell.Water.Amount}/{WaterAmount.Full})\n" +
                   $"Fill: {cell.WaterFill}/{WorldGrid.HeightStepsPerCell}\n" +
+                  $"Capacity: {WorldGrid.HeightStepsPerCell - cell.SolidFill}/" +
+                  $"{WorldGrid.HeightStepsPerCell}\n" +
+                  $"Role: {cell.Water.Role}\n" +
+                  $"Flow: {cell.Water.Direction}\n" +
                   $"Column level: {column.WaterTopUnits}\n" +
                   (waterBody != null
                       ? $"Body: #{waterBody.Id} {waterBody.Type}\n" +

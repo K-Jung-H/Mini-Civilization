@@ -2092,8 +2092,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.29230782, y: -0.62255734, z: 0.16858296, w: -0.7060866}
-  m_LocalPosition: {x: -4.0529747, y: 15.579361, z: 39.33003}
+  m_LocalRotation: {x: 0.10483809, y: 0.8805374, z: -0.2376988, w: 0.39643684}
+  m_LocalPosition: {x: 23.887077, y: 41.048523, z: 63.90689}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -13577,7 +13577,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationController
   settings: {fileID: 11400000, guid: b6f6b194b8934c81a7e9b7e0ca000001, type: 2}
-  seed: -1903286302
+  seed: -1231667089
 --- !u!114 &1900000004
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14400,9 +14400,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2bf90131140e44f4ad17e714d8d3785b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.WaterFlow.WorldWaterFlowController
-  maximumAmount: 1
-  spreadAmountLoss: 0.05
-  minimumSpreadAmount: 0.1
 --- !u!1 &1928212989
 GameObject:
   m_ObjectHideFlags: 0

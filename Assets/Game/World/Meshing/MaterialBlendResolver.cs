@@ -65,7 +65,7 @@ namespace MiniCivilization.World.Meshing
             ResolveAxis(localX, out var offsetX, out var blendX);
             ResolveAxis(localZ, out var offsetZ, out var blendZ);
             var cell = world.GetCell(x, y, z);
-            var current = ResolveWaterAppearance(catalog, cell.Water);
+            var current = ResolveWaterAppearance(catalog, cell.Water.Type);
             var xAppearance = ResolveWaterCellNeighbor(
                 world,
                 catalog,
@@ -277,7 +277,7 @@ namespace MiniCivilization.World.Meshing
                 return fallback;
             }
 
-            return ResolveWaterAppearance(catalog, cell.Water);
+            return ResolveWaterAppearance(catalog, cell.Water.Type);
         }
 
         private static SurfaceAppearance ResolveTerrainCellAppearance(
