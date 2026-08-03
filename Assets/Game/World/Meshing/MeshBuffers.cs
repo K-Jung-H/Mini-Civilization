@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using System;
 using MiniCivilization.World.Definitions;
-using MiniCivilization.World.Interaction;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -11,7 +10,6 @@ namespace MiniCivilization.World.Meshing
     {
         public MeshBuffers Terrain { get; } = new();
         public MeshBuffers Water { get; } = new();
-        public ChunkInteractionMeshData Interaction { get; } = new();
         public List<ExposedCell> SolidCells { get; } = new();
         public List<ExposedCell> WaterCells { get; } = new();
     }
@@ -42,20 +40,11 @@ namespace MiniCivilization.World.Meshing
         private readonly List<Vector2> textureScales = new();
         private readonly List<Color32> colors = new();
         private readonly List<int> indices = new();
-        private readonly List<SurfaceTriangleMetadata> triangleMetadata = new();
         private readonly Dictionary<MeshVertexKey, int> vertexLookup = new();
-        private SurfaceTriangleMetadata currentTriangleMetadata =
-            SurfaceTriangleMetadata.NotInteractive;
 
         public int VertexCount => positions.Count;
         public int TriangleCount => indices.Count / 3;
         public bool IsEmpty => positions.Count == 0;
-        internal SurfaceTriangleMetadata CurrentTriangleMetadata
-        {
-            get => currentTriangleMetadata;
-            set => currentTriangleMetadata = value;
-        }
-
         public void Clear()
         {
             positions.Clear();
@@ -68,9 +57,7 @@ namespace MiniCivilization.World.Meshing
             textureScales.Clear();
             colors.Clear();
             indices.Clear();
-            triangleMetadata.Clear();
             vertexLookup.Clear();
-            currentTriangleMetadata = SurfaceTriangleMetadata.NotInteractive;
         }
 
         internal void AddTriangle(in SurfaceVertex a, in SurfaceVertex b, in SurfaceVertex c)
@@ -95,7 +82,6 @@ namespace MiniCivilization.World.Meshing
             indices.Add(AddVertex(a, normal, tangent, layers, weightsA, scales));
             indices.Add(AddVertex(b, normal, tangent, layers, weightsB, scales));
             indices.Add(AddVertex(c, normal, tangent, layers, weightsC, scales));
-            triangleMetadata.Add(currentTriangleMetadata);
         }
 
         private static Vector4 ResolveTangent(
@@ -182,30 +168,6 @@ namespace MiniCivilization.World.Meshing
             mesh.SetTriangles(indices, 0, true);
             mesh.RecalculateBounds();
             return mesh;
-        }
-
-        internal bool TryGetInteractionTriangle(
-            int triangleIndex,
-            out Vector3 a,
-            out Vector3 b,
-            out Vector3 c,
-            out SurfaceTriangleMetadata metadata)
-        {
-            if ((uint)triangleIndex >= triangleMetadata.Count)
-            {
-                a = default;
-                b = default;
-                c = default;
-                metadata = default;
-                return false;
-            }
-
-            var indexStart = triangleIndex * 3;
-            a = positions[indices[indexStart]];
-            b = positions[indices[indexStart + 1]];
-            c = positions[indices[indexStart + 2]];
-            metadata = triangleMetadata[triangleIndex];
-            return metadata.IsInteractive;
         }
 
         private int AddVertex(

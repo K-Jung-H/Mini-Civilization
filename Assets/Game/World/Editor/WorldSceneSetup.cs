@@ -27,8 +27,6 @@ namespace MiniCivilization.World.Editor
         private const string TerrainMaterialPath = SettingsDirectory + "/WorldTerrain.mat";
         private const string WaterMaterialPath = SettingsDirectory + "/WorldWater.mat";
         private const string HighlightMaterialPath = SettingsDirectory + "/WorldTileHighlight.mat";
-        private const string WireframeMaterialPath = SettingsDirectory + "/WorldEditWireframe.mat";
-        private const int InteractionLayer = 8;
 
         [MenuItem("Mini Civilization/Setup World Scene")]
         public static void Setup()
@@ -49,22 +47,11 @@ namespace MiniCivilization.World.Editor
                 HighlightMaterialPath,
                 "Mini Civilization/World Tile Highlight",
                 "World Tile Highlight Material");
-            var wireframeMaterial = LoadOrCreateMaterial(
-                WireframeMaterialPath,
-                "Mini Civilization/World Tile Highlight",
-                "World Edit Wireframe Material");
             if (highlightMaterial.HasProperty("_ZTest"))
             {
                 highlightMaterial.SetFloat(
                     "_ZTest",
                     (float)UnityEngine.Rendering.CompareFunction.LessEqual);
-            }
-
-            if (wireframeMaterial.HasProperty("_ZTest"))
-            {
-                wireframeMaterial.SetFloat(
-                    "_ZTest",
-                    (float)UnityEngine.Rendering.CompareFunction.Always);
             }
 
             var activeScene = SceneManager.GetActiveScene();
@@ -128,24 +115,6 @@ namespace MiniCivilization.World.Editor
             var renderRoot = EnsureChildTransform(
                 renderingObject.transform,
                 "Render Root");
-            var highlightRoot = EnsureChildTransform(
-                interactionObject.transform,
-                "Highlight Root");
-            var editPreviewRoot = EnsureChildTransform(
-                editingObject.transform,
-                "Selection Preview");
-            var highlight = EnsureHighlightChild(highlightRoot, "Highlight");
-            var previewFilter = GetOrAdd<MeshFilter>(
-                editPreviewRoot.gameObject,
-                out _);
-            var previewRenderer = GetOrAdd<MeshRenderer>(
-                editPreviewRoot.gameObject,
-                out _);
-            var wireframeRenderer = GetOrAdd<WorldEditWireframeRenderer>(
-                editPreviewRoot.gameObject,
-                out _);
-            editPreviewRoot.gameObject.layer = 2;
-
             generator.SetSettings(settings);
             if (generatorCreated)
             {
@@ -157,9 +126,7 @@ namespace MiniCivilization.World.Editor
                 terrainMaterial,
                 waterMaterial,
                 renderRoot,
-                settings.RenderPatchSizeXZ,
-                true,
-                InteractionLayer);
+                settings.RenderPatchSizeXZ);
             saveController.Configure("Worlds", "default.mcw", true);
             manager.Configure(
                 generator,
@@ -172,18 +139,10 @@ namespace MiniCivilization.World.Editor
             highlighter.Configure(
                 manager,
                 selectionState,
-                highlight.Filter,
-                highlight.Renderer,
                 highlightMaterial);
             var infoPanel = EnsureTileInfoCanvas(uiObject.transform);
             var editToolbar = EnsureWorldEditToolbar(
                 uiObject.transform.Find("Canvas") as RectTransform);
-            wireframeRenderer.Configure(
-                selectionState,
-                camera,
-                previewFilter,
-                previewRenderer,
-                wireframeMaterial);
             editToolState.Configure(editToolbar);
             editInputController.Configure(
                 manager,
@@ -198,7 +157,6 @@ namespace MiniCivilization.World.Editor
                 manager,
                 selectionState,
                 editToolState,
-                1 << InteractionLayer,
                 settings.WorldSize * 4f);
             infoPresenter.Configure(
                 manager,
@@ -206,7 +164,6 @@ namespace MiniCivilization.World.Editor
                 infoProvider,
                 infoPanel);
             EnsureEventSystem();
-            ConfigureInteractionLayer();
             ConfigureDirectionalLight();
             EnsureSceneInBuildSettings();
 
@@ -217,9 +174,6 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(editToolState);
             EditorUtility.SetDirty(editInputController);
             EditorUtility.SetDirty(editApplyController);
-            EditorUtility.SetDirty(wireframeRenderer);
-            EditorUtility.SetDirty(previewFilter);
-            EditorUtility.SetDirty(previewRenderer);
             EditorUtility.SetDirty(waterFlowController);
             EditorUtility.SetDirty(renderer);
             EditorUtility.SetDirty(saveController);
@@ -1390,54 +1344,6 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(camera);
             EditorUtility.SetDirty(camera.transform);
             return camera;
-        }
-
-        private static (MeshFilter Filter, MeshRenderer Renderer)
-            EnsureHighlightChild(Transform parent, string childName)
-        {
-            var child = parent.Find(childName);
-            if (child == null)
-            {
-                var childObject = new GameObject(childName);
-                childObject.layer = 2;
-                child = childObject.transform;
-                child.SetParent(parent, false);
-            }
-
-            var filter = child.GetComponent<MeshFilter>();
-            if (filter == null)
-            {
-                filter = child.gameObject.AddComponent<MeshFilter>();
-            }
-
-            var staleMesh = filter.sharedMesh;
-            if (staleMesh != null
-                && !AssetDatabase.Contains(staleMesh))
-            {
-                filter.sharedMesh = null;
-                Object.DestroyImmediate(staleMesh);
-            }
-
-            var renderer = child.GetComponent<MeshRenderer>();
-            if (renderer == null)
-            {
-                renderer = child.gameObject.AddComponent<MeshRenderer>();
-            }
-
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
-            renderer.enabled = false;
-            return (filter, renderer);
-        }
-
-        private static void ConfigureInteractionLayer()
-        {
-            var tagManager = new SerializedObject(
-                AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset")[0]);
-            var layers = tagManager.FindProperty("layers");
-            layers.GetArrayElementAtIndex(InteractionLayer).stringValue =
-                "WorldInteraction";
-            tagManager.ApplyModifiedProperties();
         }
 
         private static void ConfigureDirectionalLight()

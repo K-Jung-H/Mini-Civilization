@@ -9,22 +9,16 @@ namespace MiniCivilization.World.Interaction
     [DisallowMultipleComponent]
     public sealed class WorldTileHighlighter : MonoBehaviour
     {
-        private sealed class SourceGeometry
-        {
-            public Mesh Mesh;
-            public uint Version;
-            public Vector3[] Vertices;
-            public int[] Triangles;
-        }
-
+        private const int MaxInstancesPerDraw = 1023;
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
         [Header("References")]
         [SerializeField] private WorldManager worldManager;
         [SerializeField] private WorldTileSelectionState selectionState;
-        [SerializeField] private MeshFilter highlightFilter;
-        [SerializeField] private MeshRenderer highlightRenderer;
         [SerializeField] private Material highlightMaterial;
+
+        [Header("Shape")]
+        [SerializeField, Min(0f)] private float cellPadding = 0.005f;
 
         [Header("Colors")]
         [SerializeField] private Color hoverColor =
@@ -36,27 +30,23 @@ namespace MiniCivilization.World.Interaction
         [SerializeField] private Color editSelectedColor =
             new(0.05f, 0.9f, 0.16f, 0.48f);
 
-        private readonly List<Vector3> buildVertices = new();
-        private readonly List<int> buildTriangles = new();
         private readonly List<CellCoordinate> selectedCells = new();
-        private readonly Dictionary<WorldChunkInteractionSurface, SourceGeometry>
-            sourceGeometry = new();
-        private readonly Dictionary<WorldChunkInteractionSurface, uint>
-            activeGeometryVersions = new();
+        private readonly List<Matrix4x4> instanceMatrices = new();
 
         private WorldTileSelectionState subscribedState;
         private WorldManager subscribedManager;
-        private TilePickResult? activeSingle;
-        private IWorldCellSelection activeMulti;
-        private uint activeSingleGeometryVersion;
-        private Mesh runtimeHighlightMesh;
+        private Mesh unitCubeMesh;
+        private Material runtimeMaterial;
+        private Material runtimeMaterialSource;
         private MaterialPropertyBlock propertyBlock;
+        private Bounds instanceBounds;
+        private Color activeColor;
+        private bool instancesDirty = true;
 
         private void OnEnable()
         {
             Subscribe();
-            InitializeRenderer();
-            RebuildActive();
+            instancesDirty = true;
         }
 
         private void OnDisable()
@@ -66,46 +56,25 @@ namespace MiniCivilization.World.Interaction
 
         private void LateUpdate()
         {
-            if (activeSingle.HasValue
-                && (activeSingle.Value.Surface == null
-                    || activeSingleGeometryVersion
-                        != activeSingle.Value.Surface.GeometryVersion))
+            if (instancesDirty)
             {
-                RebuildActive();
-                return;
+                RebuildInstances();
             }
 
-            if (activeMulti == null)
-            {
-                return;
-            }
-
-            foreach (var pair in activeGeometryVersions)
-            {
-                if (pair.Key == null || pair.Key.GeometryVersion != pair.Value)
-                {
-                    RebuildActive();
-                    return;
-                }
-            }
+            RenderInstances();
         }
 
         public void Configure(
             WorldManager manager,
             WorldTileSelectionState state,
-            MeshFilter meshFilter,
-            MeshRenderer meshRenderer,
             Material material)
         {
             Unsubscribe();
             worldManager = manager;
             selectionState = state;
-            highlightFilter = meshFilter;
-            highlightRenderer = meshRenderer;
             highlightMaterial = material;
             Subscribe();
-            InitializeRenderer();
-            RebuildActive();
+            instancesDirty = true;
         }
 
         private void Subscribe()
@@ -150,344 +119,182 @@ namespace MiniCivilization.World.Interaction
         }
 
         private void OnSelectionStateChanged(TilePickResult? _) =>
-            RebuildActive();
+            instancesDirty = true;
 
         private void OnEditStateChanged(IWorldCellSelection _) =>
-            RebuildActive();
+            instancesDirty = true;
 
         private void OnWorldChanged(WorldDataAsset _)
         {
-            ClearGeometryCache();
+            instanceMatrices.Clear();
             selectionState?.Clear();
+            instancesDirty = true;
         }
 
-        private void RebuildActive()
+        private void RebuildInstances()
         {
-            activeSingle = null;
-            activeMulti = null;
-            activeSingleGeometryVersion = 0;
-            activeGeometryVersions.Clear();
+            instancesDirty = false;
+            instanceMatrices.Clear();
+            if (!TryGetWorld(out var world))
+            {
+                return;
+            }
 
             if (selectionState?.EditHovered != null)
             {
-                activeMulti = selectionState.EditHovered;
-                ApplyColor(editHoverColor);
-                RebuildMulti(
-                    activeMulti,
-                    highlightFilter,
-                    highlightRenderer,
-                    activeGeometryVersions);
-                return;
+                activeColor = editHoverColor;
+                AppendSelection(selectionState.EditHovered, world);
             }
-
-            if (selectionState?.EditSelected != null)
+            else if (selectionState?.EditSelected != null)
             {
-                activeMulti = selectionState.EditSelected;
-                ApplyColor(editSelectedColor);
-                RebuildMulti(
-                    activeMulti,
-                    highlightFilter,
-                    highlightRenderer,
-                    activeGeometryVersions);
-                return;
+                activeColor = editSelectedColor;
+                AppendSelection(selectionState.EditSelected, world);
             }
-
-            if (selectionState?.Selected != null)
+            else if (selectionState?.Selected != null)
             {
-                activeSingle = selectionState.Selected;
-                ApplyColor(selectedColor);
-                RebuildSingle(
-                    activeSingle,
-                    highlightFilter,
-                    highlightRenderer,
-                    ref activeSingleGeometryVersion);
-                return;
+                activeColor = selectedColor;
+                AppendCell(selectionState.Selected.Value.Cell);
             }
-
-            if (selectionState?.Hovered != null)
+            else if (selectionState?.Hovered != null)
             {
-                activeSingle = selectionState.Hovered;
-                ApplyColor(hoverColor);
-                RebuildSingle(
-                    activeSingle,
-                    highlightFilter,
-                    highlightRenderer,
-                    ref activeSingleGeometryVersion);
-                return;
+                activeColor = hoverColor;
+                AppendCell(selectionState.Hovered.Value.Cell);
             }
 
-            BeginBuild();
-            CompleteBuild(highlightFilter, highlightRenderer);
+            RecalculateInstanceBounds();
         }
 
-        private void RebuildSingle(
-            TilePickResult? pick,
-            MeshFilter targetFilter,
-            MeshRenderer targetRenderer,
-            ref uint cachedVersion)
-        {
-            BeginBuild();
-            if (!pick.HasValue
-                || pick.Value.Surface == null
-                || !TryGetWorld(out var world))
-            {
-                CompleteBuild(targetFilter, targetRenderer);
-                cachedVersion = 0;
-                return;
-            }
-
-            var source = pick.Value.Surface;
-            var ownerCellIndex = pick.Value.CellIndex;
-
-            if (source.TryGetOwnedTriangleIndices(
-                    ownerCellIndex,
-                    out var ownedTriangles))
-            {
-                var geometry = GetSourceGeometry(source);
-                for (var index = 0; index < ownedTriangles.Count; index++)
-                {
-                    var triangleIndex = ownedTriangles[index];
-                    if (!source.TryResolveMetadata(
-                            triangleIndex,
-                            out var metadata)
-                        || !IsSameSurfaceGroup(
-                            pick.Value.SurfaceType,
-                            metadata.SurfaceType))
-                    {
-                        continue;
-                    }
-
-                    if (metadata.OwnerCellIndex == pick.Value.CellIndex)
-                    {
-                        AppendSourceTriangle(
-                            source,
-                            geometry,
-                            triangleIndex,
-                            targetFilter.transform);
-                    }
-                }
-            }
-
-            CompleteBuild(targetFilter, targetRenderer);
-            cachedVersion = source.GeometryVersion;
-        }
-
-        private void RebuildMulti(
+        private void AppendSelection(
             IWorldCellSelection selection,
-            MeshFilter targetFilter,
-            MeshRenderer targetRenderer,
-            Dictionary<WorldChunkInteractionSurface, uint> versions)
+            WorldData world)
         {
-            BeginBuild();
-            versions.Clear();
-            if (selection == null
-                || targetFilter == null
-                || !TryGetWorld(out var world)
-                || worldManager.Renderer == null)
+            if (selection is WorldCellBoxSelection box)
             {
-                CompleteBuild(targetFilter, targetRenderer);
+                AppendBox(box.Bounds);
                 return;
             }
 
             selectedCells.Clear();
             selection.CopyCellsTo(selectedCells, world);
-            foreach (var coordinate in selectedCells)
+            for (var index = 0; index < selectedCells.Count; index++)
             {
-                AppendSparseCell(
-                    world,
-                    coordinate,
-                    targetFilter.transform,
-                    versions);
+                AppendCell(selectedCells[index]);
             }
-
-            CompleteBuild(targetFilter, targetRenderer);
         }
 
-        private void AppendSparseCell(
-            WorldData world,
-            CellCoordinate coordinate,
-            Transform targetTransform,
-            Dictionary<WorldChunkInteractionSurface, uint> versions)
+        private void AppendCell(CellCoordinate coordinate)
         {
-            if (!world.ContainsColumn(coordinate.X, coordinate.Z)
-                || !worldManager.Renderer.TryGetInteractionSurface(
-                    coordinate.X,
-                    coordinate.Z,
-                    out var source))
+            AppendLocalBox(
+                new Vector3(
+                    coordinate.X + 0.5f,
+                    coordinate.Y + 0.5f,
+                    coordinate.Z + 0.5f),
+                Vector3.one);
+        }
+
+        private void AppendBox(in CellBounds bounds)
+        {
+            var size = new Vector3(
+                bounds.Maximum.X - bounds.Minimum.X + 1,
+                bounds.Maximum.Y - bounds.Minimum.Y + 1,
+                bounds.Maximum.Z - bounds.Minimum.Z + 1);
+            var center = new Vector3(
+                (bounds.Minimum.X + bounds.Maximum.X + 1) * 0.5f,
+                (bounds.Minimum.Y + bounds.Maximum.Y + 1) * 0.5f,
+                (bounds.Minimum.Z + bounds.Maximum.Z + 1) * 0.5f);
+            AppendLocalBox(center, size);
+        }
+
+        private void AppendLocalBox(Vector3 center, Vector3 size)
+        {
+            var rootMatrix = Matrix4x4.identity;
+            if (worldManager?.Renderer?.RenderRoot != null)
+            {
+                rootMatrix = worldManager.Renderer.RenderRoot.localToWorldMatrix;
+            }
+
+            var paddedSize = size + Vector3.one * (cellPadding * 2f);
+            instanceMatrices.Add(
+                rootMatrix * Matrix4x4.TRS(
+                    center,
+                    Quaternion.identity,
+                    paddedSize));
+        }
+
+        private void RenderInstances()
+        {
+            if (instanceMatrices.Count == 0
+                || !EnsureRuntimeMaterial()
+                || !Application.isPlaying)
             {
                 return;
             }
 
-            versions[source] = source.GeometryVersion;
-            var ownerIndex = WorldCellIndex.Encode(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
-            if (!source.TryGetOwnedTriangleIndices(
-                    ownerIndex,
-                    out var ownedTriangles))
+            EnsureUnitCube();
+            propertyBlock ??= new MaterialPropertyBlock();
+            propertyBlock.Clear();
+            propertyBlock.SetColor(BaseColorId, activeColor);
+
+            var renderParams = new RenderParams(runtimeMaterial)
             {
+                layer = gameObject.layer,
+                matProps = propertyBlock,
+                worldBounds = instanceBounds,
+                shadowCastingMode = ShadowCastingMode.Off,
+                receiveShadows = false
+            };
+
+            for (var start = 0; start < instanceMatrices.Count;
+                 start += MaxInstancesPerDraw)
+            {
+                var count = Mathf.Min(
+                    MaxInstancesPerDraw,
+                    instanceMatrices.Count - start);
+                Graphics.RenderMeshInstanced(
+                    renderParams,
+                    unitCubeMesh,
+                    0,
+                    instanceMatrices,
+                    count,
+                    start);
+            }
+        }
+
+        private void RecalculateInstanceBounds()
+        {
+            if (instanceMatrices.Count == 0)
+            {
+                instanceBounds = default;
                 return;
             }
 
-            var geometry = GetSourceGeometry(source);
-            for (var index = 0; index < ownedTriangles.Count; index++)
+            var minimum = new Vector3(
+                float.PositiveInfinity,
+                float.PositiveInfinity,
+                float.PositiveInfinity);
+            var maximum = new Vector3(
+                float.NegativeInfinity,
+                float.NegativeInfinity,
+                float.NegativeInfinity);
+            for (var matrixIndex = 0;
+                 matrixIndex < instanceMatrices.Count;
+                 matrixIndex++)
             {
-                var triangleIndex = ownedTriangles[index];
-                if (!source.TryResolveMetadata(
-                        triangleIndex,
-                        out var metadata)
-                    || metadata.OwnerCellIndex != ownerIndex)
+                var matrix = instanceMatrices[matrixIndex];
+                for (var corner = 0; corner < 8; corner++)
                 {
-                    continue;
+                    var point = matrix.MultiplyPoint3x4(new Vector3(
+                        (corner & 1) == 0 ? -0.5f : 0.5f,
+                        (corner & 2) == 0 ? -0.5f : 0.5f,
+                        (corner & 4) == 0 ? -0.5f : 0.5f));
+                    minimum = Vector3.Min(minimum, point);
+                    maximum = Vector3.Max(maximum, point);
                 }
-
-                AppendSourceTriangle(
-                    source,
-                    geometry,
-                    triangleIndex,
-                    targetTransform);
-            }
-        }
-
-        private void AppendSourceTriangle(
-            WorldChunkInteractionSurface source,
-            SourceGeometry geometry,
-            int triangleIndex,
-            Transform targetTransform)
-        {
-            ReadTriangle(
-                geometry,
-                triangleIndex,
-                out var a,
-                out var b,
-                out var c);
-            AppendTriangle(
-                a,
-                b,
-                c,
-                source.transform,
-                targetTransform);
-        }
-
-        private static void ReadTriangle(
-            SourceGeometry geometry,
-            int triangleIndex,
-            out Vector3 a,
-            out Vector3 b,
-            out Vector3 c)
-        {
-            var start = triangleIndex * 3;
-            a = geometry.Vertices[geometry.Triangles[start]];
-            b = geometry.Vertices[geometry.Triangles[start + 1]];
-            c = geometry.Vertices[geometry.Triangles[start + 2]];
-        }
-
-        private SourceGeometry GetSourceGeometry(
-            WorldChunkInteractionSurface source)
-        {
-            var mesh = source.InteractionMesh;
-            if (!sourceGeometry.TryGetValue(source, out var geometry)
-                || geometry.Mesh != mesh
-                || geometry.Version != source.GeometryVersion)
-            {
-                geometry = new SourceGeometry
-                {
-                    Mesh = mesh,
-                    Version = source.GeometryVersion,
-                    Vertices = mesh != null
-                        ? mesh.vertices
-                        : System.Array.Empty<Vector3>(),
-                    Triangles = mesh != null
-                        ? mesh.triangles
-                        : System.Array.Empty<int>()
-                };
-                sourceGeometry[source] = geometry;
             }
 
-            return geometry;
-        }
-
-        private void BeginBuild()
-        {
-            buildVertices.Clear();
-            buildTriangles.Clear();
-        }
-
-        private void CompleteBuild(
-            MeshFilter targetFilter,
-            MeshRenderer targetRenderer)
-        {
-            if (targetFilter == null || targetRenderer == null)
-            {
-                return;
-            }
-
-            if (buildTriangles.Count == 0)
-            {
-                if (runtimeHighlightMesh != null)
-                {
-                    runtimeHighlightMesh.Clear();
-                }
-
-                targetRenderer.enabled = false;
-                return;
-            }
-
-            if (!Application.isPlaying)
-            {
-                targetRenderer.enabled = false;
-                return;
-            }
-
-            if (runtimeHighlightMesh == null)
-            {
-                runtimeHighlightMesh = new Mesh
-                {
-                    name = "World Highlight Mesh"
-                };
-                runtimeHighlightMesh.MarkDynamic();
-            }
-
-            if (targetFilter.sharedMesh != runtimeHighlightMesh)
-            {
-                targetFilter.sharedMesh = runtimeHighlightMesh;
-            }
-
-            runtimeHighlightMesh.Clear();
-            runtimeHighlightMesh.indexFormat = buildVertices.Count > ushort.MaxValue
-                ? IndexFormat.UInt32
-                : IndexFormat.UInt16;
-            runtimeHighlightMesh.SetVertices(buildVertices);
-            runtimeHighlightMesh.SetTriangles(buildTriangles, 0, true);
-            runtimeHighlightMesh.RecalculateBounds();
-
-            targetRenderer.enabled = true;
-        }
-
-        private void AppendTriangle(
-            Vector3 a,
-            Vector3 b,
-            Vector3 c,
-            Transform sourceTransform,
-            Transform targetTransform)
-        {
-            if (Vector3.Cross(b - a, c - a).sqrMagnitude < 0.0000001f)
-            {
-                return;
-            }
-
-            var targetStart = buildVertices.Count;
-            buildVertices.Add(targetTransform.InverseTransformPoint(
-                sourceTransform.TransformPoint(a)));
-            buildVertices.Add(targetTransform.InverseTransformPoint(
-                sourceTransform.TransformPoint(b)));
-            buildVertices.Add(targetTransform.InverseTransformPoint(
-                sourceTransform.TransformPoint(c)));
-            buildTriangles.Add(targetStart);
-            buildTriangles.Add(targetStart + 1);
-            buildTriangles.Add(targetStart + 2);
+            instanceBounds = new Bounds(
+                (minimum + maximum) * 0.5f,
+                maximum - minimum);
         }
 
         private bool TryGetWorld(out WorldData world)
@@ -498,77 +305,119 @@ namespace MiniCivilization.World.Interaction
             return world != null;
         }
 
-        private static bool IsSameSurfaceGroup(
-            SurfaceInteractionType selected,
-            SurfaceInteractionType candidate)
+        private void EnsureUnitCube()
         {
-            if (selected == SurfaceInteractionType.Terrain)
-            {
-                return candidate == SurfaceInteractionType.Terrain;
-            }
-
-            return candidate == SurfaceInteractionType.Water;
-        }
-
-        private void InitializeRenderer()
-        {
-            if (highlightRenderer == null)
+            if (unitCubeMesh != null)
             {
                 return;
             }
 
-            highlightRenderer.sharedMaterial = highlightMaterial;
-            highlightRenderer.shadowCastingMode = ShadowCastingMode.Off;
-            highlightRenderer.receiveShadows = false;
-            highlightRenderer.enabled = false;
+            var vertices = new List<Vector3>(24);
+            var triangles = new List<int>(36);
+            AddFace(vertices, triangles,
+                new Vector3(-0.5f, -0.5f, -0.5f),
+                new Vector3(-0.5f, 0.5f, -0.5f),
+                new Vector3(-0.5f, 0.5f, 0.5f),
+                new Vector3(-0.5f, -0.5f, 0.5f));
+            AddFace(vertices, triangles,
+                new Vector3(0.5f, -0.5f, 0.5f),
+                new Vector3(0.5f, 0.5f, 0.5f),
+                new Vector3(0.5f, 0.5f, -0.5f),
+                new Vector3(0.5f, -0.5f, -0.5f));
+            AddFace(vertices, triangles,
+                new Vector3(-0.5f, -0.5f, 0.5f),
+                new Vector3(-0.5f, 0.5f, 0.5f),
+                new Vector3(0.5f, 0.5f, 0.5f),
+                new Vector3(0.5f, -0.5f, 0.5f));
+            AddFace(vertices, triangles,
+                new Vector3(0.5f, -0.5f, -0.5f),
+                new Vector3(0.5f, 0.5f, -0.5f),
+                new Vector3(-0.5f, 0.5f, -0.5f),
+                new Vector3(-0.5f, -0.5f, -0.5f));
+            AddFace(vertices, triangles,
+                new Vector3(-0.5f, 0.5f, 0.5f),
+                new Vector3(-0.5f, 0.5f, -0.5f),
+                new Vector3(0.5f, 0.5f, -0.5f),
+                new Vector3(0.5f, 0.5f, 0.5f));
+            AddFace(vertices, triangles,
+                new Vector3(-0.5f, -0.5f, -0.5f),
+                new Vector3(-0.5f, -0.5f, 0.5f),
+                new Vector3(0.5f, -0.5f, 0.5f),
+                new Vector3(0.5f, -0.5f, -0.5f));
+
+            unitCubeMesh = new Mesh
+            {
+                name = "World Highlight Unit Cube",
+                hideFlags = HideFlags.DontSave
+            };
+            unitCubeMesh.SetVertices(vertices);
+            unitCubeMesh.SetTriangles(triangles, 0, true);
+            unitCubeMesh.RecalculateBounds();
         }
 
-        private void ApplyColor(Color color)
+        private bool EnsureRuntimeMaterial()
         {
-            if (highlightRenderer == null)
+            if (highlightMaterial == null)
             {
-                return;
+                return false;
             }
 
-            propertyBlock ??= new MaterialPropertyBlock();
-            highlightRenderer.GetPropertyBlock(propertyBlock);
-            propertyBlock.SetColor(BaseColorId, color);
-            highlightRenderer.SetPropertyBlock(propertyBlock);
+            if (runtimeMaterial != null
+                && runtimeMaterialSource == highlightMaterial)
+            {
+                return true;
+            }
+
+            if (runtimeMaterial != null)
+            {
+                Destroy(runtimeMaterial);
+            }
+
+            runtimeMaterialSource = highlightMaterial;
+            runtimeMaterial = new Material(highlightMaterial)
+            {
+                name = $"{highlightMaterial.name} (Runtime Instanced)",
+                enableInstancing = true,
+                hideFlags = HideFlags.DontSave
+            };
+            return true;
         }
 
-        private void ClearGeometryCache()
+        private static void AddFace(
+            List<Vector3> vertices,
+            List<int> triangles,
+            Vector3 a,
+            Vector3 b,
+            Vector3 c,
+            Vector3 d)
         {
-            sourceGeometry.Clear();
-            activeGeometryVersions.Clear();
-            activeSingle = null;
-            activeMulti = null;
-            activeSingleGeometryVersion = 0;
-            BeginBuild();
-            if (runtimeHighlightMesh != null)
-            {
-                runtimeHighlightMesh.Clear();
-            }
-
-            if (highlightRenderer != null)
-            {
-                highlightRenderer.enabled = false;
-            }
+            var start = vertices.Count;
+            vertices.Add(a);
+            vertices.Add(b);
+            vertices.Add(c);
+            vertices.Add(d);
+            triangles.Add(start);
+            triangles.Add(start + 2);
+            triangles.Add(start + 1);
+            triangles.Add(start);
+            triangles.Add(start + 3);
+            triangles.Add(start + 2);
         }
 
         private void OnDestroy()
         {
             Unsubscribe();
-            ClearGeometryCache();
-            if (highlightFilter != null
-                && highlightFilter.sharedMesh == runtimeHighlightMesh)
+            if (unitCubeMesh != null)
             {
-                highlightFilter.sharedMesh = null;
+                Destroy(unitCubeMesh);
+                unitCubeMesh = null;
             }
 
-            if (runtimeHighlightMesh != null)
+            if (runtimeMaterial != null)
             {
-                Destroy(runtimeHighlightMesh);
-                runtimeHighlightMesh = null;
+                Destroy(runtimeMaterial);
+                runtimeMaterial = null;
+                runtimeMaterialSource = null;
             }
         }
     }

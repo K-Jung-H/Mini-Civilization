@@ -1,6 +1,6 @@
-using MiniCivilization.World.Runtime;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
@@ -17,7 +17,6 @@ namespace MiniCivilization.World.Interaction
         [SerializeField] private WorldEditToolState editToolState;
 
         [Header("Raycast")]
-        [SerializeField] private LayerMask interactionMask = 1 << 8;
         [SerializeField, Min(1f)] private float maxDistance = 1000f;
 
         private WorldData observedWorld;
@@ -55,11 +54,11 @@ namespace MiniCivilization.World.Interaction
 
             var ray = interactionCamera.ScreenPointToRay(
                 mouse.position.ReadValue());
-            if (WorldTilePicker.TryPick(
+            if (WorldDdaTilePicker.TryPick(
                     worldManager.CurrentWorldData,
+                    worldManager.Renderer,
                     ray,
                     maxDistance,
-                    interactionMask,
                     out var pick))
             {
                 selectionState.SetHovered(pick);
@@ -87,14 +86,12 @@ namespace MiniCivilization.World.Interaction
             WorldManager manager,
             WorldTileSelectionState state,
             WorldEditToolState toolState,
-            LayerMask mask,
             float rayDistance)
         {
             interactionCamera = camera;
             worldManager = manager;
             selectionState = state;
             editToolState = toolState;
-            interactionMask = mask;
             maxDistance = Mathf.Max(1f, rayDistance);
         }
 

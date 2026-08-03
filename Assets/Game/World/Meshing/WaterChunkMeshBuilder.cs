@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Interaction;
 using UnityEngine;
 
 namespace MiniCivilization.World.Meshing
@@ -17,7 +16,7 @@ namespace MiniCivilization.World.Meshing
             int patchZ,
             int patchSize,
             WorldSurfaceCatalog catalog,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
             List<ExposedCell> cells)
@@ -47,10 +46,6 @@ namespace MiniCivilization.World.Meshing
                     continue;
                 }
 
-                var ownerCellIndex = WorldCellIndex.Encode(world, x, y, z);
-                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
-                    ownerCellIndex,
-                    true);
                 if (profile.TopExposed)
                 {
                     AddTop(
@@ -217,7 +212,7 @@ namespace MiniCivilization.World.Meshing
         private static void AddSide(
             WorldData world,
             WorldSurfaceCatalog catalog,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             MeshBuffers buffers,
             int x,
             int y,
@@ -283,7 +278,7 @@ namespace MiniCivilization.World.Meshing
         private static void AddBoundaryCornerClosure(
             WorldData world,
             WorldSurfaceCatalog catalog,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             MeshBuffers buffers,
             int x,
             int y,
@@ -337,7 +332,7 @@ namespace MiniCivilization.World.Meshing
         }
 
         private static SurfaceBoundaryProfile ResolveCoverageBoundary(
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             int x,
             int y,
             int z,

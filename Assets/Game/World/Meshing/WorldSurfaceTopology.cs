@@ -288,8 +288,10 @@ namespace MiniCivilization.World.Meshing
     /// Terrain and water builders only consume these profiles; they never
     /// infer a shared Edge or Corner independently.
     /// </summary>
-    internal sealed class WorldSurfaceTopology
+    internal sealed partial class WorldSurfaceQuery
     {
+        private const int HorizontalDependencyRadius = 1;
+
         private readonly struct WaterCornerKey : IEquatable<WaterCornerKey>
         {
             public readonly int X;
@@ -322,7 +324,7 @@ namespace MiniCivilization.World.Meshing
             waterCornerHeights =
             new();
 
-        public WorldSurfaceTopology(
+        public WorldSurfaceQuery(
             WorldData world,
             WaterFlowState flowState = null)
         {
@@ -347,6 +349,48 @@ namespace MiniCivilization.World.Meshing
             solidProfiles.Clear();
             waterProfiles.Clear();
             waterCornerHeights.Clear();
+        }
+
+        public void InvalidateRegion(in CellBounds changedBounds)
+        {
+            var minimumX = Math.Max(
+                0,
+                changedBounds.Minimum.X - HorizontalDependencyRadius);
+            var maximumX = Math.Min(
+                world.Size - 1,
+                changedBounds.Maximum.X + HorizontalDependencyRadius);
+            var minimumZ = Math.Max(
+                0,
+                changedBounds.Minimum.Z - HorizontalDependencyRadius);
+            var maximumZ = Math.Min(
+                world.Size - 1,
+                changedBounds.Maximum.Z + HorizontalDependencyRadius);
+            if (minimumX > maximumX || minimumZ > maximumZ)
+            {
+                return;
+            }
+
+            // Solid profiles can scan vertically through connected columns.
+            // Invalidate every Y only in the affected XZ neighborhood so a
+            // lower edit cannot leave a cached upper cliff profile stale.
+            for (var y = 0; y < world.Height; y++)
+            for (var z = minimumZ; z <= maximumZ; z++)
+            for (var x = minimumX; x <= maximumX; x++)
+            {
+                var cellIndex = WorldIndex.EncodeCell(world, x, y, z);
+                solidProfiles.Remove(cellIndex);
+                waterProfiles.Remove(cellIndex);
+            }
+
+            // Each water profile consumes the four grid corners surrounding
+            // its Cell. Remove the corners owned by the same invalidated
+            // neighborhood, including the positive outer boundary.
+            for (var y = 0; y < world.Height; y++)
+            for (var z = minimumZ; z <= maximumZ + 1; z++)
+            for (var x = minimumX; x <= maximumX + 1; x++)
+            {
+                waterCornerHeights.Remove(new WaterCornerKey(x, y, z));
+            }
         }
 
         public SolidSurfaceProfile ResolveSolid(int x, int y, int z)

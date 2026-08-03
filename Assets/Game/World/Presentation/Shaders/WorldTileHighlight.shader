@@ -23,18 +23,29 @@ Shader "Mini Civilization/World Tile Highlight"
             Blend SrcAlpha OneMinusSrcAlpha
             ZWrite Off
             ZTest [_ZTest]
-            Cull Off
+            Cull Back
             Offset -1, -1
+
+            Stencil
+            {
+                Ref 64
+                ReadMask 64
+                WriteMask 64
+                Comp NotEqual
+                Pass Replace
+            }
 
             HLSLPROGRAM
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -49,6 +60,7 @@ Shader "Mini Civilization/World Tile Highlight"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 return output;
             }

@@ -11,41 +11,6 @@ namespace MiniCivilization.World.Interaction
         Water
     }
 
-    public readonly struct SurfaceTriangleMetadata
-    {
-        public static readonly SurfaceTriangleMetadata NotInteractive =
-            new(-1, false);
-
-        public readonly int OwnerCellIndex;
-        public readonly bool IsInteractive;
-
-        public SurfaceTriangleMetadata(
-            int ownerCellIndex,
-            bool isInteractive)
-        {
-            OwnerCellIndex = ownerCellIndex;
-            IsInteractive = isInteractive;
-        }
-    }
-
-    [Serializable]
-    public struct InteractionTriangleMetadata
-    {
-        [SerializeField] private int ownerCellIndex;
-        [SerializeField] private SurfaceInteractionType surfaceType;
-
-        public readonly int OwnerCellIndex => ownerCellIndex;
-        public readonly SurfaceInteractionType SurfaceType => surfaceType;
-
-        public InteractionTriangleMetadata(
-            int ownerCellIndex,
-            SurfaceInteractionType surfaceType)
-        {
-            this.ownerCellIndex = ownerCellIndex;
-            this.surfaceType = surfaceType;
-        }
-    }
-
     public static class WorldCellIndex
     {
         public static int Encode(WorldData world, int x, int y, int z)
@@ -231,31 +196,30 @@ namespace MiniCivilization.World.Interaction
         public readonly CellCoordinate Cell;
         public readonly int CellIndex;
         public readonly SurfaceInteractionType SurfaceType;
-        public readonly WorldChunkInteractionSurface Surface;
         public readonly Vector3 HitPoint;
         public readonly Vector3 HitNormal;
+        public readonly float Distance;
 
         public TilePickResult(
             CellCoordinate cell,
             int cellIndex,
             SurfaceInteractionType surfaceType,
-            WorldChunkInteractionSurface surface,
             Vector3 hitPoint,
-            Vector3 hitNormal)
+            Vector3 hitNormal,
+            float distance = 0f)
         {
             Cell = cell;
             CellIndex = cellIndex;
             SurfaceType = surfaceType;
-            Surface = surface;
             HitPoint = hitPoint;
             HitNormal = hitNormal;
+            Distance = distance;
         }
 
         public bool Equals(TilePickResult other)
         {
             return CellIndex == other.CellIndex
-                && SurfaceType == other.SurfaceType
-                && Surface == other.Surface;
+                && SurfaceType == other.SurfaceType;
         }
 
         public override bool Equals(object obj)
@@ -265,7 +229,7 @@ namespace MiniCivilization.World.Interaction
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(CellIndex, SurfaceType, Surface);
+            return HashCode.Combine(CellIndex, SurfaceType);
         }
 
         public override string ToString()

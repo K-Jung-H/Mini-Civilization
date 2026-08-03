@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Interaction;
 using UnityEngine;
 
 namespace MiniCivilization.World.Meshing
@@ -19,7 +18,7 @@ namespace MiniCivilization.World.Meshing
             int patchZ,
             int patchSize,
             WorldSurfaceCatalog catalog,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
             List<ExposedCell> cells)
@@ -45,10 +44,6 @@ namespace MiniCivilization.World.Meshing
                 var z = coordinate.Z;
                 var cell = world.GetCell(x, y, z);
                 var exposure = cells[index].Exposure;
-                var ownerCellIndex = WorldCellIndex.Encode(world, x, y, z);
-                buffers.CurrentTriangleMetadata = new SurfaceTriangleMetadata(
-                    ownerCellIndex,
-                    true);
                 SolidSurfaceProfile profile = default;
                 if ((exposure & CellExposureFlags.SolidTop) != 0)
                 {
@@ -253,7 +248,7 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             in CellData cell,
             CellExposureFlags exposure,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             in SolidSurfaceProfile topProfile)
         {
             AddVolumeSide(world, catalog, buffers, x, y, z, startX, startZ, cell, exposure, topology, topProfile, -1, 0, CellExposureFlags.SolidNegativeX);
@@ -282,7 +277,7 @@ namespace MiniCivilization.World.Meshing
             int startX,
             int startZ,
             in CellData cell,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             in SolidSurfaceProfile topProfile,
             int directionX,
             int directionZ)
@@ -391,7 +386,7 @@ namespace MiniCivilization.World.Meshing
             int startZ,
             in CellData cell,
             CellExposureFlags exposure,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             in SolidSurfaceProfile topProfile,
             int directionX,
             int directionZ,
@@ -509,7 +504,7 @@ namespace MiniCivilization.World.Meshing
             int z,
             int directionX,
             int directionZ,
-            WorldSurfaceTopology topology,
+            WorldSurfaceQuery topology,
             int fallbackHeight,
             out float startHeight,
             out float shoulderStartHeight,
