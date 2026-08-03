@@ -61,6 +61,9 @@ namespace MiniCivilization.World.Generation
         [Tooltip("A horizontal spread candidate below this WaterAmount is not created.")]
         [SerializeField, Range(WaterAmount.Unit, 1f)]
         private float minimumSpreadAmount = 0.1f;
+        [Tooltip("WaterAmount removed per simulation step when upstream supply is lower than the current amount.")]
+        [SerializeField, Range(WaterAmount.Unit, 1f)]
+        private float dissipationAmountLoss = 0.05f;
 
         [Header("Biome")]
         [Tooltip("수분 값이 이 값 이하인 육지를 사막으로 판정합니다.")]
@@ -95,9 +98,11 @@ namespace MiniCivilization.World.Generation
         public int LakeRadius => lakeRadius;
         public float SpreadAmountLoss => spreadAmountLoss;
         public float MinimumSpreadAmount => minimumSpreadAmount;
+        public float DissipationAmountLoss => dissipationAmountLoss;
         public WaterFlowRules WaterFlowRules => new(
             spreadAmountLoss,
-            minimumSpreadAmount);
+            minimumSpreadAmount,
+            dissipationAmountLoss);
         public float DesertMoistureThreshold => desertMoistureThreshold;
         public float WetlandMoistureThreshold => wetlandMoistureThreshold;
         public float SnowTemperatureThreshold => snowTemperatureThreshold;
@@ -176,6 +181,10 @@ namespace MiniCivilization.World.Generation
                 1f);
             minimumSpreadAmount = Math.Clamp(
                 minimumSpreadAmount,
+                WaterAmount.Unit,
+                1f);
+            dissipationAmountLoss = Math.Clamp(
+                dissipationAmountLoss,
                 WaterAmount.Unit,
                 1f);
         }

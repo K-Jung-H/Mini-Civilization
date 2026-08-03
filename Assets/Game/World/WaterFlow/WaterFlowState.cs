@@ -15,8 +15,7 @@ namespace MiniCivilization.World.WaterFlow
         private readonly int worldHeight;
         private readonly int[] waterBodyIdsByColumn;
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
-        private readonly Dictionary<int, WaterCellData> resolvedCells = new();
-        private readonly Dictionary<int, WaterCellData> nextResolvedCells = new();
+        private readonly Dictionary<int, WaterCellData> stagedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
 
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
@@ -72,11 +71,6 @@ namespace MiniCivilization.World.WaterFlow
 
         internal WaterCellData GetWater(int cellIndex)
         {
-            if (resolvedCells.TryGetValue(cellIndex, out var water))
-            {
-                return water;
-            }
-
             var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             return world.GetCell(
                 coordinate.X,
@@ -92,36 +86,21 @@ namespace MiniCivilization.World.WaterFlow
             water.Normalize();
             if (GetWater(cellIndex).Equals(water))
             {
+                stagedCells.Remove(cellIndex);
                 return false;
             }
 
-            nextResolvedCells[cellIndex] = water;
+            stagedCells[cellIndex] = water;
             return true;
         }
 
-        internal void ApplyResolutionPass()
-        {
-            foreach (var pair in nextResolvedCells)
-            {
-                resolvedCells[pair.Key] = pair.Value;
-            }
-
-            nextResolvedCells.Clear();
-        }
-
-        internal void CancelResolutionPass() => nextResolvedCells.Clear();
+        internal void CancelResolutionPass() => stagedCells.Clear();
 
         internal void SynchronizeFromPersistent(int cellIndex) =>
-            resolvedCells.Remove(cellIndex);
+            stagedCells.Remove(cellIndex);
 
         internal IEnumerable<KeyValuePair<int, WaterCellData>>
-            EnumerateResolvedCells() => resolvedCells;
-
-        internal void ClearResolvedCells()
-        {
-            resolvedCells.Clear();
-            nextResolvedCells.Clear();
-        }
+            EnumerateStagedCells() => stagedCells;
 
         internal void ReplaceWaterBodies(IReadOnlyList<WaterBody> bodies)
         {

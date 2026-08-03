@@ -25,9 +25,11 @@ namespace MiniCivilization.World.Presentation
 
         [Header("Mesh")]
         [SerializeField, Min(1)] private int renderPatchSizeXZ = 32;
+        [SerializeField, Min(1)] private int maxPatchRebuildsPerFrame = 2;
 
-        private readonly HashSet<Vector2Int> pendingGeometryPatches = new();
-        private readonly HashSet<Vector2Int> pendingMaterialPatches = new();
+        private readonly HashSet<Vector2Int> pendingFullPatches = new();
+        private readonly HashSet<Vector2Int> pendingTerrainPatches = new();
+        private readonly HashSet<Vector2Int> pendingWaterPatches = new();
         private readonly WorldMeshBuildScratch meshBuildScratch = new();
         private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
@@ -49,6 +51,14 @@ namespace MiniCivilization.World.Presentation
         private void LateUpdate()
         {
             RebuildPendingPatches();
+        }
+
+        private void OnValidate()
+        {
+            renderPatchSizeXZ = Math.Max(1, renderPatchSizeXZ);
+            maxPatchRebuildsPerFrame = Math.Max(
+                1,
+                maxPatchRebuildsPerFrame);
         }
 
         public void BuildRuntimeWorld(
@@ -186,21 +196,24 @@ namespace MiniCivilization.World.Presentation
             const WorldChangeType materialChanges =
                 WorldChangeType.Material
                 | WorldChangeType.Environment;
-            var rebuildSharedGeometry =
+            const WorldChangeType waterChanges =
+                WorldChangeType.WaterTopology
+                | WorldChangeType.WaterSurface;
+            var rebuildFull =
                 (changeSet.ChangeTypes & geometryChanges) != 0
-                ||
+                || (changeSet.ChangeTypes & materialChanges) != 0;
+            var rebuildWater =
+                (changeSet.ChangeTypes & waterChanges) != 0;
+            var invalidateGeometry =
                 (changeSet.ChangeTypes
-                    & (WorldChangeType.WaterTopology
-                        | WorldChangeType.WaterSurface)) != 0;
-            var rebuildMaterials =
-                (changeSet.ChangeTypes & materialChanges) != 0;
-            if (rebuildSharedGeometry)
+                    & (geometryChanges | waterChanges)) != 0;
+            if (invalidateGeometry)
             {
                 exposureCache?.ApplyChanges(changeSet);
                 surfaceQuery?.InvalidateRegion(changeSet.AffectedBounds);
             }
 
-            if ((rebuildSharedGeometry || rebuildMaterials)
+            if ((rebuildFull || rebuildWater)
                 && activeRenderPatchSize > 0)
             {
                 for (var index = 0;
@@ -213,15 +226,24 @@ namespace MiniCivilization.World.Presentation
                     var patch = new Vector2Int(
                         startX / activeRenderPatchSize,
                         startZ / activeRenderPatchSize);
-                    if (rebuildSharedGeometry)
+                    if (rebuildFull)
                     {
-                        pendingGeometryPatches.Add(patch);
+                        pendingFullPatches.Add(patch);
+                        pendingTerrainPatches.Remove(patch);
+                        pendingWaterPatches.Remove(patch);
                     }
-                    else
+                    else if (!pendingFullPatches.Contains(patch))
                     {
-                        pendingMaterialPatches.Add(patch);
+                        pendingWaterPatches.Add(patch);
                     }
                 }
+            }
+
+            if (!rebuildFull
+                && rebuildWater
+                && activeRenderPatchSize > 0)
+            {
+                QueueTerrainPatchesAffectedByWater(changeSet);
             }
 
             LastAppliedChangeId = changeSet.ChangeId;
@@ -231,43 +253,154 @@ namespace MiniCivilization.World.Presentation
         {
             if (boundWorld == null
                 || chunkViews == null
-                || (pendingGeometryPatches.Count == 0
-                    && pendingMaterialPatches.Count == 0))
+                || (pendingFullPatches.Count == 0
+                    && pendingTerrainPatches.Count == 0
+                    && pendingWaterPatches.Count == 0))
             {
                 return;
             }
 
-            foreach (var patch in pendingGeometryPatches)
+            for (var rebuildIndex = 0;
+                 rebuildIndex < maxPatchRebuildsPerFrame;
+                 rebuildIndex++)
             {
-                if ((uint)patch.x >= chunkViews.GetLength(0)
-                    || (uint)patch.y >= chunkViews.GetLength(1))
+                if (TryTakePatch(pendingFullPatches, out var patch))
+                {
+                    pendingTerrainPatches.Remove(patch);
+                    pendingWaterPatches.Remove(patch);
+                    if (ContainsPatch(patch))
+                    {
+                        BuildPatch(
+                            chunkViews[patch.x, patch.y],
+                            patch.x,
+                            patch.y);
+                    }
+
+                    continue;
+                }
+
+                if (TryTakePatch(pendingTerrainPatches, out patch))
+                {
+                    var rebuildWaterWithTerrain =
+                        pendingWaterPatches.Remove(patch);
+                    if (!ContainsPatch(patch))
+                    {
+                        continue;
+                    }
+
+                    var terrainView = chunkViews[patch.x, patch.y];
+                    if (terrainView.IsPrepared)
+                    {
+                        BuildPatch(terrainView, patch.x, patch.y);
+                    }
+                    else
+                    {
+                        RebuildTerrainPatch(terrainView);
+                        if (rebuildWaterWithTerrain)
+                        {
+                            RebuildWaterPatch(terrainView);
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (!TryTakePatch(pendingWaterPatches, out patch))
+                {
+                    break;
+                }
+
+                if (!ContainsPatch(patch))
                 {
                     continue;
                 }
 
-                BuildPatch(
-                    chunkViews[patch.x, patch.y],
-                    patch.x,
-                    patch.y);
-            }
-
-            foreach (var patch in pendingMaterialPatches)
-            {
-                if (pendingGeometryPatches.Contains(patch)
-                    || (uint)patch.x >= chunkViews.GetLength(0)
-                    || (uint)patch.y >= chunkViews.GetLength(1))
+                var view = chunkViews[patch.x, patch.y];
+                if (view.IsPrepared)
                 {
-                    continue;
+                    BuildPatch(view, patch.x, patch.y);
                 }
+                else
+                {
+                    RebuildWaterPatch(view);
+                }
+            }
+        }
 
-                BuildPatch(
-                    chunkViews[patch.x, patch.y],
-                    patch.x,
-                    patch.y);
+        private bool ContainsPatch(Vector2Int patch) =>
+            (uint)patch.x < chunkViews.GetLength(0)
+            && (uint)patch.y < chunkViews.GetLength(1);
+
+        private static bool TryTakePatch(
+            HashSet<Vector2Int> patches,
+            out Vector2Int patch)
+        {
+            var enumerator = patches.GetEnumerator();
+            if (!enumerator.MoveNext())
+            {
+                enumerator.Dispose();
+                patch = default;
+                return false;
             }
 
-            pendingGeometryPatches.Clear();
-            pendingMaterialPatches.Clear();
+            patch = enumerator.Current;
+            enumerator.Dispose();
+            patches.Remove(patch);
+            return true;
+        }
+
+        private void RebuildWaterPatch(WorldChunkView view)
+        {
+            view.RebuildWater(
+                boundWorld,
+                surfaceCatalog,
+                waterMaterial,
+                surfaceQuery,
+                exposureCache,
+                meshBuildScratch);
+        }
+
+        private void RebuildTerrainPatch(WorldChunkView view)
+        {
+            view.RebuildTerrain(
+                boundWorld,
+                surfaceCatalog,
+                terrainMaterial,
+                surfaceQuery,
+                exposureCache,
+                meshBuildScratch);
+        }
+
+        private void QueueTerrainPatchesAffectedByWater(
+            WorldChangeSet changeSet)
+        {
+            for (var index = 0;
+                 index < changeSet.ChangedCellIndices.Count;
+                 index++)
+            {
+                var changed = WorldIndex.DecodeCell(
+                    boundWorld,
+                    changeSet.ChangedCellIndices[index]);
+                var minimumY = Math.Max(0, changed.Y - 1);
+                for (var y = minimumY; y <= changed.Y; y++)
+                for (var z = changed.Z - 1; z <= changed.Z + 1; z++)
+                for (var x = changed.X - 1; x <= changed.X + 1; x++)
+                {
+                    if (!boundWorld.TryGetCell(x, y, z, out var cell)
+                        || !cell.HasSolid)
+                    {
+                        continue;
+                    }
+
+                    var patch = new Vector2Int(
+                        x / activeRenderPatchSize,
+                        z / activeRenderPatchSize);
+                    if (!pendingFullPatches.Contains(patch))
+                    {
+                        pendingTerrainPatches.Add(patch);
+                    }
+                }
+            }
         }
 
         public void Unbind()
@@ -301,8 +434,9 @@ namespace MiniCivilization.World.Presentation
             activeRenderPatchSize = 0;
             BindingMode = WorldRenderBindingMode.None;
             LastAppliedChangeId = WorldChangeId.None;
-            pendingGeometryPatches.Clear();
-            pendingMaterialPatches.Clear();
+            pendingFullPatches.Clear();
+            pendingTerrainPatches.Clear();
+            pendingWaterPatches.Clear();
             if (clearViews)
             {
                 ClearViews();

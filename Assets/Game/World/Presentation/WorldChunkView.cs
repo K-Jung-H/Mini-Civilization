@@ -83,7 +83,8 @@ namespace MiniCivilization.World.Presentation
                 surfaceQuery,
                 exposureCache,
                 scratch.Water,
-                scratch.WaterCells);
+                scratch.WaterCells,
+                scratch.WaterCellIndices);
             waterFilter.sharedMesh = waterBuffers.CreateMesh(
                 $"Water [{patchX}, {patchZ}]",
                 replacePreparedMeshes ? null : waterFilter.sharedMesh);
@@ -93,6 +94,75 @@ namespace MiniCivilization.World.Presentation
             waterRenderer.enabled = !waterBuffers.IsEmpty;
 
             preparedReadOnly = false;
+        }
+
+        internal void RebuildWater(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            Material waterMaterial,
+            WorldSurfaceQuery surfaceQuery,
+            WorldExposureCache exposureCache,
+            WorldMeshBuildScratch scratch)
+        {
+            if (preparedReadOnly)
+            {
+                throw new System.InvalidOperationException(
+                    "Prepared patches must be converted with a full rebuild.");
+            }
+
+            EnsureChildren();
+            var waterBuffers = WaterChunkMeshBuilder.Build(
+                world,
+                patchX,
+                patchZ,
+                patchSize,
+                catalog,
+                surfaceQuery,
+                exposureCache,
+                scratch.Water,
+                scratch.WaterCells,
+                scratch.WaterCellIndices);
+            waterFilter.sharedMesh = waterBuffers.CreateMesh(
+                $"Water [{patchX}, {patchZ}]",
+                waterFilter.sharedMesh);
+            waterRenderer.sharedMaterial = waterMaterial;
+            waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            waterRenderer.receiveShadows = true;
+            waterRenderer.enabled = !waterBuffers.IsEmpty;
+        }
+
+        internal void RebuildTerrain(
+            WorldData world,
+            WorldSurfaceCatalog catalog,
+            Material terrainMaterial,
+            WorldSurfaceQuery surfaceQuery,
+            WorldExposureCache exposureCache,
+            WorldMeshBuildScratch scratch)
+        {
+            if (preparedReadOnly)
+            {
+                throw new System.InvalidOperationException(
+                    "Prepared patches must be converted with a full rebuild.");
+            }
+
+            EnsureChildren();
+            var terrainBuffers = TerrainChunkMeshBuilder.Build(
+                world,
+                patchX,
+                patchZ,
+                patchSize,
+                catalog,
+                surfaceQuery,
+                exposureCache,
+                scratch.Terrain,
+                scratch.SolidCells);
+            terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
+                $"Terrain [{patchX}, {patchZ}]",
+                terrainFilter.sharedMesh);
+            terrainRenderer.sharedMaterial = terrainMaterial;
+            terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
+            terrainRenderer.receiveShadows = true;
+            terrainRenderer.enabled = !terrainBuffers.IsEmpty;
         }
 
         public void ReleaseMeshes()
@@ -118,7 +188,10 @@ namespace MiniCivilization.World.Presentation
             if (terrainFilter == null
                 || waterFilter == null
                 || terrainFilter.sharedMesh == null
-                || waterFilter.sharedMesh == null)
+                || waterFilter.sharedMesh == null
+                || (waterFilter.sharedMesh.vertexCount > 0
+                    && !waterFilter.sharedMesh.HasVertexAttribute(
+                        VertexAttribute.TexCoord5)))
             {
                 return false;
             }

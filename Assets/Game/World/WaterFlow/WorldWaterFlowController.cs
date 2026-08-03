@@ -8,48 +8,69 @@ namespace MiniCivilization.World.WaterFlow
     [DisallowMultipleComponent]
     public sealed class WorldWaterFlowController : MonoBehaviour
     {
-        private readonly HashSet<int> pendingCellIndices = new();
-        private readonly HashSet<int> pendingColumnIndices = new();
+        [Header("Simulation Budget")]
+        [SerializeField, Min(0.01f)]
+        private float simulationStepInterval = 0.1f;
+        [SerializeField, Min(1)]
+        private int maxCellsPerFrame = 2048;
+
+        private readonly HashSet<int> pendingBodyColumnIndices = new();
         private readonly HashSet<int> affectedWaterBodyIds = new();
         private WorldData boundWorld;
         private WaterFlowResolver resolver;
-        private bool recalculationRequested;
         private bool waterBodyTopologyRefreshRequested;
         private bool waterBodyMetricsRefreshRequested;
         private WaterFlowParameters activeParameters;
+        private float simulationAccumulator;
 
         public WorldData BoundWorld => boundWorld;
         public WaterFlowState State { get; private set; }
         public WorldChangeId LastAppliedChangeId { get; private set; }
-        public bool HasPendingRecalculation => recalculationRequested;
-        public int PendingChangeCount =>
-            pendingCellIndices.Count + pendingColumnIndices.Count;
+        public bool HasPendingRecalculation => resolver?.HasWork == true;
+        public int PendingChangeCount => resolver?.PendingCellCount ?? 0;
         public event Action<WaterFlowState> StateChanged;
         public event Action<WorldChangeSet> ChangeCommitted;
 
         private void Update()
         {
-            if (!recalculationRequested || boundWorld == null || State == null)
+            if (boundWorld == null
+                || State == null
+                || resolver == null
+                || !resolver.HasWork)
+            {
+                simulationAccumulator = 0f;
+                return;
+            }
+
+            if (!resolver.IsWaveInProgress)
+            {
+                simulationAccumulator += Time.deltaTime;
+                if (simulationAccumulator < simulationStepInterval)
+                {
+                    return;
+                }
+
+                simulationAccumulator -= simulationStepInterval;
+            }
+
+            if (!resolver.Step(
+                boundWorld,
+                State,
+                activeParameters,
+                maxCellsPerFrame,
+                out var result))
             {
                 return;
             }
 
-            recalculationRequested = false;
-            var result = resolver.Recalculate(
-                boundWorld,
-                State,
-                pendingCellIndices,
-                pendingColumnIndices,
-                activeParameters);
             foreach (var columnIndex in result.ChangedColumnIndices)
             {
-                pendingColumnIndices.Add(columnIndex);
+                pendingBodyColumnIndices.Add(columnIndex);
             }
 
-            if (result.HasPersistentChanges)
-            {
-                CommitResolvedChanges(result);
-            }
+            // Completing a wave changes the persisted frontier even when no
+            // Cell changes, so it must still advance the world change state.
+            CommitResolvedChanges(result);
 
             if (result.HasTopologyChanges
                 || waterBodyTopologyRefreshRequested)
@@ -62,15 +83,20 @@ namespace MiniCivilization.World.WaterFlow
                 WaterBodyResolver.RefreshMetrics(
                     boundWorld,
                     State,
-                    pendingColumnIndices,
+                    pendingBodyColumnIndices,
                     affectedWaterBodyIds);
             }
 
-            pendingCellIndices.Clear();
-            pendingColumnIndices.Clear();
+            pendingBodyColumnIndices.Clear();
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
             StateChanged?.Invoke(State);
+        }
+
+        private void OnValidate()
+        {
+            simulationStepInterval = Math.Max(0.01f, simulationStepInterval);
+            maxCellsPerFrame = Math.Max(1, maxCellsPerFrame);
         }
 
         public void Bind(WorldData world)
@@ -91,11 +117,14 @@ namespace MiniCivilization.World.WaterFlow
                 world,
                 WaterBodyResolver.Resolve(world));
             resolver = new WaterFlowResolver(State.CellCount);
-            pendingCellIndices.Clear();
-            pendingColumnIndices.Clear();
-            recalculationRequested = false;
+            resolver.RestoreFrontier(
+                world,
+                State,
+                world.WaterFlowSchedule.FrontierCellIndices);
+            pendingBodyColumnIndices.Clear();
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
+            simulationAccumulator = 0f;
             LastAppliedChangeId = world.CurrentChangeId;
             StateChanged?.Invoke(State);
         }
@@ -106,12 +135,11 @@ namespace MiniCivilization.World.WaterFlow
             State = null;
             resolver = null;
             activeParameters = default;
-            recalculationRequested = false;
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
-            pendingCellIndices.Clear();
-            pendingColumnIndices.Clear();
+            pendingBodyColumnIndices.Clear();
             affectedWaterBodyIds.Clear();
+            simulationAccumulator = 0f;
             LastAppliedChangeId = WorldChangeId.None;
             StateChanged?.Invoke(null);
         }
@@ -142,8 +170,19 @@ namespace MiniCivilization.World.WaterFlow
             if ((changeSet.ChangeTypes & relevantChanges) != 0)
             {
                 ReconcileEditedWater(changeSet.ChangedCellIndices);
-                AddPendingChanges(changeSet);
-                recalculationRequested = true;
+                resolver.EnqueueChanges(
+                    boundWorld,
+                    State,
+                    changeSet.ChangedCellIndices,
+                    changeSet.ChangedColumnIndices);
+                for (var index = 0;
+                     index < changeSet.ChangedColumnIndices.Count;
+                     index++)
+                {
+                    pendingBodyColumnIndices.Add(
+                        changeSet.ChangedColumnIndices[index]);
+                }
+
                 waterBodyTopologyRefreshRequested |=
                     changeSet.Includes(WorldChangeType.CellStructure)
                     || changeSet.Includes(WorldChangeType.WaterTopology);
@@ -154,21 +193,12 @@ namespace MiniCivilization.World.WaterFlow
             LastAppliedChangeId = changeSet.ChangeId;
         }
 
-        private void AddPendingChanges(WorldChangeSet changeSet)
+        public void ConfigureSimulation(
+            float stepInterval,
+            int cellBudgetPerFrame)
         {
-            for (var index = 0;
-                 index < changeSet.ChangedCellIndices.Count;
-                 index++)
-            {
-                pendingCellIndices.Add(changeSet.ChangedCellIndices[index]);
-            }
-
-            for (var index = 0;
-                 index < changeSet.ChangedColumnIndices.Count;
-                 index++)
-            {
-                pendingColumnIndices.Add(changeSet.ChangedColumnIndices[index]);
-            }
+            simulationStepInterval = Math.Max(0.01f, stepInterval);
+            maxCellsPerFrame = Math.Max(1, cellBudgetPerFrame);
         }
 
         private void ReconcileEditedWater(
@@ -190,11 +220,7 @@ namespace MiniCivilization.World.WaterFlow
 
                 if (cell.Water.Role == WaterCellRole.None)
                 {
-                    cell.Water.Role = cell.Water.Type == WaterType.Sea
-                        ? WaterCellRole.Reservoir
-                        : (cell.Water.Flags & WaterCellFlags.River) != 0
-                            ? WaterCellRole.Dynamic
-                            : WaterCellRole.Reservoir;
+                    cell.Water.Role = WaterCellRole.Source;
                     boundWorld.SetCellForEdit(
                         coordinate.X,
                         coordinate.Y,

@@ -10,7 +10,7 @@ namespace MiniCivilization.World.WaterFlow
             (1, 0), (-1, 0), (0, 1), (0, -1)
         };
 
-        internal static IReadOnlyList<WaterBody> Resolve(WorldData world, int pondMaximumVolumeUnits = 80)
+        internal static IReadOnlyList<WaterBody> Resolve(WorldData world)
         {
             var visited = new bool[world.Size * world.Size];
             var result = new List<WaterBody>();
@@ -61,7 +61,6 @@ namespace MiniCivilization.World.WaterFlow
                     }
                 }
 
-                body.Type = ResolveType(body, pondMaximumVolumeUnits);
                 result.Add(body);
             }
 
@@ -72,8 +71,7 @@ namespace MiniCivilization.World.WaterFlow
             WorldData world,
             WaterFlowState state,
             IReadOnlyCollection<int> changedColumnIndices,
-            HashSet<int> affectedBodyIds,
-            int pondMaximumVolumeUnits = 80)
+            HashSet<int> affectedBodyIds)
         {
             affectedBodyIds.Clear();
             if (world == null
@@ -110,7 +108,6 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 body.VolumeUnits = volumeUnits;
-                body.Type = ResolveType(body, pondMaximumVolumeUnits);
             }
         }
 
@@ -176,15 +173,6 @@ namespace MiniCivilization.World.WaterFlow
                     waterBottomUnits,
                     solidTopUnits));
         }
-
-        private static WaterBodyType ResolveType(
-            WaterBody body,
-            int pondMaximumVolumeUnits) =>
-            body.TouchesWorldEdge
-                ? WaterBodyType.Sea
-                : body.VolumeUnits <= pondMaximumVolumeUnits
-                    ? WaterBodyType.Pond
-                    : WaterBodyType.Lake;
 
         private static int ToIndex(WorldData world, int x, int z) => x + world.Size * z;
     }

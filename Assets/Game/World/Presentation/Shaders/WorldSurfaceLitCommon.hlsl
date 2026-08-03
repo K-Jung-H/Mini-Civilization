@@ -12,6 +12,7 @@ struct WorldAttributes
     float2 textureLayers  : TEXCOORD2;
     float2 textureWeights : TEXCOORD3;
     float2 textureScales  : TEXCOORD4;
+    float4 flow           : TEXCOORD5;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -31,6 +32,7 @@ struct WorldVaryings
     half3 vertexLighting  : TEXCOORD10;
     half3 vertexSH        : TEXCOORD11;
     half fogFactor        : TEXCOORD12;
+    nointerpolation float4 flow : TEXCOORD13;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -56,6 +58,7 @@ WorldVaryings WorldLitVertex(WorldAttributes input)
     output.textureLayers = input.textureLayers;
     output.textureWeights = input.textureWeights;
     output.textureScales = input.textureScales;
+    output.flow = input.flow;
     output.vertexLighting = VertexLighting(positionInputs.positionWS, output.normalWS);
     output.vertexSH = SampleSHVertex(output.normalWS);
 

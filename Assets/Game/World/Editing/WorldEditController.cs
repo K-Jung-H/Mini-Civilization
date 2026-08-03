@@ -114,17 +114,13 @@ namespace MiniCivilization.World.Editing
         public WorldChangeSet SetWaterLevel(
             int x,
             int z,
-            int waterSurfaceUnits,
-            WaterType water,
-            WaterCellFlags flags = WaterCellFlags.None)
+            int waterSurfaceUnits)
         {
             var transaction = BeginTransaction();
             transaction.SetWaterLevel(
                 x,
                 z,
-                waterSurfaceUnits,
-                water,
-                flags);
+                waterSurfaceUnits);
             return Commit(transaction);
         }
 
@@ -822,9 +818,7 @@ namespace MiniCivilization.World.Editing
         public void SetWaterLevel(
             int x,
             int z,
-            int waterSurfaceUnits,
-            WaterType water,
-            WaterCellFlags flags = WaterCellFlags.None)
+            int waterSurfaceUnits)
         {
             EnsureColumn(x, z);
             waterSurfaceUnits = Math.Clamp(
@@ -852,11 +846,7 @@ namespace MiniCivilization.World.Editing
                         Amount = WaterAmount.FromRenderFill(
                             waterFill,
                             available),
-                        Type = water,
-                        Role = (flags & WaterCellFlags.River) != 0
-                            ? WaterCellRole.Dynamic
-                            : WaterCellRole.Reservoir,
-                        Flags = flags
+                        Role = WaterCellRole.Source
                     }
                     : default;
                 if (waterFill > 0)

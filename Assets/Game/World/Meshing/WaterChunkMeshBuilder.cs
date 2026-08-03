@@ -19,7 +19,8 @@ namespace MiniCivilization.World.Meshing
             WorldSurfaceQuery topology,
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
-            List<ExposedCell> cells)
+            List<ExposedCell> cells,
+            HashSet<int> candidateIndices)
         {
             buffers.Clear();
             var startX = patchX * patchSize;
@@ -27,11 +28,19 @@ namespace MiniCivilization.World.Meshing
             var endX = Math.Min(startX + patchSize, world.Size);
             var endZ = Math.Min(startZ + patchSize, world.Size);
             exposureCache.CopyWaterCellsForPatch(
+                startX - 1,
+                startZ - 1,
+                endX + 1,
+                endZ + 1,
+                cells);
+            ExpandRenderCandidates(
+                world,
                 startX,
                 startZ,
                 endX,
                 endZ,
-                cells);
+                cells,
+                candidateIndices);
 
             for (var index = 0; index < cells.Count; index++)
             {
@@ -90,6 +99,71 @@ namespace MiniCivilization.World.Meshing
             }
 
             return buffers;
+        }
+
+        /// <summary>
+        /// Raw Cell exposure is resolved before flow-shaped vertices lower a
+        /// water boundary. Include the one-Cell shell behind that boundary so
+        /// newly revealed side and corner faces can still be emitted.
+        /// </summary>
+        private static void ExpandRenderCandidates(
+            WorldData world,
+            int startX,
+            int startZ,
+            int endX,
+            int endZ,
+            List<ExposedCell> cells,
+            HashSet<int> candidateIndices)
+        {
+            candidateIndices.Clear();
+            for (var sourceIndex = 0;
+                 sourceIndex < cells.Count;
+                 sourceIndex++)
+            {
+                var source = cells[sourceIndex].Coordinate;
+                for (var offsetY = -1; offsetY <= 1; offsetY++)
+                for (var offsetZ = -1; offsetZ <= 1; offsetZ++)
+                for (var offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    var x = source.X + offsetX;
+                    var y = source.Y + offsetY;
+                    var z = source.Z + offsetZ;
+                    if (x < startX
+                        || x >= endX
+                        || z < startZ
+                        || z >= endZ
+                        || !world.TryGetCell(x, y, z, out var cell)
+                        || !cell.HasWater)
+                    {
+                        continue;
+                    }
+
+                    candidateIndices.Add(
+                        WorldIndex.EncodeCell(world, x, y, z));
+                }
+            }
+
+            cells.Clear();
+            foreach (var cellIndex in candidateIndices)
+            {
+                cells.Add(new ExposedCell(
+                    WorldIndex.DecodeCell(world, cellIndex),
+                    CellExposureFlags.None));
+            }
+
+            cells.Sort(CompareCoordinates);
+        }
+
+        private static int CompareCoordinates(
+            ExposedCell left,
+            ExposedCell right)
+        {
+            var y = left.Coordinate.Y.CompareTo(right.Coordinate.Y);
+            if (y != 0) return y;
+            var z = left.Coordinate.Z.CompareTo(right.Coordinate.Z);
+            return z != 0
+                ? z
+                : left.Coordinate.X.CompareTo(right.Coordinate.X);
         }
 
         private static void AddTop(
@@ -391,7 +465,8 @@ namespace MiniCivilization.World.Meshing
                     y,
                     z,
                     localX,
-                    localZ));
+                    localZ),
+                ResolveFlowData(world.GetCell(x, y, z).Water));
 
         private static SurfaceVertex CreateSideVertex(
             WorldData world,
@@ -431,7 +506,67 @@ namespace MiniCivilization.World.Meshing
                     y,
                     z,
                     localX,
-                    localZ));
+                    localZ),
+                ResolveSideFlowData(
+                    world.GetCell(x, y, z).Water,
+                    directionX,
+                    directionZ));
+        }
+
+        private static Vector4 ResolveSideFlowData(
+            WaterCellData water,
+            int directionX,
+            int directionZ)
+        {
+            var flow = ResolveFlowData(water);
+            var horizontalUvFlow = directionX < 0
+                ? flow.y
+                : directionX > 0
+                    ? -flow.y
+                    : directionZ < 0
+                        ? -flow.x
+                        : flow.x;
+            return new Vector4(
+                horizontalUvFlow,
+                0f,
+                flow.z,
+                flow.w);
+        }
+
+        private static Vector4 ResolveFlowData(WaterCellData water)
+        {
+            var direction = water.Direction;
+            var horizontal = Vector2.zero;
+            if ((direction & WaterFlowDirectionMask.East) != 0)
+            {
+                horizontal.x += 1f;
+            }
+
+            if ((direction & WaterFlowDirectionMask.West) != 0)
+            {
+                horizontal.x -= 1f;
+            }
+
+            if ((direction & WaterFlowDirectionMask.North) != 0)
+            {
+                horizontal.y += 1f;
+            }
+
+            if ((direction & WaterFlowDirectionMask.South) != 0)
+            {
+                horizontal.y -= 1f;
+            }
+
+            if (horizontal.sqrMagnitude > 0.0001f)
+            {
+                horizontal.Normalize();
+            }
+
+            return new Vector4(
+                horizontal.x,
+                horizontal.y,
+                water.IsFalling ? 1f : 0f,
+                water.IsFlowing ? 1f : 0f);
         }
 
         private static void GetBoundaryCoordinates(

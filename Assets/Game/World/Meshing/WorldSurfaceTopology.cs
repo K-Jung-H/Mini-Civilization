@@ -885,9 +885,8 @@ namespace MiniCivilization.World.Meshing
                         cellZ,
                         cell,
                         direction);
-                    var stableWater = cell.Water.Role
-                        is WaterCellRole.Source
-                        or WaterCellRole.Reservoir;
+                    var stableWater =
+                        cell.Water.Role == WaterCellRole.Source;
                     var connectsFromAbove = IsFallingWater(
                         cellX,
                         key.Y + 1,

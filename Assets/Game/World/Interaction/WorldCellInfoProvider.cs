@@ -38,7 +38,7 @@ namespace MiniCivilization.World.Interaction
                 $"Water: amount {Cell.Water.Amount}/{WaterAmount.Full}, " +
                 $"fill {Cell.WaterFill}/{WorldGrid.HeightStepsPerCell}, " +
                 $"capacity {WorldGrid.HeightStepsPerCell - Cell.SolidFill}/" +
-                $"{WorldGrid.HeightStepsPerCell} ({Cell.Water.Type})");
+                $"{WorldGrid.HeightStepsPerCell}");
             if (Cell.HasWater)
             {
                 text.AppendLine(
@@ -54,7 +54,7 @@ namespace MiniCivilization.World.Interaction
             if (WaterBody != null)
             {
                 text.Append(
-                    $"Water body: #{WaterBody.Id} {WaterBody.Type}, " +
+                    $"Water body: #{WaterBody.Id}, " +
                     $"volume {WaterBody.VolumeUnits}, surface cells {WaterBody.SurfaceCellCount}");
             }
             else

@@ -174,14 +174,10 @@ namespace MiniCivilization.World.Editor
             WorldSurfaceCatalog catalog)
         {
             var profiles = new List<SurfaceTextureProfile> { null };
-            var water = catalog.WaterSurfaceDefinitions;
-            for (var i = 0; i < water.Count; i++)
+            var water = catalog.WaterSurfaceProfile;
+            if (water != null)
             {
-                var definition = water[i];
-                if (definition?.Appearance != null)
-                {
-                    profiles.Add(definition.Appearance);
-                }
+                profiles.Add(water);
             }
 
             return profiles;

@@ -47,20 +47,11 @@ namespace MiniCivilization.World.Domain
         Shore = 7
     }
 
-    public enum WaterType : byte
-    {
-        None = 0,
-        Fresh = 1,
-        Sea = 2,
-        Marsh = 3
-    }
-
     public enum WaterCellRole : byte
     {
         None = 0,
         Dynamic = 1,
-        Source = 2,
-        Reservoir = 3
+        Source = 2
     }
 
     [Flags]
@@ -73,13 +64,6 @@ namespace MiniCivilization.World.Domain
         South = 1 << 3,
         Down = 1 << 4,
         Horizontal = East | North | West | South
-    }
-
-    [Flags]
-    public enum WaterCellFlags : byte
-    {
-        None = 0,
-        River = 1 << 0
     }
 
     public static class WaterAmount
@@ -125,20 +109,45 @@ namespace MiniCivilization.World.Domain
     {
         public byte SpreadAmountLoss;
         public byte MinimumSpreadAmount;
+        public byte DissipationAmountLoss;
 
-        public static WaterFlowRules Default => new(0.05f, 0.1f);
+        public static WaterFlowRules Default => new(0.05f, 0.1f, 0.05f);
 
         public WaterFlowRules(
             float spreadAmountLoss,
-            float minimumSpreadAmount)
+            float minimumSpreadAmount) : this(
+                spreadAmountLoss,
+                minimumSpreadAmount,
+                spreadAmountLoss)
+        {
+        }
+
+        public WaterFlowRules(
+            float spreadAmountLoss,
+            float minimumSpreadAmount,
+            float dissipationAmountLoss)
         {
             SpreadAmountLoss = WaterAmount.FromNormalized(
                 Math.Clamp(spreadAmountLoss, WaterAmount.Unit, 1f));
             MinimumSpreadAmount = WaterAmount.FromNormalized(
                 Math.Clamp(minimumSpreadAmount, WaterAmount.Unit, 1f));
+            DissipationAmountLoss = WaterAmount.FromNormalized(
+                Math.Clamp(dissipationAmountLoss, WaterAmount.Unit, 1f));
         }
 
-        public WaterFlowRules(byte spreadAmountLoss, byte minimumSpreadAmount)
+        public WaterFlowRules(
+            byte spreadAmountLoss,
+            byte minimumSpreadAmount) : this(
+                spreadAmountLoss,
+                minimumSpreadAmount,
+                spreadAmountLoss)
+        {
+        }
+
+        public WaterFlowRules(
+            byte spreadAmountLoss,
+            byte minimumSpreadAmount,
+            byte dissipationAmountLoss)
         {
             SpreadAmountLoss = Math.Clamp(
                 spreadAmountLoss,
@@ -146,6 +155,10 @@ namespace MiniCivilization.World.Domain
                 WaterAmount.Full);
             MinimumSpreadAmount = Math.Clamp(
                 minimumSpreadAmount,
+                (byte)1,
+                WaterAmount.Full);
+            DissipationAmountLoss = Math.Clamp(
+                dissipationAmountLoss,
                 (byte)1,
                 WaterAmount.Full);
         }
@@ -156,26 +169,29 @@ namespace MiniCivilization.World.Domain
         public readonly float MinimumSpreadAmountNormalized =>
             MinimumSpreadAmount * WaterAmount.Unit;
 
+        public readonly float DissipationAmountLossNormalized =>
+            DissipationAmountLoss * WaterAmount.Unit;
+
         public readonly bool Equals(WaterFlowRules other) =>
             SpreadAmountLoss == other.SpreadAmountLoss
-            && MinimumSpreadAmount == other.MinimumSpreadAmount;
+            && MinimumSpreadAmount == other.MinimumSpreadAmount
+            && DissipationAmountLoss == other.DissipationAmountLoss;
 
         public override readonly bool Equals(object obj) =>
             obj is WaterFlowRules other && Equals(other);
 
         public override readonly int GetHashCode() => HashCode.Combine(
             SpreadAmountLoss,
-            MinimumSpreadAmount);
+            MinimumSpreadAmount,
+            DissipationAmountLoss);
     }
 
     [Serializable]
     public struct WaterCellData : IEquatable<WaterCellData>
     {
         public byte Amount;
-        public WaterType Type;
         public WaterCellRole Role;
         public WaterFlowDirectionMask Direction;
-        public WaterCellFlags Flags;
 
         public readonly bool HasWater => Amount > 0;
         public readonly bool IsStatic =>
@@ -192,33 +208,27 @@ namespace MiniCivilization.World.Domain
                 | WaterFlowDirectionMask.Down;
             if (Amount == 0)
             {
-                Type = WaterType.None;
                 Role = WaterCellRole.None;
                 Direction = WaterFlowDirectionMask.None;
-                Flags = WaterCellFlags.None;
             }
-            else if (Type == WaterType.None)
+            else if (Role == WaterCellRole.None)
             {
-                Type = WaterType.Fresh;
+                Role = WaterCellRole.Source;
             }
         }
 
         public readonly bool Equals(WaterCellData other) =>
             Amount == other.Amount
-            && Type == other.Type
             && Role == other.Role
-            && Direction == other.Direction
-            && Flags == other.Flags;
+            && Direction == other.Direction;
 
         public override readonly bool Equals(object obj) =>
             obj is WaterCellData other && Equals(other);
 
         public override readonly int GetHashCode() => HashCode.Combine(
             Amount,
-            Type,
             Role,
-            Direction,
-            Flags);
+            Direction);
     }
 
     [Serializable]
@@ -287,7 +297,6 @@ namespace MiniCivilization.World.Domain
         public short WaterCellY;
         public byte WaterLevel;
         public SurfaceType Surface;
-        public WaterType Water;
 
         public readonly bool HasSurface => SurfaceCellY >= 0 && SurfaceLevel > 0;
         public readonly bool HasWater => WaterCellY >= 0 && WaterLevel > 0;

@@ -7,6 +7,10 @@ Shader "Mini Civilization/World Water Lit"
         [NoScaleOffset] _SurfaceMaskArray("Surface Mask Array", 2DArray) = "" {}
         _Opacity("Opacity", Range(0, 1)) = 1
         [HDR] _EmissionColor("Emission", Color) = (0, 0, 0, 0)
+        _HorizontalFlowSpeed("Horizontal Flow Speed", Float) = 0.18
+        _VerticalFlowSpeed("Vertical Flow Speed", Float) = 0.35
+        _StaticFlowSpeed("Static Flow Speed", Float) = 0.035
+        _StaticFlowDirection("Static Flow Direction", Vector) = (0.707, 0.707, 0, 0)
         [HideInInspector] _Cull("Cull", Float) = 2
         _DepthBiasFactor("Depth Bias Factor", Float) = 0
         _DepthBiasUnits("Depth Bias Units", Float) = 0
@@ -39,6 +43,10 @@ Shader "Mini Civilization/World Water Lit"
             half4 _EmissionColor;
             half _Opacity;
             half _Cull;
+            float _HorizontalFlowSpeed;
+            float _VerticalFlowSpeed;
+            float _StaticFlowSpeed;
+            float4 _StaticFlowDirection;
         CBUFFER_END
 
         #include "Assets/Game/World/Presentation/Shaders/WorldSurfaceLitCommon.hlsl"
@@ -48,13 +56,30 @@ Shader "Mini Civilization/World Water Lit"
             UNITY_SETUP_INSTANCE_ID(input);
             UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
+            float2 flowDirection = input.flow.xy;
+            float flowSpeed = _HorizontalFlowSpeed;
+            if (input.flow.z > 0.5)
+            {
+                flowDirection = float2(0.0, -1.0);
+                flowSpeed = _VerticalFlowSpeed;
+            }
+            else if (dot(flowDirection, flowDirection) < 0.0001)
+            {
+                float2 staticDirection = _StaticFlowDirection.xy;
+                flowDirection = staticDirection
+                    / max(length(staticDirection), 0.0001);
+                flowSpeed = _StaticFlowSpeed;
+            }
+
+            float2 animatedUv = input.uv
+                + flowDirection * flowSpeed * _Time.y;
             float2 textureWeights = NormalizeSurfaceWeights(input.textureWeights);
             half4 albedoSample = SampleSurfaceAlbedo(
-                input.uv, input.textureLayers, textureWeights, input.textureScales);
+                animatedUv, input.textureLayers, textureWeights, input.textureScales);
             half4 normalSample = SampleSurfaceNormal(
-                input.uv, input.textureLayers, textureWeights, input.textureScales);
+                animatedUv, input.textureLayers, textureWeights, input.textureScales);
             half4 maskSample = SampleSurfaceMask(
-                input.uv, input.textureLayers, textureWeights, input.textureScales);
+                animatedUv, input.textureLayers, textureWeights, input.textureScales);
             half3 normalTS = normalize(normalSample.xyz * 2.0h - 1.0h);
             InputData inputData;
             InitializeWorldInputData(input, normalTS, inputData);

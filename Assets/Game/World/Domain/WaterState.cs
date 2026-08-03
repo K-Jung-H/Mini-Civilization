@@ -4,21 +4,41 @@ using System.Collections.Generic;
 namespace MiniCivilization.World.Domain
 {
     [Serializable]
+    public sealed class WaterFlowScheduleData
+    {
+        private int[] frontierCellIndices = Array.Empty<int>();
+
+        public IReadOnlyList<int> FrontierCellIndices => frontierCellIndices;
+        public bool HasPendingFlow => frontierCellIndices.Length > 0;
+
+        internal void ReplaceFrontier(IReadOnlyCollection<int> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                frontierCellIndices = Array.Empty<int>();
+                return;
+            }
+
+            frontierCellIndices = new int[values.Count];
+            var index = 0;
+            foreach (var value in values)
+            {
+                frontierCellIndices[index++] = value;
+            }
+        }
+    }
+
+    [Serializable]
     public sealed class WaterSourceGroupData
     {
         private readonly int[] cellIndices;
 
         public int Id { get; }
-        public WaterType WaterType { get; }
         public IReadOnlyList<int> CellIndices => cellIndices;
 
-        public WaterSourceGroupData(
-            int id,
-            WaterType waterType,
-            int[] cellIndices)
+        public WaterSourceGroupData(int id, int[] cellIndices)
         {
             Id = id;
-            WaterType = waterType;
             this.cellIndices = cellIndices
                 ?? throw new ArgumentNullException(nameof(cellIndices));
         }
@@ -30,9 +50,11 @@ namespace MiniCivilization.World.Domain
     /// </summary>
     public sealed class WaterSourceCollection
     {
-        private static readonly (int x, int z)[] CardinalDirections =
+        private static readonly (int x, int y, int z)[] NeighborDirections =
         {
-            (1, 0), (0, 1), (-1, 0), (0, -1)
+            (1, 0, 0), (-1, 0, 0),
+            (0, 1, 0), (0, -1, 0),
+            (0, 0, 1), (0, 0, -1)
         };
 
         private readonly List<WaterSourceGroupData> groups = new();
@@ -64,7 +86,6 @@ namespace MiniCivilization.World.Domain
                 throw new ArgumentNullException(nameof(world));
             }
 
-            groups.Clear();
             for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
@@ -75,183 +96,89 @@ namespace MiniCivilization.World.Domain
                     continue;
                 }
 
-                cell.Water.Role = cell.Water.Type == WaterType.Sea
-                    ? WaterCellRole.Reservoir
-                    : (cell.Water.Flags & WaterCellFlags.River) != 0
-                        ? WaterCellRole.Dynamic
-                        : WaterCellRole.Reservoir;
-                world.SetCellBulk(x, y, z, cell);
+                if (cell.Water.Role == WaterCellRole.None)
+                {
+                    cell.Water.Role = WaterCellRole.Source;
+                    world.SetCellBulk(x, y, z, cell);
+                }
             }
 
-            ClassifyRiverSources(world);
-            IsInitialized = true;
+            RebuildGroups(world);
         }
 
         internal void SynchronizeWithWorld(WorldData world)
         {
-            for (var groupIndex = groups.Count - 1;
-                 groupIndex >= 0;
-                 groupIndex--)
+            if (world == null)
             {
-                var group = groups[groupIndex];
-                var validCells = new List<int>(group.CellIndices.Count);
-                for (var index = 0;
-                     index < group.CellIndices.Count;
-                     index++)
-                {
-                    var cellIndex = group.CellIndices[index];
-                    var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-                    var cell = world.GetCell(
-                        coordinate.X,
-                        coordinate.Y,
-                        coordinate.Z);
-                    if (cell.HasWater
-                        && cell.Water.Role == WaterCellRole.Source)
-                    {
-                        validCells.Add(cellIndex);
-                    }
-                }
-
-                if (validCells.Count == 0)
-                {
-                    groups.RemoveAt(groupIndex);
-                    continue;
-                }
-
-                if (validCells.Count != group.CellIndices.Count)
-                {
-                    groups[groupIndex] = new WaterSourceGroupData(
-                        group.Id,
-                        group.WaterType,
-                        validCells.ToArray());
-                }
+                throw new ArgumentNullException(nameof(world));
             }
+
+            RebuildGroups(world);
         }
 
-        private void ClassifyRiverSources(WorldData world)
+        private void RebuildGroups(WorldData world)
         {
-            var visited = new bool[world.Size * world.Size];
+            groups.Clear();
+            var visited = new bool[checked(
+                world.Size * world.Size * world.Height)];
             var queue = new Queue<int>();
+            for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
-                var startIndex = WorldIndex.EncodeColumn(world, x, z);
-                var column = world.GetSurfaceColumn(x, z);
+                var startIndex = WorldIndex.EncodeCell(world, x, y, z);
                 if (visited[startIndex]
-                    || !IsRiverColumn(world, x, z, column))
-                {
-                    continue;
-                }
-
-                var plateauHeight = column.WaterTopUnits;
-                var plateauColumns = new List<int>();
-                var hasHigherRiverNeighbor = false;
-                queue.Enqueue(startIndex);
-                visited[startIndex] = true;
-                while (queue.Count > 0)
-                {
-                    var plateauIndex = queue.Dequeue();
-                    plateauColumns.Add(plateauIndex);
-                    WorldIndex.DecodeColumn(
-                        world,
-                        plateauIndex,
-                        out var plateauX,
-                        out var plateauZ);
-                    for (var directionIndex = 0;
-                         directionIndex < CardinalDirections.Length;
-                         directionIndex++)
-                    {
-                        var direction = CardinalDirections[directionIndex];
-                        var nextX = plateauX + direction.x;
-                        var nextZ = plateauZ + direction.z;
-                        if (!world.ContainsColumn(nextX, nextZ))
-                        {
-                            continue;
-                        }
-
-                        var next = world.GetSurfaceColumn(nextX, nextZ);
-                        if (!IsRiverColumn(world, nextX, nextZ, next))
-                        {
-                            continue;
-                        }
-
-                        if (next.WaterTopUnits > plateauHeight)
-                        {
-                            hasHigherRiverNeighbor = true;
-                        }
-
-                        var nextIndex = WorldIndex.EncodeColumn(
-                            world,
-                            nextX,
-                            nextZ);
-                        if (next.WaterTopUnits == plateauHeight
-                            && !visited[nextIndex])
-                        {
-                            visited[nextIndex] = true;
-                            queue.Enqueue(nextIndex);
-                        }
-                    }
-                }
-
-                if (hasHigherRiverNeighbor)
+                    || !IsSource(world.GetCell(x, y, z)))
                 {
                     continue;
                 }
 
                 var sourceCells = new List<int>();
-                var groupId = groups.Count + 1;
-                for (var position = 0;
-                     position < plateauColumns.Count;
-                     position++)
+                queue.Enqueue(startIndex);
+                visited[startIndex] = true;
+                while (queue.Count > 0)
                 {
-                    WorldIndex.DecodeColumn(
-                        world,
-                        plateauColumns[position],
-                        out var sourceX,
-                        out var sourceZ);
-                    for (var y = 0; y < world.Height; y++)
+                    var cellIndex = queue.Dequeue();
+                    sourceCells.Add(cellIndex);
+                    var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+                    for (var directionIndex = 0;
+                         directionIndex < NeighborDirections.Length;
+                         directionIndex++)
                     {
-                        var cell = world.GetCell(sourceX, y, sourceZ);
-                        if (!cell.HasWater
-                            || cell.Water.Role != WaterCellRole.Dynamic)
+                        var direction = NeighborDirections[directionIndex];
+                        var nextX = coordinate.X + direction.x;
+                        var nextY = coordinate.Y + direction.y;
+                        var nextZ = coordinate.Z + direction.z;
+                        if (!world.Contains(nextX, nextY, nextZ))
                         {
                             continue;
                         }
 
-                        cell.Water.Role = WaterCellRole.Source;
-                        cell.Water.Amount = WaterAmount.Full;
-                        world.SetCellBulk(sourceX, y, sourceZ, cell);
-                        sourceCells.Add(WorldIndex.EncodeCell(
+                        var nextIndex = WorldIndex.EncodeCell(
                             world,
-                            sourceX,
-                            y,
-                            sourceZ));
+                            nextX,
+                            nextY,
+                            nextZ);
+                        if (visited[nextIndex]
+                            || !IsSource(world.GetCell(nextX, nextY, nextZ)))
+                        {
+                            continue;
+                        }
+
+                        visited[nextIndex] = true;
+                        queue.Enqueue(nextIndex);
                     }
                 }
 
-                if (sourceCells.Count > 0)
-                {
-                    groups.Add(new WaterSourceGroupData(
-                        groupId,
-                        WaterType.Fresh,
-                        sourceCells.ToArray()));
-                }
-            }
-        }
-
-        private static bool IsRiverColumn(
-            WorldData world,
-            int x,
-            int z,
-            SurfaceColumnData column)
-        {
-            if (!column.HasWater)
-            {
-                return false;
+                groups.Add(new WaterSourceGroupData(
+                    groups.Count + 1,
+                    sourceCells.ToArray()));
             }
 
-            var cell = world.GetCell(x, column.WaterCellY, z);
-            return (cell.Water.Flags & WaterCellFlags.River) != 0;
+            IsInitialized = true;
         }
+
+        private static bool IsSource(CellData cell) =>
+            cell.HasWater && cell.Water.Role == WaterCellRole.Source;
     }
 }

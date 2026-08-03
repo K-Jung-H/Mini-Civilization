@@ -49,13 +49,6 @@ namespace MiniCivilization.World.Definitions
     }
 
     [Serializable]
-    public sealed class WaterSurfaceDefinition
-    {
-        public WaterType Type = WaterType.Fresh;
-        public SurfaceTextureProfile Appearance = new();
-    }
-
-    [Serializable]
     public struct SurfaceTextureArrayAvailability
     {
         [SerializeField] private bool albedo;
@@ -254,12 +247,18 @@ namespace MiniCivilization.World.Definitions
         private List<BiomeSurfaceSet> biomes = new();
 
         [SerializeField]
-        [Tooltip("Fresh, Sea, Marsh 수면 타입별 재질 프로필입니다.")]
-        private List<WaterSurfaceDefinition> water = new();
+        [Tooltip("수면에 공통으로 사용하는 재질 프로필입니다.")]
+        private SurfaceTextureProfile waterSurface = new()
+        {
+            Tint = new Color(0.08f, 0.42f, 0.68f, 0.72f),
+            Metallic = 0f,
+            Smoothness = 0.72f,
+            Occlusion = 0.9f
+        };
 
         private readonly Dictionary<SurfaceType, SurfaceAppearance> commonCache = new();
         private readonly Dictionary<TerrainSurfaceKey, SurfaceAppearance> biomeCache = new();
-        private readonly Dictionary<WaterType, SurfaceAppearance> waterCache = new();
+        private SurfaceAppearance waterAppearance;
         [SerializeField, HideInInspector] private Texture2DArray terrainAlbedoArray;
         [SerializeField, HideInInspector] private Texture2DArray terrainNormalArray;
         [SerializeField, HideInInspector] private Texture2DArray terrainMaskArray;
@@ -279,7 +278,7 @@ namespace MiniCivilization.World.Definitions
         internal bool TextureArrayMipMaps => textureArrayMipMaps;
         internal IReadOnlyList<TerrainSurfaceDefinition> CommonTerrainDefinitions => commonTerrain;
         internal IReadOnlyList<BiomeSurfaceSet> BiomeSurfaceSets => biomes;
-        internal IReadOnlyList<WaterSurfaceDefinition> WaterSurfaceDefinitions => water;
+        internal SurfaceTextureProfile WaterSurfaceProfile => waterSurface;
         internal string BakedTextureArraySignature => bakedTextureArraySignature;
         internal Texture2DArray TerrainAlbedoArray => terrainAlbedoArray;
         internal Texture2DArray TerrainNormalArray => terrainNormalArray;
@@ -341,12 +340,12 @@ namespace MiniCivilization.World.Definitions
             return DefaultSurfacePalette.ResolveTerrain(biome, type);
         }
 
-        public SurfaceAppearance ResolveWater(WaterType type)
+        public SurfaceAppearance ResolveWater()
         {
             EnsureRuntimeCache();
-            return waterCache.TryGetValue(type, out var appearance)
-                ? appearance
-                : DefaultSurfacePalette.ResolveWater(type);
+            return waterSurface != null
+                ? waterAppearance
+                : DefaultSurfacePalette.ResolveWater();
         }
 
         public void ApplyToMaterials(
@@ -370,9 +369,15 @@ namespace MiniCivilization.World.Definitions
 
         private void OnEnable()
         {
-            if (commonTerrain.Count == 0 && biomes.Count == 0 && water.Count == 0)
+            if (commonTerrain.Count == 0 && biomes.Count == 0)
             {
                 PopulateDefaultProfiles();
+            }
+            else if (waterSurface == null)
+            {
+                waterSurface = CreateWaterProfile(
+                    new Color(0.08f, 0.42f, 0.68f, 0.72f),
+                    0.72f);
             }
 
             cacheValid = false;
@@ -413,14 +418,14 @@ namespace MiniCivilization.World.Definitions
 
             commonCache.Clear();
             biomeCache.Clear();
-            waterCache.Clear();
+            waterAppearance = default;
 
             var terrainProfiles = new List<SurfaceTextureProfile> { null };
             AddCommonProfiles(terrainProfiles);
             AddBiomeProfiles(terrainProfiles);
 
             var waterProfiles = new List<SurfaceTextureProfile> { null };
-            AddWaterProfiles(waterProfiles);
+            AddWaterProfile(waterProfiles);
 
             cacheValid = true;
         }
@@ -454,12 +459,9 @@ namespace MiniCivilization.World.Definitions
             biomes[(int)BiomeType.Forest - 1].Surfaces.Add(
                 CreateTerrainDefinition(SurfaceType.Riverbed, new Color(0.19f, 0.24f, 0.18f), 0f, 0.12f));
 
-            water = new List<WaterSurfaceDefinition>
-            {
-                CreateWaterDefinition(WaterType.Fresh, new Color(0.08f, 0.42f, 0.68f, 0.72f), 0.72f),
-                CreateWaterDefinition(WaterType.Sea, new Color(0.05f, 0.25f, 0.52f, 0.78f), 0.72f),
-                CreateWaterDefinition(WaterType.Marsh, new Color(0.18f, 0.31f, 0.17f, 0.8f), 0.65f)
-            };
+            waterSurface = CreateWaterProfile(
+                new Color(0.08f, 0.42f, 0.68f, 0.72f),
+                0.72f);
         }
 
         private static BiomeSurfaceSet CreateBiomeSet(BiomeType biome, Color tint)
@@ -493,21 +495,16 @@ namespace MiniCivilization.World.Definitions
             };
         }
 
-        private static WaterSurfaceDefinition CreateWaterDefinition(
-            WaterType type,
+        private static SurfaceTextureProfile CreateWaterProfile(
             Color tint,
             float smoothness)
         {
-            return new WaterSurfaceDefinition
+            return new SurfaceTextureProfile
             {
-                Type = type,
-                Appearance = new SurfaceTextureProfile
-                {
-                    Tint = tint,
-                    Metallic = 0f,
-                    Smoothness = smoothness,
-                    Occlusion = 0.9f
-                }
+                Tint = tint,
+                Metallic = 0f,
+                Smoothness = smoothness,
+                Occlusion = 0.9f
             };
         }
 
@@ -553,20 +550,16 @@ namespace MiniCivilization.World.Definitions
             }
         }
 
-        private void AddWaterProfiles(List<SurfaceTextureProfile> profiles)
+        private void AddWaterProfile(List<SurfaceTextureProfile> profiles)
         {
-            for (var i = 0; i < water.Count; i++)
+            if (waterSurface == null)
             {
-                var definition = water[i];
-                if (definition == null || definition.Appearance == null)
-                {
-                    continue;
-                }
-
-                var layer = profiles.Count;
-                profiles.Add(definition.Appearance);
-                waterCache[definition.Type] = CreateAppearance(definition.Appearance, layer);
+                return;
             }
+
+            var layer = profiles.Count;
+            profiles.Add(waterSurface);
+            waterAppearance = CreateAppearance(waterSurface, layer);
         }
 
         private static SurfaceAppearance CreateAppearance(SurfaceTextureProfile profile, int layer)
@@ -673,14 +666,11 @@ namespace MiniCivilization.World.Definitions
             };
         }
 
-        public static SurfaceAppearance ResolveWater(WaterType type)
-        {
-            return type switch
-            {
-                WaterType.Sea => new SurfaceAppearance(new Color(0.05f, 0.25f, 0.52f, 0.78f), 0f, 0.72f, 0.9f),
-                WaterType.Marsh => new SurfaceAppearance(new Color(0.18f, 0.31f, 0.17f, 0.8f), 0f, 0.65f, 0.82f),
-                _ => new SurfaceAppearance(new Color(0.08f, 0.42f, 0.68f, 0.72f), 0f, 0.72f, 0.92f)
-            };
-        }
+        public static SurfaceAppearance ResolveWater() =>
+            new(
+                new Color(0.08f, 0.42f, 0.68f, 0.72f),
+                0f,
+                0.72f,
+                0.92f);
     }
 }

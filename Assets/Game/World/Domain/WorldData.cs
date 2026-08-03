@@ -80,6 +80,7 @@ namespace MiniCivilization.World.Domain
         public WaterFlowRules WaterFlowRules { get; private set; }
         public WorldChangeId CurrentChangeId { get; private set; }
         public WaterSourceCollection WaterSources { get; }
+        public WaterFlowScheduleData WaterFlowSchedule { get; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -113,6 +114,7 @@ namespace MiniCivilization.World.Domain
             surfaceColumnMap = new SurfaceColumnData[size * size];
             columnEnvironmentMap = new ColumnEnvironmentData[size * size];
             WaterSources = new WaterSourceCollection();
+            WaterFlowSchedule = new WaterFlowScheduleData();
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
             for (var chunkZ = 0; chunkZ < ChunkCountZ; chunkZ++)
@@ -136,7 +138,8 @@ namespace MiniCivilization.World.Domain
         {
             WaterFlowRules = new WaterFlowRules(
                 rules.SpreadAmountLoss,
-                rules.MinimumSpreadAmount);
+                rules.MinimumSpreadAmount,
+                rules.DissipationAmountLoss);
         }
 
         public bool Contains(int x, int y, int z) => (uint)x < Size && (uint)y < Height && (uint)z < Size;
@@ -268,7 +271,6 @@ namespace MiniCivilization.World.Domain
                 {
                     column.WaterCellY = (short)y;
                     column.WaterLevel = (byte)(cell.SolidFill + cell.WaterFill);
-                    column.Water = cell.Water.Type;
                     waterTopUnits = y * WorldGrid.HeightStepsPerCell + column.WaterLevel;
                 }
 
@@ -294,7 +296,6 @@ namespace MiniCivilization.World.Domain
             {
                 column.WaterCellY = -1;
                 column.WaterLevel = 0;
-                column.Water = WaterType.None;
             }
 
             SetSurfaceColumn(x, z, column);

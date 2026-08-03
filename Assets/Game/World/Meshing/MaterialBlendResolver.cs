@@ -31,28 +31,6 @@ namespace MiniCivilization.World.Meshing
             return ResolveTerrain(world, catalog, x, z, localX, localZ, (SurfaceType?)surfaceOverride);
         }
 
-        public static SurfaceAppearance ResolveWater(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            float localX,
-            float localZ)
-        {
-            ResolveAxis(localX, out var offsetX, out var blendX);
-            ResolveAxis(localZ, out var offsetZ, out var blendZ);
-
-            var currentColumn = world.GetSurfaceColumn(x, z);
-            var current = ResolveWaterAppearance(catalog, currentColumn.Water);
-            var xAppearance = ResolveWaterNeighbor(world, catalog, x + offsetX, z, current);
-            var zAppearance = ResolveWaterNeighbor(world, catalog, x, z + offsetZ, current);
-            var diagonalAppearance = ResolveWaterNeighbor(world, catalog, x + offsetX, z + offsetZ, current);
-
-            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
-            var row1 = SurfaceAppearance.Lerp(zAppearance, diagonalAppearance, blendX);
-            return SurfaceAppearance.Lerp(row0, row1, blendZ);
-        }
-
         public static SurfaceAppearance ResolveWaterCell(
             WorldData world,
             WorldSurfaceCatalog catalog,
@@ -62,37 +40,7 @@ namespace MiniCivilization.World.Meshing
             float localX,
             float localZ)
         {
-            ResolveAxis(localX, out var offsetX, out var blendX);
-            ResolveAxis(localZ, out var offsetZ, out var blendZ);
-            var cell = world.GetCell(x, y, z);
-            var current = ResolveWaterAppearance(catalog, cell.Water.Type);
-            var xAppearance = ResolveWaterCellNeighbor(
-                world,
-                catalog,
-                x + offsetX,
-                y,
-                z,
-                current);
-            var zAppearance = ResolveWaterCellNeighbor(
-                world,
-                catalog,
-                x,
-                y,
-                z + offsetZ,
-                current);
-            var diagonalAppearance = ResolveWaterCellNeighbor(
-                world,
-                catalog,
-                x + offsetX,
-                y,
-                z + offsetZ,
-                current);
-            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
-            var row1 = SurfaceAppearance.Lerp(
-                zAppearance,
-                diagonalAppearance,
-                blendX);
-            return SurfaceAppearance.Lerp(row0, row1, blendZ);
+            return ResolveWaterAppearance(catalog);
         }
 
         public static SurfaceAppearance ResolveTerrainCell(
@@ -164,12 +112,11 @@ namespace MiniCivilization.World.Meshing
         }
 
         internal static SurfaceAppearance ResolveWaterAppearance(
-            WorldSurfaceCatalog catalog,
-            WaterType water)
+            WorldSurfaceCatalog catalog)
         {
             return catalog != null
-                ? catalog.ResolveWater(water)
-                : DefaultSurfacePalette.ResolveWater(water);
+                ? catalog.ResolveWater()
+                : DefaultSurfacePalette.ResolveWater();
         }
 
         private static SurfaceAppearance ResolveTerrain(
@@ -244,40 +191,6 @@ namespace MiniCivilization.World.Meshing
                 catalog,
                 world.GetColumnEnvironment(x, z).Biome,
                 surfaceOverride ?? column.Surface);
-        }
-
-        private static SurfaceAppearance ResolveWaterNeighbor(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            in SurfaceAppearance fallback)
-        {
-            if (!world.ContainsColumn(x, z))
-            {
-                return fallback;
-            }
-
-            var column = world.GetSurfaceColumn(x, z);
-            return column.HasWater
-                ? ResolveWaterAppearance(catalog, column.Water)
-                : fallback;
-        }
-
-        private static SurfaceAppearance ResolveWaterCellNeighbor(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int y,
-            int z,
-            in SurfaceAppearance fallback)
-        {
-            if (!world.TryGetCell(x, y, z, out var cell) || !cell.HasWater)
-            {
-                return fallback;
-            }
-
-            return ResolveWaterAppearance(catalog, cell.Water.Type);
         }
 
         private static SurfaceAppearance ResolveTerrainCellAppearance(

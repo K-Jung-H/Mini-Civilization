@@ -12,6 +12,7 @@ namespace MiniCivilization.World.Meshing
         public MeshBuffers Water { get; } = new();
         public List<ExposedCell> SolidCells { get; } = new();
         public List<ExposedCell> WaterCells { get; } = new();
+        public HashSet<int> WaterCellIndices { get; } = new();
     }
 
     internal readonly struct SurfaceVertex
@@ -19,12 +20,23 @@ namespace MiniCivilization.World.Meshing
         public readonly Vector3 Position;
         public readonly Vector2 Uv;
         public readonly SurfaceAppearance Appearance;
+        public readonly Vector4 Flow;
 
         public SurfaceVertex(Vector3 position, Vector2 uv, in SurfaceAppearance appearance)
+            : this(position, uv, appearance, Vector4.zero)
+        {
+        }
+
+        public SurfaceVertex(
+            Vector3 position,
+            Vector2 uv,
+            in SurfaceAppearance appearance,
+            Vector4 flow)
         {
             Position = position;
             Uv = uv;
             Appearance = appearance;
+            Flow = flow;
         }
     }
 
@@ -38,6 +50,7 @@ namespace MiniCivilization.World.Meshing
         private readonly List<Vector2> textureLayers = new();
         private readonly List<Vector2> textureWeights = new();
         private readonly List<Vector2> textureScales = new();
+        private readonly List<Vector4> flowData = new();
         private readonly List<Color32> colors = new();
         private readonly List<int> indices = new();
         private readonly Dictionary<MeshVertexKey, int> vertexLookup = new();
@@ -55,6 +68,7 @@ namespace MiniCivilization.World.Meshing
             textureLayers.Clear();
             textureWeights.Clear();
             textureScales.Clear();
+            flowData.Clear();
             colors.Clear();
             indices.Clear();
             vertexLookup.Clear();
@@ -164,6 +178,7 @@ namespace MiniCivilization.World.Meshing
             mesh.SetUVs(2, textureLayers);
             mesh.SetUVs(3, textureWeights);
             mesh.SetUVs(4, textureScales);
+            mesh.SetUVs(5, flowData);
             mesh.SetColors(colors);
             mesh.SetTriangles(indices, 0, true);
             mesh.RecalculateBounds();
@@ -193,6 +208,7 @@ namespace MiniCivilization.World.Meshing
                 layers,
                 weights,
                 scales,
+                vertex.Flow,
                 color);
             if (vertexLookup.TryGetValue(key, out var existingIndex))
             {
@@ -209,6 +225,7 @@ namespace MiniCivilization.World.Meshing
             textureLayers.Add(layers);
             textureWeights.Add(weights);
             textureScales.Add(scales);
+            flowData.Add(vertex.Flow);
             colors.Add(color);
             return index;
         }
@@ -391,6 +408,7 @@ namespace MiniCivilization.World.Meshing
             private readonly Vector2 layers;
             private readonly Vector2 weights;
             private readonly Vector2 scales;
+            private readonly Vector4 flow;
             private readonly Color32 color;
 
             public MeshVertexKey(
@@ -402,6 +420,7 @@ namespace MiniCivilization.World.Meshing
                 Vector2 layers,
                 Vector2 weights,
                 Vector2 scales,
+                Vector4 flow,
                 Color32 color)
             {
                 this.position = position;
@@ -412,6 +431,7 @@ namespace MiniCivilization.World.Meshing
                 this.layers = layers;
                 this.weights = weights;
                 this.scales = scales;
+                this.flow = flow;
                 this.color = color;
             }
 
@@ -425,6 +445,7 @@ namespace MiniCivilization.World.Meshing
                     && layers.Equals(other.layers)
                     && weights.Equals(other.weights)
                     && scales.Equals(other.scales)
+                    && flow.Equals(other.flow)
                     && color.Equals(other.color);
             }
 
@@ -433,8 +454,16 @@ namespace MiniCivilization.World.Meshing
             public override int GetHashCode()
             {
                 var geometryHash = HashCode.Combine(position, normal, tangent, uv);
-                var surfaceHash = HashCode.Combine(material, layers, weights, scales);
-                return HashCode.Combine(geometryHash, surfaceHash, color);
+                var surfaceHash = HashCode.Combine(
+                    material,
+                    layers,
+                    weights,
+                    scales);
+                return HashCode.Combine(
+                    geometryHash,
+                    surfaceHash,
+                    flow,
+                    color);
             }
         }
     }

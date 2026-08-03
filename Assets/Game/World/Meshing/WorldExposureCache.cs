@@ -103,6 +103,10 @@ namespace MiniCivilization.World.Meshing
             bool water)
         {
             target.Clear();
+            startX = Math.Max(0, startX);
+            startZ = Math.Max(0, startZ);
+            endX = Math.Min(world.Size, endX);
+            endZ = Math.Min(world.Size, endZ);
             if (startX >= endX || startZ >= endZ)
             {
                 return;
