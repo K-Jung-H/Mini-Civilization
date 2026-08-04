@@ -40,7 +40,6 @@ namespace MiniCivilization.World.Generation
             var waterSurfaces = new int[columnCount];
             var waterRoles = new WaterCellRole[columnCount];
             var waterBedSurfaces = new SurfaceType[columnCount];
-            var waterDirections = new WaterFlowDirectionMask[columnCount];
 
             GenerateBaseTerrain(world, settings, seed, solidHeights);
             InitializeSea(
@@ -54,18 +53,20 @@ namespace MiniCivilization.World.Generation
                 world,
                 solidHeights,
                 waterSurfaces,
-                waterRoles,
-                waterDirections);
+                waterRoles);
             var hydrology = HydrologyMapBuilder.Build(
                 world.Size,
                 settings.SeaLevelUnits,
                 solidHeights,
                 waterSurfaces);
+            var waterValidationContext =
+                WaterPlanValidator.CreateContext(world);
             var lakePlans = InlandLakePlanner.BuildPlans(
                 world,
                 settings,
                 hydrology,
-                seed);
+                seed,
+                waterValidationContext);
             var hydrologyFeaturePlan =
                 DynamicRiverPlanner.BuildFeaturePlan(
                     world,
@@ -74,7 +75,8 @@ namespace MiniCivilization.World.Generation
                     lakePlans,
                     solidHeights,
                     waterSurfaces,
-                    seed);
+                    seed,
+                    waterValidationContext);
             DynamicRiverPlanner.ApplyFeaturePlan(
                 hydrologyFeaturePlan,
                 solidHeights,
@@ -85,101 +87,13 @@ namespace MiniCivilization.World.Generation
                 world,
                 solidHeights,
                 waterSurfaces,
-                waterRoles,
-                waterDirections);
+                waterRoles);
+            VerifyAppliedFeaturePlan(world, hydrologyFeaturePlan);
             world.WaterSources.InitializeFromGeneratedWorld(world);
             WaterFlowSolver.PrepareGeneratedWorld(world);
             ApplyBiomes(world, settings, seed, waterBedSurfaces);
 
             return world;
-        }
-
-        public static ulong ComputeStableHash(WorldData world)
-        {
-            const ulong offset = 14695981039346656037UL;
-            const ulong prime = 1099511628211UL;
-            var hash = offset;
-            hash = Mix(hash, world.Size, prime);
-            hash = Mix(hash, world.Height, prime);
-            hash = Mix(hash, world.Seed, prime);
-            hash = Mix(hash, world.WaterFlowRules.SpreadAmountLoss, prime);
-            hash = Mix(hash, world.WaterFlowRules.MinimumSpreadAmount, prime);
-            hash = Mix(hash, world.WaterFlowRules.DissipationAmountLoss, prime);
-            foreach (var chunk in world.EnumerateChunks())
-            {
-                foreach (var cell in chunk.AsSpan())
-                {
-                    hash = Mix(hash, (ushort)cell.Material, prime);
-                    hash = Mix(hash, (ushort)cell.Surface, prime);
-                    hash = Mix(hash, cell.Water.Amount, prime);
-                    hash = Mix(hash, (byte)cell.Water.Role, prime);
-                    hash = Mix(hash, (byte)cell.Water.Direction, prime);
-                    hash = Mix(hash, (ushort)cell.Geology, prime);
-                    hash = Mix(hash, cell.DepositIndex, prime);
-                    hash = Mix(hash, cell.SolidFill, prime);
-                    hash = Mix(hash, (ushort)cell.Flags, prime);
-                }
-            }
-
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
-            {
-                var column = world.GetSurfaceColumn(x, z);
-                hash = Mix(hash, column.SurfaceCellY, prime);
-                hash = Mix(hash, column.SurfaceLevel, prime);
-                hash = Mix(hash, column.WaterCellY, prime);
-                hash = Mix(hash, column.WaterLevel, prime);
-                hash = Mix(hash, (ushort)column.Surface, prime);
-                var environment = world.GetColumnEnvironment(x, z);
-                hash = Mix(hash, (ushort)environment.Biome, prime);
-                hash = Mix(hash, environment.Temperature, prime);
-                hash = Mix(hash, environment.Moisture, prime);
-                hash = Mix(hash, environment.Fertility, prime);
-            }
-
-            hash = Mix(
-                hash,
-                world.WaterFlowSchedule.FrontierCellIndices.Count,
-                prime);
-            for (var index = 0;
-                 index < world.WaterFlowSchedule.FrontierCellIndices.Count;
-                 index++)
-            {
-                hash = Mix(
-                    hash,
-                    world.WaterFlowSchedule.FrontierCellIndices[index],
-                    prime);
-            }
-
-            return hash;
-        }
-
-        private static ulong Mix(ulong hash, ushort value, ulong prime)
-        {
-            hash ^= (byte)value;
-            hash *= prime;
-            hash ^= (byte)(value >> 8);
-            return hash * prime;
-        }
-
-        private static ulong Mix(ulong hash, byte value, ulong prime)
-        {
-            hash ^= value;
-            return hash * prime;
-        }
-
-        private static ulong Mix(ulong hash, int value, ulong prime)
-        {
-            unchecked
-            {
-                for (var shift = 0; shift < 32; shift += 8)
-                {
-                    hash ^= (byte)(value >> shift);
-                    hash *= prime;
-                }
-            }
-
-            return hash;
         }
 
         private static void GenerateBaseTerrain(
@@ -200,22 +114,22 @@ namespace MiniCivilization.World.Generation
             for (var x = 0; x < world.Size; x++)
             {
                 var noise = DeterministicNoise.FractalNoise(
-                    x * settings.TerrainNoiseScale,
-                    z * settings.TerrainNoiseScale,
+                    x * settings.TerrainScale,
+                    z * settings.TerrainScale,
                     terrainSeed,
-                    settings.TerrainOctaves,
-                    settings.TerrainLacunarity,
-                    settings.TerrainPersistence);
+                    settings.TerrainLayers,
+                    settings.TerrainSpacing,
+                    settings.TerrainDetail);
                 var mountainRidge = DeterministicNoise.RidgedFractalNoise(
-                    x * settings.MountainNoiseScale,
-                    z * settings.MountainNoiseScale,
+                    x * settings.MountainScale,
+                    z * settings.MountainScale,
                     mountainSeed,
-                    settings.TerrainOctaves,
-                    settings.TerrainLacunarity,
-                    settings.TerrainPersistence);
+                    settings.TerrainLayers,
+                    settings.TerrainSpacing,
+                    settings.TerrainDetail);
                 var mountainMaskNoise = DeterministicNoise.FractalNoise(
-                    x * settings.MountainNoiseScale * 0.4f,
-                    z * settings.MountainNoiseScale * 0.4f,
+                    x * settings.MountainScale * 0.4f,
+                    z * settings.MountainScale * 0.4f,
                     mountainMaskSeed,
                     3,
                     2f,
@@ -226,21 +140,21 @@ namespace MiniCivilization.World.Generation
                 var edgeDistance = MathF.Max(MathF.Abs(normalizedX), MathF.Abs(normalizedZ));
                 var edgePenalty = MathF.Pow(edgeDistance, 3f)
                     * edgeFalloffUnits
-                    * settings.IslandFalloff;
+                    * settings.EdgeLowering;
                 var centeredNoise = noise * 2f - 1f;
                 var mountainMask = SmoothStep01(
-                    (mountainMaskNoise - settings.MountainThreshold) / 0.2f);
+                    (mountainMaskNoise - settings.MountainCoverage) / 0.2f);
                 var inlandMask = 1f - SmoothStep01(
                     (edgeDistance - 0.62f) / 0.38f);
                 var mountainHeight = MathF.Pow(
                         mountainRidge,
-                        settings.MountainSharpness)
+                        settings.MountainSteepness)
                     * mountainMask
                     * inlandMask
-                    * settings.MountainStrengthUnits;
-                var height = settings.BaseTerrainHeightUnits
+                    * settings.MountainHeightUnits;
+                var height = settings.BaseHeightUnits
                     + (int)MathF.Round(
-                        centeredNoise * settings.TerrainAmplitudeUnits
+                        centeredNoise * settings.HeightVariationUnits
                         + mountainHeight
                         - edgePenalty);
 
@@ -308,8 +222,7 @@ namespace MiniCivilization.World.Generation
             WorldData world,
             int[] solidHeights,
             int[] waterSurfaces,
-            WaterCellRole[] waterRoles,
-            WaterFlowDirectionMask[] waterDirections)
+            WaterCellRole[] waterRoles)
         {
             var writer = new WorldBulkWriter(world);
             for (var z = 0; z < world.Size; z++)
@@ -326,10 +239,44 @@ namespace MiniCivilization.World.Generation
                     SurfaceType.Ground,
                     waterSurface,
                     waterRoles[index],
-                    waterDirections[index]);
+                    WaterFlowDirectionMask.None);
             }
 
             writer.Complete();
+        }
+
+        private static void VerifyAppliedFeaturePlan(
+            WorldData world,
+            HydrologyFeaturePlan featurePlan)
+        {
+            foreach (var pair in featurePlan.TerrainColumns)
+            {
+                var planned = pair.Value;
+                var column = world.GetSurfaceColumn(
+                    planned.X,
+                    planned.Z);
+                if (column.SolidTopUnits != planned.TargetHeightUnits)
+                {
+                    throw new InvalidOperationException(
+                        "Applied terrain does not match the accepted water feature plan.");
+                }
+            }
+
+            foreach (var pair in featurePlan.SourceCells)
+            {
+                var planned = pair.Value;
+                var coordinate = planned.Coordinate;
+                var cell = world.GetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z);
+                if (!cell.HasWater
+                    || !cell.Water.Equals(planned.Water))
+                {
+                    throw new InvalidOperationException(
+                        "Applied source water does not match the accepted water feature plan.");
+                }
+            }
         }
 
         private static void ApplyBiomes(

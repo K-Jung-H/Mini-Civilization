@@ -353,6 +353,10 @@ namespace MiniCivilization.World.WaterFlow
 
             var desired = default(WaterCellData);
             var hasHorizontalInflow = false;
+            var connectsToSourceBelow = IsSourceImmediatelyBelow(
+                world,
+                state,
+                coordinate);
             if (coordinate.Y + 1 < world.Height)
             {
                 var aboveIndex = WorldIndex.EncodeCell(
@@ -398,6 +402,15 @@ namespace MiniCivilization.World.WaterFlow
                 var donor = state.GetWater(donorIndex);
                 if (donor.Amount <= parameters.SpreadAmountLoss
                     || donor.Amount < parameters.MinimumSpreadAmount
+                    || (donor.Role == WaterCellRole.Dynamic
+                        && (donor.IsFalling
+                            || IsSourceImmediatelyBelow(
+                                world,
+                                state,
+                                new CellCoordinate(
+                                    donorX,
+                                    coordinate.Y,
+                                    donorZ))))
                     || CanFlowDown(
                         world,
                         state,
@@ -459,7 +472,8 @@ namespace MiniCivilization.World.WaterFlow
 
             if (desired.Amount > 0)
             {
-                if (CanFlowDown(world, state, coordinate)
+                if (connectsToSourceBelow
+                    || CanFlowDown(world, state, coordinate)
                     || (hasHorizontalInflow
                         && HasVerticalDropBelow(world, coordinate)))
                 {
@@ -471,6 +485,15 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 desired.Normalize();
+            }
+
+            if (connectsToSourceBelow
+                && current.Role == WaterCellRole.Dynamic)
+            {
+                current.Direction =
+                    (current.Direction & WaterFlowDirectionMask.Horizontal)
+                    | WaterFlowDirectionMask.Down;
+                current.Normalize();
             }
 
             return ApplyDissipation(current, desired, parameters);
@@ -530,6 +553,25 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             return result;
+        }
+
+        private static bool IsSourceImmediatelyBelow(
+            WorldData world,
+            WaterFlowState state,
+            CellCoordinate coordinate)
+        {
+            if (coordinate.Y <= 0)
+            {
+                return false;
+            }
+
+            var belowIndex = WorldIndex.EncodeCell(
+                world,
+                coordinate.X,
+                coordinate.Y - 1,
+                coordinate.Z);
+            return state.GetWater(belowIndex).Role
+                == WaterCellRole.Source;
         }
 
         private static WaterCellData ApplyDissipation(

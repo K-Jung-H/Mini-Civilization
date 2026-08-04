@@ -86,9 +86,6 @@ namespace MiniCivilization.World.Generation
                         current.HeightUnits);
                     map.SetFilledHeightUnits(nextIndex, filledHeight);
                     map.SetReceiverColumnIndex(nextIndex, current.Index);
-                    map.SetSeaConnected(
-                        nextIndex,
-                        map.IsSeaConnected(current.Index));
                     queue.Enqueue(nextIndex, filledHeight);
                 }
             }
@@ -131,7 +128,6 @@ namespace MiniCivilization.World.Generation
                         seaLevelUnits)
                     : map.GetTerrainHeightUnits(index);
                 map.SetFilledHeightUnits(index, height);
-                map.SetSeaConnected(index, seaMask[index]);
                 queue.Enqueue(index, height);
             }
         }
@@ -242,7 +238,6 @@ namespace MiniCivilization.World.Generation
                 var outletHeight = int.MaxValue;
                 var minimumSeaDistance = int.MaxValue;
                 var maximumDepth = 0;
-                var accumulation = 1;
                 for (var columnIndex = 0;
                      columnIndex < columns.Count;
                      columnIndex++)
@@ -255,9 +250,6 @@ namespace MiniCivilization.World.Generation
                         maximumDepth,
                         map.GetFilledHeightUnits(index)
                         - map.GetTerrainHeightUnits(index));
-                    accumulation = Math.Max(
-                        accumulation,
-                        map.GetFlowAccumulation(index));
                     var receiver = map.GetReceiverColumnIndex(index);
                     if (receiver < 0
                         || basinMarkers[receiver] == basinId)
@@ -276,24 +268,13 @@ namespace MiniCivilization.World.Generation
                     }
                 }
 
-                for (var columnIndex = 0;
-                     columnIndex < columns.Count;
-                     columnIndex++)
-                {
-                    map.SetBasin(
-                        columns[columnIndex],
-                        basinId,
-                        spillHeight);
-                }
-
                 map.AddBasin(new HydrologyBasin(
                     basinId,
                     columns,
                     spillHeight,
                     outletIndex,
                     minimumSeaDistance,
-                    maximumDepth,
-                    accumulation));
+                    maximumDepth));
                 basinId++;
             }
         }

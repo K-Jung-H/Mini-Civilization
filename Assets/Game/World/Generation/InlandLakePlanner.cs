@@ -10,7 +10,8 @@ namespace MiniCivilization.World.Generation
             WorldData validationWorld,
             WorldGenerationSettings settings,
             HydrologyMap hydrology,
-            int worldSeed)
+            int worldSeed,
+            WaterPlanValidationContext validationContext)
         {
             if (validationWorld == null)
             {
@@ -68,10 +69,25 @@ namespace MiniCivilization.World.Generation
                  index++)
             {
                 var plan = candidates[index].Plan;
-                if (WaterPlanValidator.Validate(validationWorld, plan).IsValid)
+                var candidatePlans = new List<BasinPlan>(accepted)
                 {
-                    accepted.Add(plan);
+                    plan
+                };
+                if (!HydrologyFeaturePlan.TryCreate(
+                        validationWorld.Size,
+                        validationWorld.Height,
+                        candidatePlans,
+                        Array.Empty<ChannelPlan>(),
+                        out var candidateFeaturePlan)
+                    || !WaterPlanValidator.Validate(
+                        validationWorld,
+                        candidateFeaturePlan,
+                        validationContext).IsValid)
+                {
+                    continue;
                 }
+
+                accepted.Add(plan);
             }
 
             return accepted;
@@ -173,10 +189,8 @@ namespace MiniCivilization.World.Generation
                 world.Size,
                 world.Height,
                 basin.Id,
-                basin.SpillHeightUnits,
                 waterSurface,
-                basin.OutletColumnIndex,
-                WaterPlanRepairPolicy.Default);
+                basin.OutletColumnIndex);
             for (var index = 0; index < wetColumns.Count; index++)
             {
                 var columnIndex = wetColumns[index];

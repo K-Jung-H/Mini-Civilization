@@ -14,7 +14,6 @@ namespace MiniCivilization.World.Generation
         public int OutletColumnIndex { get; }
         public int MinimumSeaDistance { get; }
         public int MaximumDepthUnits { get; }
-        public int FlowAccumulation { get; }
 
         public HydrologyBasin(
             int id,
@@ -22,8 +21,7 @@ namespace MiniCivilization.World.Generation
             int spillHeightUnits,
             int outletColumnIndex,
             int minimumSeaDistance,
-            int maximumDepthUnits,
-            int flowAccumulation)
+            int maximumDepthUnits)
         {
             if (columns == null || columns.Count == 0)
             {
@@ -44,7 +42,6 @@ namespace MiniCivilization.World.Generation
             OutletColumnIndex = outletColumnIndex;
             MinimumSeaDistance = Math.Max(0, minimumSeaDistance);
             MaximumDepthUnits = Math.Max(0, maximumDepthUnits);
-            FlowAccumulation = Math.Max(1, flowAccumulation);
         }
     }
 
@@ -56,12 +53,9 @@ namespace MiniCivilization.World.Generation
     {
         private readonly int[] terrainHeightUnits;
         private readonly int[] filledHeightUnits;
-        private readonly int[] basinIds;
-        private readonly int[] spillHeightUnits;
         private readonly int[] receiverColumnIndices;
         private readonly int[] flowAccumulation;
         private readonly int[] seaDistances;
-        private readonly bool[] seaConnected;
         private readonly List<HydrologyBasin> basins = new();
 
         public int Size { get; }
@@ -86,13 +80,9 @@ namespace MiniCivilization.World.Generation
             Size = size;
             terrainHeightUnits = new int[terrainHeights.Count];
             filledHeightUnits = new int[terrainHeights.Count];
-            basinIds = new int[terrainHeights.Count];
-            spillHeightUnits = new int[terrainHeights.Count];
             receiverColumnIndices = new int[terrainHeights.Count];
             flowAccumulation = new int[terrainHeights.Count];
             seaDistances = new int[terrainHeights.Count];
-            seaConnected = new bool[terrainHeights.Count];
-            Array.Fill(basinIds, -1);
             Array.Fill(receiverColumnIndices, -1);
             Array.Fill(seaDistances, int.MaxValue);
 
@@ -101,7 +91,6 @@ namespace MiniCivilization.World.Generation
                 var height = Math.Max(0, terrainHeights[index]);
                 terrainHeightUnits[index] = height;
                 filledHeightUnits[index] = height;
-                spillHeightUnits[index] = height;
                 flowAccumulation[index] = 1;
             }
         }
@@ -124,26 +113,15 @@ namespace MiniCivilization.World.Generation
             terrainHeightUnits[ValidateIndex(index)];
         public int GetFilledHeightUnits(int index) =>
             filledHeightUnits[ValidateIndex(index)];
-        public int GetBasinId(int index) => basinIds[ValidateIndex(index)];
-        public int GetSpillHeightUnits(int index) =>
-            spillHeightUnits[ValidateIndex(index)];
         public int GetReceiverColumnIndex(int index) =>
             receiverColumnIndices[ValidateIndex(index)];
         public int GetFlowAccumulation(int index) =>
             flowAccumulation[ValidateIndex(index)];
         public int GetSeaDistance(int index) =>
             seaDistances[ValidateIndex(index)];
-        public bool IsSeaConnected(int index) =>
-            seaConnected[ValidateIndex(index)];
 
         internal void SetFilledHeightUnits(int index, int value) =>
             filledHeightUnits[ValidateIndex(index)] = Math.Max(0, value);
-        internal void SetBasin(int index, int basinId, int spillHeight) 
-        {
-            index = ValidateIndex(index);
-            basinIds[index] = basinId;
-            spillHeightUnits[index] = Math.Max(0, spillHeight);
-        }
 
         internal void SetReceiverColumnIndex(int index, int receiverIndex)
         {
@@ -160,8 +138,6 @@ namespace MiniCivilization.World.Generation
             flowAccumulation[ValidateIndex(index)] = Math.Max(1, value);
         internal void SetSeaDistance(int index, int value) =>
             seaDistances[ValidateIndex(index)] = Math.Max(0, value);
-        internal void SetSeaConnected(int index, bool value) =>
-            seaConnected[ValidateIndex(index)] = value;
         internal void AddBasin(HydrologyBasin basin)
         {
             if (basin == null)
@@ -187,32 +163,16 @@ namespace MiniCivilization.World.Generation
     {
         public readonly int X;
         public readonly int Z;
-        public readonly int OriginalHeightUnits;
         public readonly int TargetHeightUnits;
-        public readonly int MaximumCutUnits;
-        public readonly int MaximumRaiseUnits;
-
-        public int CutUnits => Math.Max(
-            0,
-            OriginalHeightUnits - TargetHeightUnits);
-        public int RaiseUnits => Math.Max(
-            0,
-            TargetHeightUnits - OriginalHeightUnits);
 
         public PlannedTerrainColumn(
             int x,
             int z,
-            int originalHeightUnits,
-            int targetHeightUnits,
-            int maximumCutUnits,
-            int maximumRaiseUnits)
+            int targetHeightUnits)
         {
             X = x;
             Z = z;
-            OriginalHeightUnits = Math.Max(0, originalHeightUnits);
             TargetHeightUnits = Math.Max(0, targetHeightUnits);
-            MaximumCutUnits = Math.Max(0, maximumCutUnits);
-            MaximumRaiseUnits = Math.Max(0, maximumRaiseUnits);
         }
     }
 
@@ -235,51 +195,6 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal enum WaterPlanRepairAction : byte
-    {
-        None = 0,
-        LowerSurface = 1,
-        DeepenBed = 2,
-        ExpandAllowedArea = 3,
-        RaiseBankWithinLimit = 4,
-        Reroute = 5,
-        Reject = 6
-    }
-
-    internal readonly struct WaterPlanRepairPolicy
-    {
-        public readonly int MaximumAttempts;
-
-        public static WaterPlanRepairPolicy Default => new(5);
-
-        public WaterPlanRepairPolicy(int maximumAttempts)
-        {
-            MaximumAttempts = Math.Max(0, maximumAttempts);
-        }
-
-        public WaterPlanRepairAction GetAction(int attempt)
-        {
-            if (attempt < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(attempt));
-            }
-
-            if (attempt >= MaximumAttempts)
-            {
-                return WaterPlanRepairAction.Reject;
-            }
-
-            return attempt switch
-            {
-                0 => WaterPlanRepairAction.LowerSurface,
-                1 => WaterPlanRepairAction.DeepenBed,
-                2 => WaterPlanRepairAction.ExpandAllowedArea,
-                3 => WaterPlanRepairAction.RaiseBankWithinLimit,
-                _ => WaterPlanRepairAction.Reroute
-            };
-        }
-    }
-
     internal class WaterFeaturePlan
     {
         private readonly Dictionary<int, PlannedTerrainColumn>
@@ -287,7 +202,6 @@ namespace MiniCivilization.World.Generation
         private readonly Dictionary<int, PlannedWaterCell> sourceCells = new();
         private readonly HashSet<int> allowedWetCellIndices = new();
         private readonly HashSet<int> requiredWetCellIndices = new();
-        private int repairAttempt;
 
         public int WorldSize { get; }
         public int WorldHeight { get; }
@@ -299,13 +213,10 @@ namespace MiniCivilization.World.Generation
             allowedWetCellIndices;
         public IReadOnlyCollection<int> RequiredWetCellIndices =>
             requiredWetCellIndices;
-        public WaterPlanRepairPolicy RepairPolicy { get; }
-        public int RepairAttempt => repairAttempt;
 
         protected WaterFeaturePlan(
             int worldSize,
-            int worldHeight,
-            WaterPlanRepairPolicy repairPolicy)
+            int worldHeight)
         {
             if (worldSize <= 0 || worldHeight <= 0)
             {
@@ -314,7 +225,6 @@ namespace MiniCivilization.World.Generation
 
             WorldSize = worldSize;
             WorldHeight = worldHeight;
-            RepairPolicy = repairPolicy;
         }
 
         public int EncodeColumn(int x, int z)
@@ -354,17 +264,6 @@ namespace MiniCivilization.World.Generation
             allowedWetCellIndices.Add(index);
         }
 
-        public WaterPlanRepairAction GetNextRepairAction()
-        {
-            var action = RepairPolicy.GetAction(repairAttempt);
-            if (action != WaterPlanRepairAction.Reject)
-            {
-                repairAttempt++;
-            }
-
-            return action;
-        }
-
         private void ValidateColumn(int x, int z)
         {
             if ((uint)x >= WorldSize || (uint)z >= WorldSize)
@@ -385,63 +284,22 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal readonly struct ChannelSectionPlan
-    {
-        public readonly int ColumnIndex;
-        public readonly int WidthCells;
-        public readonly int CenterDepthUnits;
-        public readonly int SurfaceHeightUnits;
-        public readonly int FlowAccumulation;
-
-        public ChannelSectionPlan(
-            int columnIndex,
-            int widthCells,
-            int centerDepthUnits,
-            int surfaceHeightUnits,
-            int flowAccumulation)
-        {
-            ColumnIndex = columnIndex;
-            WidthCells = Math.Max(1, widthCells);
-            CenterDepthUnits = Math.Max(1, centerDepthUnits);
-            SurfaceHeightUnits = Math.Max(1, surfaceHeightUnits);
-            FlowAccumulation = Math.Max(1, flowAccumulation);
-        }
-    }
-
-    internal enum BasinConnectionType : byte
-    {
-        Inlet = 0,
-        Outlet = 1
-    }
-
     internal readonly struct BasinConnectionPort
     {
-        public readonly int BasinId;
-        public readonly BasinConnectionType Type;
         public readonly int BasinWetColumnIndex;
         public readonly int ShoreColumnIndex;
-        public readonly int ExternalColumnIndex;
         public readonly int InterfaceSurfaceHeightUnits;
-        public readonly WaterFlowDirectionMask Direction;
 
         public BasinConnectionPort(
-            int basinId,
-            BasinConnectionType type,
             int basinWetColumnIndex,
             int shoreColumnIndex,
-            int externalColumnIndex,
-            int interfaceSurfaceHeightUnits,
-            WaterFlowDirectionMask direction)
+            int interfaceSurfaceHeightUnits)
         {
-            BasinId = basinId;
-            Type = type;
             BasinWetColumnIndex = basinWetColumnIndex;
             ShoreColumnIndex = shoreColumnIndex;
-            ExternalColumnIndex = externalColumnIndex;
             InterfaceSurfaceHeightUnits = Math.Max(
                 1,
                 interfaceSurfaceHeightUnits);
-            Direction = direction;
         }
     }
 
@@ -454,57 +312,34 @@ namespace MiniCivilization.World.Generation
         ConnectionPort = 4
     }
 
-    internal enum RiverChannelArchetype : byte
+    internal enum RiverWaterMode : byte
     {
-        MountainDynamic = 0,
-        LowlandDynamic = 1,
-        SteppedDynamic = 2,
-        SourceChannel = 3
+        Dynamic = 0,
+        Source = 1
+    }
+
+    internal enum RiverTerrainStyle : byte
+    {
+        Mountain = 0,
+        Lowland = 1,
+        Stepped = 2
     }
 
     internal sealed class ChannelPlan : WaterFeaturePlan
     {
-        private readonly List<int> centerlineColumnIndices = new();
-        private readonly Dictionary<int, ChannelSectionPlan> sections = new();
         private readonly HashSet<int> channelColumnIndices = new();
         private readonly List<BasinConnectionPort> connections = new();
 
-        public IReadOnlyList<int> CenterlineColumnIndices =>
-            centerlineColumnIndices;
-        public IReadOnlyDictionary<int, ChannelSectionPlan> Sections =>
-            sections;
         public IReadOnlyCollection<int> ChannelColumnIndices =>
             channelColumnIndices;
         public IReadOnlyList<BasinConnectionPort> Connections => connections;
-        public RiverChannelArchetype Archetype { get; }
 
         public ChannelPlan(
             int worldSize,
-            int worldHeight,
-            RiverChannelArchetype archetype,
-            WaterPlanRepairPolicy repairPolicy) : base(
+            int worldHeight) : base(
                 worldSize,
-                worldHeight,
-                repairPolicy)
+                worldHeight)
         {
-            Archetype = archetype;
-        }
-
-        public void AddSection(in ChannelSectionPlan section)
-        {
-            if ((uint)section.ColumnIndex
-                >= (uint)(WorldSize * WorldSize))
-            {
-                throw new ArgumentOutOfRangeException(nameof(section));
-            }
-
-            if (!sections.ContainsKey(section.ColumnIndex))
-            {
-                centerlineColumnIndices.Add(section.ColumnIndex);
-            }
-
-            sections[section.ColumnIndex] = section;
-            channelColumnIndices.Add(section.ColumnIndex);
         }
 
         public void AddChannelColumn(int columnIndex)
@@ -526,7 +361,6 @@ namespace MiniCivilization.World.Generation
         private readonly List<int> wetColumnIndices = new();
 
         public int BasinId { get; }
-        public int SpillHeightUnits { get; }
         public int WaterSurfaceHeightUnits { get; }
         public int OutletColumnIndex { get; }
         public IReadOnlyList<int> WetColumnIndices => wetColumnIndices;
@@ -535,16 +369,12 @@ namespace MiniCivilization.World.Generation
             int worldSize,
             int worldHeight,
             int basinId,
-            int spillHeightUnits,
             int waterSurfaceHeightUnits,
-            int outletColumnIndex,
-            WaterPlanRepairPolicy repairPolicy) : base(
+            int outletColumnIndex) : base(
                 worldSize,
-                worldHeight,
-                repairPolicy)
+                worldHeight)
         {
             BasinId = basinId;
-            SpillHeightUnits = Math.Max(0, spillHeightUnits);
             WaterSurfaceHeightUnits = Math.Max(
                 0,
                 waterSurfaceHeightUnits);
@@ -573,18 +403,14 @@ namespace MiniCivilization.World.Generation
     {
         private readonly List<BasinPlan> basins = new();
         private readonly List<ChannelPlan> channels = new();
-        private readonly List<BasinConnectionPort> connections = new();
         private readonly HydrologyColumnOwnership[] ownership;
 
         public IReadOnlyList<BasinPlan> Basins => basins;
         public IReadOnlyList<ChannelPlan> Channels => channels;
-        public IReadOnlyList<BasinConnectionPort> Connections => connections;
-        public IReadOnlyList<HydrologyColumnOwnership> Ownership => ownership;
 
         private HydrologyFeaturePlan(int worldSize, int worldHeight) : base(
             worldSize,
-            worldHeight,
-            WaterPlanRepairPolicy.Default)
+            worldHeight)
         {
             ownership = new HydrologyColumnOwnership[
                 checked(worldSize * worldSize)];
@@ -729,7 +555,6 @@ namespace MiniCivilization.World.Generation
                     return false;
                 }
 
-                connections.Add(connection);
             }
 
             channels.Add(channel);

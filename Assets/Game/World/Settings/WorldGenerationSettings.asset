@@ -15,31 +15,31 @@ MonoBehaviour:
   worldSize: 256
   worldHeight: 32
   chunkSizeXZ: 8
-  chunkHeight: 4
+  chunkHeight: 8
   renderPatchSizeXZ: 8
-  terrainNoiseScale: 0.035
-  terrainOctaves: 4
-  terrainLacunarity: 2
-  terrainPersistence: 0.5
-  baseTerrainHeightCells: 3
-  terrainAmplitudeCells: 3
-  islandFalloff: 0.034
-  mountainNoiseScale: 0.025
-  mountainStrengthCells: 31
-  mountainThreshold: 0.42
-  mountainSharpness: 2.2
+  terrainScale: 0.09
+  terrainLayers: 3
+  terrainSpacing: 2
+  terrainDetail: 0.4
+  baseHeightCells: 10
+  heightVariationCells: 6
+  edgeLowering: 0.25
+  mountainScale: 0.018
+  mountainHeightCells: 8
+  mountainCoverage: 0.58
+  mountainSteepness: 1.8
   seaLevelCell: 3
   seaLevelStep: 0
-  riverCount: 7
-  riverDepthSteps: 2
-  maximumRiverWidthCells: 3
-  maximumRiverDepthSteps: 4
+  riverCount: 3
+  riverDepthCells: 2
+  maximumRiverWidthCells: 5
+  maximumRiverDepthCells: 4
   lakeCount: 2
   minimumInlandLakeDistance: 6
   minimumInlandLakeArea: 3
   minimumInlandLakeDepthSteps: 1
   spreadAmountLoss: 0.01
-  minimumSpreadAmount: 0.1
+  minimumSpreadAmount: 0.05
   dissipationAmountLoss: 0.05
   desertMoistureThreshold: 0.28
   wetlandMoistureThreshold: 0.72

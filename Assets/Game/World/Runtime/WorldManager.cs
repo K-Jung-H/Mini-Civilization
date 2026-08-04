@@ -6,7 +6,6 @@ using MiniCivilization.World.WaterFlow;
 using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Runtime
 {
@@ -21,7 +20,6 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldEditController editController;
         [SerializeField] private WorldWaterFlowController waterFlowController;
         [SerializeField] private WorldRenderer worldRenderer;
-        [FormerlySerializedAs("persistence")]
         [SerializeField] private WorldSaveController saveController;
 
         private WorldEditController subscribedEditController;

@@ -5,68 +5,37 @@ using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Generation
 {
-    internal enum WaterPlanTerrainViolationType : byte
-    {
-        None = 0,
-        StaleOriginalHeight = 1,
-        CutLimitExceeded = 2,
-        RaiseLimitExceeded = 3,
-        HeightOutsideWorld = 4,
-        SourceBlockedBySolid = 5
-    }
-
-    internal readonly struct WaterPlanTerrainViolation
-    {
-        public readonly int ColumnIndex;
-        public readonly WaterPlanTerrainViolationType Type;
-        public readonly int ActualHeightUnits;
-        public readonly int PlannedHeightUnits;
-
-        public WaterPlanTerrainViolation(
-            int columnIndex,
-            WaterPlanTerrainViolationType type,
-            int actualHeightUnits,
-            int plannedHeightUnits)
-        {
-            ColumnIndex = columnIndex;
-            Type = type;
-            ActualHeightUnits = actualHeightUnits;
-            PlannedHeightUnits = plannedHeightUnits;
-        }
-    }
-
     internal sealed class WaterPlanValidationResult
     {
-        public bool Stabilized { get; }
-        public int CompletedWaveCount { get; }
         public IReadOnlyList<int> LeakedCellIndices { get; }
-        public IReadOnlyList<int> MissingRequiredCellIndices { get; }
-        public IReadOnlyList<WaterPlanTerrainViolation>
-            TerrainViolations { get; }
-        public WaterPlanRepairAction RecommendedRepairAction { get; }
-        public bool IsValid =>
-            Stabilized
-            && LeakedCellIndices.Count == 0
-            && MissingRequiredCellIndices.Count == 0
-            && TerrainViolations.Count == 0;
+        public bool IsValid { get; }
 
         public WaterPlanValidationResult(
             bool stabilized,
-            int completedWaveCount,
             IReadOnlyList<int> leakedCellIndices,
-            IReadOnlyList<int> missingRequiredCellIndices,
-            IReadOnlyList<WaterPlanTerrainViolation> terrainViolations,
-            WaterPlanRepairAction recommendedRepairAction)
+            IReadOnlyList<int> missingRequiredCellIndices)
         {
-            Stabilized = stabilized;
-            CompletedWaveCount = completedWaveCount;
             LeakedCellIndices = leakedCellIndices ?? Array.Empty<int>();
-            MissingRequiredCellIndices =
-                missingRequiredCellIndices ?? Array.Empty<int>();
-            TerrainViolations =
-                terrainViolations
-                ?? Array.Empty<WaterPlanTerrainViolation>();
-            RecommendedRepairAction = recommendedRepairAction;
+            IsValid = stabilized
+                && LeakedCellIndices.Count == 0
+                && (missingRequiredCellIndices?.Count ?? 0) == 0;
+        }
+    }
+
+    internal sealed class WaterPlanValidationContext
+    {
+        internal WorldData SourceWorld { get; }
+        internal int MaximumWaves { get; }
+        internal HashSet<int> BaselineWetCells { get; }
+
+        internal WaterPlanValidationContext(
+            WorldData sourceWorld,
+            int maximumWaves,
+            HashSet<int> baselineWetCells)
+        {
+            SourceWorld = sourceWorld;
+            MaximumWaves = maximumWaves;
+            BaselineWetCells = baselineWetCells;
         }
     }
 
@@ -77,10 +46,34 @@ namespace MiniCivilization.World.Generation
     /// </summary>
     internal static class WaterPlanValidator
     {
+        public static WaterPlanValidationContext CreateContext(
+            WorldData sourceWorld)
+        {
+            if (sourceWorld == null)
+            {
+                throw new ArgumentNullException(nameof(sourceWorld));
+            }
+
+            var maximumWaves = Math.Max(
+                32,
+                checked((sourceWorld.Size + sourceWorld.Height) * 4));
+            var baselinePreview = CloneWorld(sourceWorld);
+            if (!RunToStability(baselinePreview, maximumWaves))
+            {
+                throw new InvalidOperationException(
+                    "Base water state did not stabilize during global validation.");
+            }
+
+            return new WaterPlanValidationContext(
+                sourceWorld,
+                maximumWaves,
+                CaptureWetCells(baselinePreview));
+        }
+
         public static WaterPlanValidationResult Validate(
             WorldData sourceWorld,
             WaterFeaturePlan plan,
-            int maximumWaves = 0)
+            WaterPlanValidationContext context)
         {
             if (sourceWorld == null)
             {
@@ -92,6 +85,14 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(plan));
             }
 
+            if (context == null
+                || !ReferenceEquals(context.SourceWorld, sourceWorld))
+            {
+                throw new ArgumentException(
+                    "The validation context belongs to another world.",
+                    nameof(context));
+            }
+
             if (plan.WorldSize != sourceWorld.Size
                 || plan.WorldHeight != sourceWorld.Height)
             {
@@ -100,52 +101,28 @@ namespace MiniCivilization.World.Generation
                     nameof(plan));
             }
 
-            maximumWaves = maximumWaves > 0
-                ? maximumWaves
-                : Math.Max(
-                    32,
-                    checked((sourceWorld.Size + sourceWorld.Height) * 4));
-
-            var baselinePreview = CloneWorld(sourceWorld);
-            var baselineStabilized = RunToStability(
-                baselinePreview,
-                maximumWaves,
-                out _);
-            var baselineWetCells = CaptureWetCells(baselinePreview);
             var preview = CloneWorld(sourceWorld);
-            var terrainViolations = new List<WaterPlanTerrainViolation>();
-            ApplyTerrainPlan(
-                sourceWorld,
+            ApplyTerrainPlan(preview, plan);
+            ApplySources(preview, plan);
+            var planMaximumWaves = Math.Max(
+                context.MaximumWaves,
+                checked(
+                    plan.AllowedWetCellIndices.Count
+                    + sourceWorld.Height * 2));
+            var stabilized = RunToStability(
                 preview,
-                plan,
-                terrainViolations);
-            ApplySources(preview, plan, terrainViolations);
-            var planStabilized = RunToStability(
-                preview,
-                maximumWaves,
-                out var completedWaveCount);
-            var stabilized = baselineStabilized && planStabilized;
+                planMaximumWaves);
             var leaked = FindLeakedCells(
                 preview,
                 plan.AllowedWetCellIndices,
-                baselineWetCells);
+                context.BaselineWetCells);
             var missing = FindMissingRequiredCells(
                 preview,
                 plan.RequiredWetCellIndices);
-            terrainViolations.Sort(CompareTerrainViolations);
-            var recommendedAction = stabilized
-                && leaked.Count == 0
-                && missing.Count == 0
-                && terrainViolations.Count == 0
-                    ? WaterPlanRepairAction.None
-                    : plan.RepairPolicy.GetAction(plan.RepairAttempt);
             return new WaterPlanValidationResult(
                 stabilized,
-                completedWaveCount,
                 leaked,
-                missing,
-                terrainViolations,
-                recommendedAction);
+                missing);
         }
 
         private static WorldData CloneWorld(WorldData source)
@@ -171,8 +148,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool RunToStability(
             WorldData preview,
-            int maximumWaves,
-            out int completedWaveCount)
+            int maximumWaves)
         {
             preview.RebuildAllSurfaceColumns();
             preview.WaterSources.InitializeFromGeneratedWorld(preview);
@@ -186,7 +162,7 @@ namespace MiniCivilization.World.Generation
                 flowState,
                 preview.WaterFlowSchedule.FrontierCellIndices);
             var parameters = new WaterFlowParameters(preview.WaterFlowRules);
-            completedWaveCount = 0;
+            var completedWaveCount = 0;
             while (resolver.HasWork && completedWaveCount < maximumWaves)
             {
                 resolver.Step(
@@ -218,56 +194,14 @@ namespace MiniCivilization.World.Generation
         }
 
         private static void ApplyTerrainPlan(
-            WorldData source,
             WorldData preview,
-            WaterFeaturePlan plan,
-            List<WaterPlanTerrainViolation> violations)
+            WaterFeaturePlan plan)
         {
             var maximumWorldHeight =
-                source.Height * WorldGrid.HeightStepsPerCell;
+                preview.Height * WorldGrid.HeightStepsPerCell;
             foreach (var pair in plan.TerrainColumns)
             {
                 var column = pair.Value;
-                var actualHeight = ResolveSolidHeight(
-                    source,
-                    column.X,
-                    column.Z);
-                if (actualHeight != column.OriginalHeightUnits)
-                {
-                    violations.Add(new WaterPlanTerrainViolation(
-                        pair.Key,
-                        WaterPlanTerrainViolationType.StaleOriginalHeight,
-                        actualHeight,
-                        column.OriginalHeightUnits));
-                }
-
-                if (column.CutUnits > column.MaximumCutUnits)
-                {
-                    violations.Add(new WaterPlanTerrainViolation(
-                        pair.Key,
-                        WaterPlanTerrainViolationType.CutLimitExceeded,
-                        actualHeight,
-                        column.TargetHeightUnits));
-                }
-
-                if (column.RaiseUnits > column.MaximumRaiseUnits)
-                {
-                    violations.Add(new WaterPlanTerrainViolation(
-                        pair.Key,
-                        WaterPlanTerrainViolationType.RaiseLimitExceeded,
-                        actualHeight,
-                        column.TargetHeightUnits));
-                }
-
-                if (column.TargetHeightUnits > maximumWorldHeight)
-                {
-                    violations.Add(new WaterPlanTerrainViolation(
-                        pair.Key,
-                        WaterPlanTerrainViolationType.HeightOutsideWorld,
-                        actualHeight,
-                        column.TargetHeightUnits));
-                }
-
                 ApplyColumnHeight(
                     preview,
                     column.X,
@@ -281,8 +215,7 @@ namespace MiniCivilization.World.Generation
 
         private static void ApplySources(
             WorldData preview,
-            WaterFeaturePlan plan,
-            List<WaterPlanTerrainViolation> violations)
+            WaterFeaturePlan plan)
         {
             foreach (var pair in plan.SourceCells)
             {
@@ -294,15 +227,6 @@ namespace MiniCivilization.World.Generation
                     coordinate.Z);
                 if (cell.SolidFill >= WorldGrid.HeightStepsPerCell)
                 {
-                    violations.Add(new WaterPlanTerrainViolation(
-                        coordinate.X + preview.Size * coordinate.Z,
-                        WaterPlanTerrainViolationType.SourceBlockedBySolid,
-                        ResolveSolidHeight(
-                            preview,
-                            coordinate.X,
-                            coordinate.Z),
-                        (coordinate.Y + 1)
-                        * WorldGrid.HeightStepsPerCell));
                     continue;
                 }
 
@@ -332,23 +256,6 @@ namespace MiniCivilization.World.Generation
                 cell.Normalize();
                 world.SetCellBulk(x, y, z, cell);
             }
-        }
-
-        private static int ResolveSolidHeight(
-            WorldData world,
-            int x,
-            int z)
-        {
-            for (var y = world.Height - 1; y >= 0; y--)
-            {
-                var fill = world.GetCell(x, y, z).SolidFill;
-                if (fill > 0)
-                {
-                    return y * WorldGrid.HeightStepsPerCell + fill;
-                }
-            }
-
-            return 0;
         }
 
         private static List<int> FindLeakedCells(
@@ -402,14 +309,5 @@ namespace MiniCivilization.World.Generation
             return result;
         }
 
-        private static int CompareTerrainViolations(
-            WaterPlanTerrainViolation left,
-            WaterPlanTerrainViolation right)
-        {
-            var columnComparison = left.ColumnIndex.CompareTo(right.ColumnIndex);
-            return columnComparison != 0
-                ? columnComparison
-                : left.Type.CompareTo(right.Type);
-        }
     }
 }

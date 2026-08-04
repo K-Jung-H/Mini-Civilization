@@ -7,9 +7,7 @@ namespace MiniCivilization.World.Generation
 {
     internal static class DynamicRiverPlanner
     {
-        private const int MaximumChannelCutUnits =
-            WorldGrid.HeightStepsPerCell;
-        private const int MaximumBankRaiseUnits = 2;
+        private const int MaximumBankRepairPasses = 4;
 
         private static readonly (int x, int z)[] Directions =
         {
@@ -23,7 +21,8 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<BasinPlan> basinPlans,
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
-            int worldSeed)
+            int worldSeed,
+            WaterPlanValidationContext validationContext)
         {
             ValidateArguments(
                 validationWorld,
@@ -33,28 +32,14 @@ namespace MiniCivilization.World.Generation
                 solidHeights,
                 seaWaterSurfaces);
 
-            var acceptedBasins = BuildCompatibleBasins(
-                validationWorld,
-                basinPlans);
+            var acceptedBasins = basinPlans;
             var acceptedChannels = new List<ChannelPlan>();
             var usedChannelColumns = new HashSet<int>();
             var basinByWetColumn = BuildBasinLookup(
                 hydrology.ColumnCount,
                 acceptedBasins);
-            var maximumTraceLength = Math.Max(2, validationWorld.Size);
             if (settings.RiverCount > 0)
             {
-                AddLakeOutlets(
-                    validationWorld,
-                    settings,
-                    hydrology,
-                    acceptedBasins,
-                    solidHeights,
-                    seaWaterSurfaces,
-                    basinByWetColumn,
-                    maximumTraceLength,
-                    acceptedChannels,
-                    usedChannelColumns);
                 AddHeadwaterChannels(
                     validationWorld,
                     settings,
@@ -63,10 +48,21 @@ namespace MiniCivilization.World.Generation
                     solidHeights,
                     seaWaterSurfaces,
                     basinByWetColumn,
-                    maximumTraceLength,
                     worldSeed,
                     acceptedChannels,
-                    usedChannelColumns);
+                    usedChannelColumns,
+                    validationContext);
+                AddLakeOutlets(
+                    validationWorld,
+                    settings,
+                    hydrology,
+                    acceptedBasins,
+                    solidHeights,
+                    seaWaterSurfaces,
+                    basinByWetColumn,
+                    acceptedChannels,
+                    usedChannelColumns,
+                    validationContext);
             }
 
             if (!HydrologyFeaturePlan.TryCreate(
@@ -77,7 +73,16 @@ namespace MiniCivilization.World.Generation
                     out var result))
             {
                 throw new InvalidOperationException(
-                    "Accepted hydrology plans could not be merged.");
+                    "Accepted water feature plans could not be merged.");
+            }
+
+            if (!WaterPlanValidator.Validate(
+                    validationWorld,
+                    result,
+                    validationContext).IsValid)
+            {
+                throw new InvalidOperationException(
+                    "Accepted water feature plans failed final validation.");
             }
 
             return result;
@@ -132,36 +137,6 @@ namespace MiniCivilization.World.Generation
             }
         }
 
-        private static List<BasinPlan> BuildCompatibleBasins(
-            WorldData world,
-            IReadOnlyList<BasinPlan> basinPlans)
-        {
-            var accepted = new List<BasinPlan>(basinPlans.Count);
-            for (var index = 0; index < basinPlans.Count; index++)
-            {
-                var candidate = new List<BasinPlan>(accepted)
-                {
-                    basinPlans[index]
-                };
-                if (!HydrologyFeaturePlan.TryCreate(
-                        world.Size,
-                        world.Height,
-                        candidate,
-                        Array.Empty<ChannelPlan>(),
-                        out var merged))
-                {
-                    continue;
-                }
-
-                if (WaterPlanValidator.Validate(world, merged).IsValid)
-                {
-                    accepted.Add(basinPlans[index]);
-                }
-            }
-
-            return accepted;
-        }
-
         private static void AddLakeOutlets(
             WorldData world,
             WorldGenerationSettings settings,
@@ -170,9 +145,9 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
             int[] basinByWetColumn,
-            int maximumLength,
             List<ChannelPlan> acceptedChannels,
-            HashSet<int> usedColumns)
+            HashSet<int> usedColumns,
+            WaterPlanValidationContext validationContext)
         {
             for (var basinIndex = 0;
                  basinIndex < basins.Count
@@ -189,7 +164,6 @@ namespace MiniCivilization.World.Generation
                         solidHeights,
                         seaWaterSurfaces,
                         basinByWetColumn,
-                        maximumLength,
                         acceptedChannels.Count,
                         usedColumns,
                         out var channel))
@@ -200,9 +174,11 @@ namespace MiniCivilization.World.Generation
                 TryAcceptChannel(
                     world,
                     basins,
+                    solidHeights,
                     channel,
                     acceptedChannels,
-                    usedColumns);
+                    usedColumns,
+                    validationContext);
             }
         }
 
@@ -214,15 +190,28 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
             int[] basinByWetColumn,
-            int maximumLength,
             int worldSeed,
             List<ChannelPlan> acceptedChannels,
-            HashSet<int> usedColumns)
+            HashSet<int> usedColumns,
+            WaterPlanValidationContext validationContext)
         {
-            var seed = DeterministicNoise.DeriveSeed(
+            var candidateSeed = DeterministicNoise.DeriveSeed(
                 worldSeed,
-                "dynamic-river-headwaters");
-            var candidates = new List<HeadwaterCandidate>();
+                "river-spatial-candidates");
+            var orderSeed = DeterministicNoise.DeriveSeed(
+                worldSeed,
+                "river-candidate-order");
+            var targetSectorCount = Math.Max(
+                4,
+                (int)Math.Ceiling(Math.Sqrt(
+                    Math.Max(16, settings.RiverCount * 6))));
+            var sectorSize = Math.Max(
+                4,
+                (world.Size + targetSectorCount - 1)
+                / targetSectorCount);
+            var candidatesBySector = new Dictionary<
+                int,
+                HeadwaterCandidate>();
             for (var index = 0; index < hydrology.ColumnCount; index++)
             {
                 if (basinByWetColumn[index] >= 0
@@ -250,44 +239,84 @@ namespace MiniCivilization.World.Generation
                     continue;
                 }
 
-                var hasFeasibleBanks = HasFeasibleHeadwaterBanks(
-                    world.Size,
-                    hydrology,
-                    index,
-                    solidHeights,
-                    seaWaterSurfaces,
-                    basinByWetColumn);
-
-                var score = (float)Math.Log(
+                var localFitness = (float)Math.Log(
                         hydrology.GetFlowAccumulation(index) + 1d,
-                        2d) * 20f
-                    + solidHeights[index] * 0.1f
-                    + (hasFeasibleBanks ? 100f : 0f)
-                    + DeterministicNoise.Value01(x, z, seed);
-                candidates.Add(new HeadwaterCandidate(index, score));
+                        2d) * 2f
+                    + Math.Min(
+                        hydrology.GetSeaDistance(index),
+                        world.Size / 3) * 0.1f
+                    + DeterministicNoise.Value01(
+                        x,
+                        z,
+                        candidateSeed) * 5f;
+                var sectorX = x / sectorSize;
+                var sectorZ = z / sectorSize;
+                var sectorIndex = sectorX
+                    + targetSectorCount * sectorZ;
+                if (!candidatesBySector.TryGetValue(
+                        sectorIndex,
+                        out var existing)
+                    || localFitness > existing.Fitness)
+                {
+                    var order = DeterministicNoise.Value01(
+                        sectorX,
+                        sectorZ,
+                        orderSeed);
+                    candidatesBySector[sectorIndex] =
+                        new HeadwaterCandidate(
+                            index,
+                            localFitness,
+                            order);
+                }
             }
 
+            var candidates = new List<HeadwaterCandidate>(
+                candidatesBySector.Values);
             candidates.Sort(CompareHeadwaters);
             var candidateLimit = Math.Min(
                 candidates.Count,
-                Math.Max(24, settings.RiverCount * 12));
+                Math.Max(16, settings.RiverCount * 8));
             for (var candidateIndex = 0;
                  candidateIndex < candidateLimit
                  && acceptedChannels.Count < settings.RiverCount;
                  candidateIndex++)
             {
                 var start = candidates[candidateIndex].ColumnIndex;
-                if (usedColumns.Contains(start)
-                    || !TryTraceChannel(
+                if (usedColumns.Contains(start))
+                {
+                    continue;
+                }
+
+                var generationProfile = ResolveGenerationProfile(
+                    hydrology,
+                    start,
+                    solidHeights,
+                    candidateIndex,
+                    world.Seed);
+                var traced = generationProfile.WaterMode
+                        == RiverWaterMode.Source
+                    ? TryTraceSourceChannel(
+                        world,
                         hydrology,
                         start,
-                        -1,
-                        maximumLength,
+                        solidHeights,
                         seaWaterSurfaces,
                         basinByWetColumn,
                         basins,
                         usedColumns,
-                        out var trace))
+                        candidateIndex,
+                        out var trace)
+                    : TryTraceDynamicChannel(
+                        hydrology,
+                        start,
+                        -1,
+                        solidHeights,
+                        seaWaterSurfaces,
+                        basinByWetColumn,
+                        basins,
+                        usedColumns,
+                        out trace);
+                if (!traced)
                 {
                     continue;
                 }
@@ -303,7 +332,7 @@ namespace MiniCivilization.World.Generation
                         basinByWetColumn,
                         true,
                         null,
-                        acceptedChannels.Count,
+                        generationProfile,
                         out var channel))
                 {
                     continue;
@@ -312,52 +341,12 @@ namespace MiniCivilization.World.Generation
                 TryAcceptChannel(
                     world,
                     basins,
+                    solidHeights,
                     channel,
                     acceptedChannels,
-                    usedColumns);
+                    usedColumns,
+                    validationContext);
             }
-        }
-
-        private static bool HasFeasibleHeadwaterBanks(
-            int size,
-            HydrologyMap hydrology,
-            int startIndex,
-            IReadOnlyList<int> solidHeights,
-            IReadOnlyList<int> seaWaterSurfaces,
-            int[] basinByWetColumn)
-        {
-            var sourceSurface = AlignToCellCeiling(
-                solidHeights[startIndex]);
-            var receiver = hydrology.GetReceiverColumnIndex(startIndex);
-            var x = startIndex % size;
-            var z = startIndex / size;
-            for (var directionIndex = 0;
-                 directionIndex < Directions.Length;
-                 directionIndex++)
-            {
-                var nextX = x + Directions[directionIndex].x;
-                var nextZ = z + Directions[directionIndex].z;
-                if ((uint)nextX >= size || (uint)nextZ >= size)
-                {
-                    continue;
-                }
-
-                var nextIndex = nextX + size * nextZ;
-                if (nextIndex == receiver)
-                {
-                    continue;
-                }
-
-                if (seaWaterSurfaces[nextIndex] > 0
-                    || basinByWetColumn[nextIndex] >= 0
-                    || sourceSurface - solidHeights[nextIndex]
-                        > MaximumBankRaiseUnits)
-                {
-                    return false;
-                }
-            }
-
-            return true;
         }
 
         private static bool IsAdjacentToPlannedWater(
@@ -399,8 +388,7 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
             int[] basinByWetColumn,
-            int maximumLength,
-            int archetypeSlot,
+            int profileSlot,
             HashSet<int> usedColumns,
             out ChannelPlan channel)
         {
@@ -420,11 +408,11 @@ namespace MiniCivilization.World.Generation
                 return false;
             }
 
-            if (!TryTraceChannel(
+            if (!TryTraceDynamicChannel(
                     hydrology,
                     shore,
                     sourceBasin.BasinId,
-                    maximumLength,
+                    solidHeights,
                     seaWaterSurfaces,
                     basinByWetColumn,
                     basins,
@@ -437,17 +425,16 @@ namespace MiniCivilization.World.Generation
                 return false;
             }
 
-            var external = trace.Path.Count > 1
-                ? trace.Path[1]
-                : shore;
             var outlet = new BasinConnectionPort(
-                sourceBasin.BasinId,
-                BasinConnectionType.Outlet,
                 sourceWetColumn,
                 shore,
-                external,
-                sourceBasin.WaterSurfaceHeightUnits,
-                ToDirection(world.Size, sourceWetColumn, shore));
+                sourceBasin.WaterSurfaceHeightUnits);
+            var profile = ResolveGenerationProfile(
+                hydrology,
+                shore,
+                solidHeights,
+                profileSlot,
+                world.Seed);
             return TryBuildChannel(
                 world,
                 settings,
@@ -459,15 +446,15 @@ namespace MiniCivilization.World.Generation
                 basinByWetColumn,
                 false,
                 outlet,
-                archetypeSlot,
+                profile,
                 out channel);
         }
 
-        private static bool TryTraceChannel(
+        private static bool TryTraceDynamicChannel(
             HydrologyMap hydrology,
             int start,
             int ignoredBasinId,
-            int maximumLength,
+            IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
             int[] basinByWetColumn,
             IReadOnlyList<BasinPlan> basins,
@@ -477,10 +464,9 @@ namespace MiniCivilization.World.Generation
             var path = new List<int>();
             var visited = new HashSet<int>();
             var current = start;
-            for (var step = 0; step < maximumLength; step++)
+            while (current >= 0)
             {
-                if (current < 0
-                    || !visited.Add(current)
+                if (!visited.Add(current)
                     || usedColumns.Contains(current)
                     || basinByWetColumn[current] >= 0
                     || seaWaterSurfaces[current] > 0)
@@ -507,7 +493,18 @@ namespace MiniCivilization.World.Generation
                     break;
                 }
 
-                current = hydrology.GetReceiverColumnIndex(current);
+                if (!TryChooseDynamicNext(
+                        hydrology,
+                        current,
+                        solidHeights,
+                        seaWaterSurfaces,
+                        basinByWetColumn,
+                        usedColumns,
+                        visited,
+                        out current))
+                {
+                    break;
+                }
             }
 
             if (path.Count >= 2)
@@ -522,6 +519,212 @@ namespace MiniCivilization.World.Generation
             return false;
         }
 
+        private static bool TryChooseDynamicNext(
+            HydrologyMap hydrology,
+            int current,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
+            HashSet<int> usedColumns,
+            HashSet<int> visited,
+            out int next)
+        {
+            var preferred = hydrology.GetReceiverColumnIndex(current);
+            var currentX = current % hydrology.Size;
+            var currentZ = current / hydrology.Size;
+            var bestCost = float.MaxValue;
+            next = -1;
+            for (var directionIndex = 0;
+                 directionIndex < Directions.Length;
+                 directionIndex++)
+            {
+                var nextX = currentX + Directions[directionIndex].x;
+                var nextZ = currentZ + Directions[directionIndex].z;
+                if (!hydrology.Contains(nextX, nextZ))
+                {
+                    continue;
+                }
+
+                var candidate = hydrology.ToIndex(nextX, nextZ);
+                if (visited.Contains(candidate)
+                    || usedColumns.Contains(candidate)
+                    || seaWaterSurfaces[candidate] > 0
+                    || basinByWetColumn[candidate] >= 0)
+                {
+                    continue;
+                }
+
+                var rise = solidHeights[candidate]
+                    - solidHeights[current];
+
+                var cost = candidate == preferred ? 0f : 4f;
+                cost += Math.Max(0, rise) * 2f;
+                cost += hydrology.GetFilledHeightUnits(candidate) * 0.001f;
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    next = candidate;
+                }
+            }
+
+            return next >= 0;
+        }
+
+        private static bool TryTraceSourceChannel(
+            WorldData world,
+            HydrologyMap hydrology,
+            int start,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
+            IReadOnlyList<BasinPlan> basins,
+            HashSet<int> usedColumns,
+            int routeSlot,
+            out ChannelTrace trace)
+        {
+            var directionSeed = DeterministicNoise.DeriveSeed(
+                world.Seed,
+                "source-river-direction");
+            var startX = start % world.Size;
+            var startZ = start / world.Size;
+            var forwardDirection = (int)(DeterministicNoise.Hash(
+                startX,
+                startZ,
+                directionSeed + routeSlot) % (uint)Directions.Length);
+            var visited = new HashSet<int> { start };
+            var backward = ExtendSourceFront(
+                (forwardDirection + 2) % Directions.Length,
+                out var startTarget);
+            var forward = ExtendSourceFront(
+                forwardDirection,
+                out var endTarget);
+            if (backward.Count + forward.Count < 1)
+            {
+                trace = default;
+                return false;
+            }
+
+            backward.Reverse();
+            var path = new List<int>(
+                backward.Count + 1 + forward.Count);
+            path.AddRange(backward);
+            path.Add(start);
+            path.AddRange(forward);
+            trace = new ChannelTrace(path, startTarget, endTarget);
+            return path.Count >= 2;
+
+            List<int> ExtendSourceFront(
+                int initialDirection,
+                out ChannelTerminal terminal)
+            {
+                var result = new List<int>();
+                var current = start;
+                var previousDirection = initialDirection;
+                terminal = ChannelTerminal.Independent;
+                while (true)
+                {
+                    if (result.Count > 0
+                        && TryFindAdjacentWaterBody(
+                            world.Size,
+                            current,
+                            -1,
+                            seaWaterSurfaces,
+                            basinByWetColumn,
+                            basins,
+                            out terminal))
+                    {
+                        break;
+                    }
+
+                    if (!TryChooseSourceNext(
+                            current,
+                            previousDirection,
+                            out var next,
+                            out var nextDirection))
+                    {
+                        terminal = ChannelTerminal.Independent;
+                        break;
+                    }
+
+                    visited.Add(next);
+                    result.Add(next);
+                    current = next;
+                    previousDirection = nextDirection;
+                }
+
+                return result;
+            }
+
+            bool TryChooseSourceNext(
+                int current,
+                int previousDirection,
+                out int next,
+                out int nextDirection)
+            {
+                var currentX = current % world.Size;
+                var currentZ = current / world.Size;
+                var receiver = hydrology.GetReceiverColumnIndex(current);
+                var routeSeed = DeterministicNoise.DeriveSeed(
+                    world.Seed,
+                    "source-river-route");
+                var bestCost = float.MaxValue;
+                next = -1;
+                nextDirection = previousDirection;
+                for (var directionIndex = 0;
+                     directionIndex < Directions.Length;
+                     directionIndex++)
+                {
+                    if (directionIndex
+                        == (previousDirection + 2) % Directions.Length)
+                    {
+                        continue;
+                    }
+
+                    var nextX = currentX + Directions[directionIndex].x;
+                    var nextZ = currentZ + Directions[directionIndex].z;
+                    if (!hydrology.Contains(nextX, nextZ))
+                    {
+                        continue;
+                    }
+
+                    var candidate = hydrology.ToIndex(nextX, nextZ);
+                    if (visited.Contains(candidate)
+                        || usedColumns.Contains(candidate)
+                        || seaWaterSurfaces[candidate] > 0
+                        || basinByWetColumn[candidate] >= 0)
+                    {
+                        continue;
+                    }
+
+                    var turnCost = directionIndex == previousDirection
+                        ? 0f
+                        : 1.5f;
+                    var terrainCost = Math.Abs(
+                        solidHeights[candidate]
+                        - solidHeights[current]) * 0.35f;
+                    var hydrologyCost = candidate == receiver
+                        ? -0.35f
+                        : 0.15f;
+                    var variation = DeterministicNoise.ValueNoise(
+                        nextX * 0.15f,
+                        nextZ * 0.15f,
+                        routeSeed + routeSlot) * 0.9f;
+                    var cost = turnCost
+                        + terrainCost
+                        + hydrologyCost
+                        + variation;
+                    if (cost < bestCost)
+                    {
+                        bestCost = cost;
+                        next = candidate;
+                        nextDirection = directionIndex;
+                    }
+                }
+
+                return next >= 0;
+            }
+        }
+
         private static bool TryBuildChannel(
             WorldData world,
             WorldGenerationSettings settings,
@@ -533,93 +736,38 @@ namespace MiniCivilization.World.Generation
             int[] basinByWetColumn,
             bool hasHeadwaterSource,
             BasinConnectionPort? outlet,
-            int archetypeSlot,
+            RiverGenerationProfile preferredProfile,
             out ChannelPlan channel)
         {
-            var preferredArchetype = ResolveArchetype(
-                world,
-                trace,
-                solidHeights,
-                archetypeSlot);
-            var archetypeOrder = BuildArchetypeOrder(preferredArchetype);
-            for (var archetypeIndex = 0;
-                 archetypeIndex < archetypeOrder.Count;
-                 archetypeIndex++)
+            var profileOrder = BuildGenerationProfileOrder(preferredProfile);
+            for (var profileIndex = 0;
+                 profileIndex < profileOrder.Count;
+                 profileIndex++)
             {
-                var archetype = archetypeOrder[archetypeIndex];
-                if (!TryLimitTraceForArchetype(
-                        world,
-                        trace,
-                        archetype,
-                        out var archetypeTrace))
-                {
-                    continue;
-                }
-
-                var maximumWidth = ResolveArchetypeMaximumWidth(
-                    archetype,
+                var profile = profileOrder[profileIndex];
+                var maximumWidth = ResolveMaximumWidth(
                     settings.MaximumRiverWidthCells);
-                for (var widthLimit = maximumWidth;
-                     widthLimit >= 1;
-                     widthLimit -= 2)
+                if (TryBuildChannelWithWidthLimit(
+                        world,
+                        settings,
+                        hydrology,
+                        trace,
+                        basins,
+                        solidHeights,
+                        seaWaterSurfaces,
+                        basinByWetColumn,
+                        hasHeadwaterSource,
+                        outlet,
+                        profile,
+                        maximumWidth,
+                        out channel))
                 {
-                    if (TryBuildChannelWithWidthLimit(
-                            world,
-                            settings,
-                            hydrology,
-                            archetypeTrace,
-                            basins,
-                            solidHeights,
-                            seaWaterSurfaces,
-                            basinByWetColumn,
-                            hasHeadwaterSource,
-                            outlet,
-                            archetype,
-                            widthLimit,
-                            out channel))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
 
             channel = null;
             return false;
-        }
-
-        private static bool TryLimitTraceForArchetype(
-            WorldData world,
-            ChannelTrace source,
-            RiverChannelArchetype archetype,
-            out ChannelTrace result)
-        {
-            var maximumColumns = archetype
-                == RiverChannelArchetype.SourceChannel
-                    ? world.Size
-                    : WaterFlowReachability.GetSafeHorizontalSpreadCount(
-                        world.WaterFlowRules);
-            if (maximumColumns < 2)
-            {
-                result = default;
-                return false;
-            }
-
-            if (source.Path.Count <= maximumColumns)
-            {
-                result = source;
-                return true;
-            }
-
-            var shortenedPath = new int[maximumColumns];
-            for (var index = 0; index < maximumColumns; index++)
-            {
-                shortenedPath[index] = source.Path[index];
-            }
-
-            result = new ChannelTrace(
-                shortenedPath,
-                ChannelTerminal.Independent);
-            return true;
         }
 
         private static bool TryBuildChannelWithWidthLimit(
@@ -633,7 +781,7 @@ namespace MiniCivilization.World.Generation
             int[] basinByWetColumn,
             bool hasHeadwaterSource,
             BasinConnectionPort? outlet,
-            RiverChannelArchetype archetype,
+            RiverGenerationProfile generationProfile,
             int widthLimit,
             out ChannelPlan channel)
         {
@@ -642,52 +790,53 @@ namespace MiniCivilization.World.Generation
                 trace,
                 hydrology,
                 widthLimit,
-                archetype);
-            var depths = BuildSectionDepths(
+                generationProfile.WaterMode,
+                generationProfile.TerrainStyle,
+                world.Seed);
+            ConstrainSectionWidths(
                 widths,
-                settings,
-                archetype);
-
-            var levels = BuildSurfaceProfile(
                 trace,
+                hydrology,
+                seaWaterSurfaces,
+                basinByWetColumn);
+            var levels = BuildSurfaceProfile(
+                world,
+                trace,
+                widths,
+                hydrology,
                 solidHeights,
-                depths,
+                seaWaterSurfaces,
+                basinByWetColumn,
                 outlet?.InterfaceSurfaceHeightUnits,
-                archetype);
+                generationProfile);
             if (levels == null)
             {
                 return false;
             }
+            var depths = BuildSectionDepths(
+                widths,
+                settings,
+                generationProfile.TerrainStyle,
+                world.Seed,
+                world.Size,
+                trace);
 
             var bedHeights = new int[trace.Path.Count];
-            for (var pathIndex = 0;
-                 pathIndex < trace.Path.Count;
-                 pathIndex++)
-            {
-                var columnIndex = trace.Path[pathIndex];
-                bedHeights[pathIndex] = hasHeadwaterSource
-                        && pathIndex == 0
-                    ? Math.Min(
-                        solidHeights[columnIndex],
-                        levels[pathIndex] - depths[pathIndex])
-                    : levels[pathIndex] - depths[pathIndex];
-            }
-
             var channelCells = new Dictionary<int, ChannelCellProfile>();
             for (var pathIndex = 0;
                  pathIndex < trace.Path.Count;
                  pathIndex++)
             {
                 var centerIndex = trace.Path[pathIndex];
+                bedHeights[pathIndex] = ResolveChannelBedHeight(
+                    centerIndex,
+                    levels[pathIndex],
+                    depths[pathIndex]);
                 if (!TryAddChannelCell(
                         centerIndex,
                         bedHeights[pathIndex],
                         levels[pathIndex],
-                        pathIndex > 0
-                            ? Math.Max(
-                                levels[pathIndex],
-                                levels[pathIndex - 1])
-                            : levels[pathIndex],
+                        ResolveMaximumWaterTop(pathIndex),
                         pathIndex,
                         true))
                 {
@@ -727,12 +876,15 @@ namespace MiniCivilization.World.Generation
                     }
 
                     var lateralIndex = hydrology.ToIndex(x, z);
-                    var lateralBed = Math.Min(
-                        bedHeights[pathIndex],
-                        solidHeights[lateralIndex]);
-                    return levels[pathIndex] - lateralBed
-                            <= settings.MaximumRiverDepthSteps
-                        && TryAddChannelCell(
+                    var lateralDepth = ResolveCrossSectionDepth(
+                        widths[pathIndex],
+                        depths[pathIndex],
+                        Math.Abs(offset));
+                    var lateralBed = ResolveChannelBedHeight(
+                        lateralIndex,
+                        levels[pathIndex],
+                        lateralDepth);
+                    return TryAddChannelCell(
                             lateralIndex,
                             lateralBed,
                             levels[pathIndex],
@@ -740,24 +892,116 @@ namespace MiniCivilization.World.Generation
                             pathIndex,
                             false);
                 }
+
+                int ResolveChannelBedHeight(
+                    int columnIndex,
+                    int surfaceHeight,
+                    int depthCells)
+                {
+                    var originalHeight = solidHeights[columnIndex];
+                    var desiredBedHeight = Math.Max(
+                        0,
+                        surfaceHeight
+                        - depthCells * WorldGrid.HeightStepsPerCell);
+                    int resolvedBedHeight;
+                    if (desiredBedHeight >= originalHeight)
+                    {
+                        resolvedBedHeight = desiredBedHeight;
+                    }
+                    else if (originalHeight
+                        <= WorldGrid.HeightStepsPerCell)
+                    {
+                        resolvedBedHeight = originalHeight;
+                    }
+                    else
+                    {
+                        resolvedBedHeight = Math.Max(
+                            WorldGrid.HeightStepsPerCell,
+                            desiredBedHeight);
+                    }
+
+                    return resolvedBedHeight;
+                }
+
+                int ResolveMaximumWaterTop(int index)
+                {
+                    if (generationProfile.WaterMode
+                        == RiverWaterMode.Source)
+                    {
+                        return levels[index];
+                    }
+
+                    var maximum = levels[index];
+                    if (index > 0)
+                    {
+                        maximum = Math.Max(maximum, levels[index - 1]);
+                    }
+
+                    if (index + 1 < levels.Length)
+                    {
+                        maximum = Math.Max(maximum, levels[index + 1]);
+                    }
+
+                    return maximum;
+                }
             }
 
-            var terrainTargets = new Dictionary<int, int>();
             var channelColumnSet = new HashSet<int>(channelCells.Keys);
+            foreach (var profile in channelCells.Values)
+            {
+                if (profile.SurfaceHeightUnits
+                    <= profile.BedHeightUnits)
+                {
+                    return false;
+                }
+            }
+
+            for (var pathIndex = 0;
+                 pathIndex < trace.Path.Count;
+                 pathIndex++)
+            {
+                var centerProfile = channelCells[trace.Path[pathIndex]];
+                levels[pathIndex] = centerProfile.SurfaceHeightUnits;
+                bedHeights[pathIndex] = centerProfile.BedHeightUnits;
+            }
+
+            var sourceTransitionTops = generationProfile.WaterMode
+                    == RiverWaterMode.Source
+                ? BuildSourceTransitionTops(
+                    trace,
+                    widths,
+                    levels,
+                    hydrology,
+                    channelColumnSet)
+                : null;
+
+            var terrainTargets = new Dictionary<int, int>();
             foreach (var pair in channelCells)
             {
                 var columnIndex = pair.Key;
                 var profile = pair.Value;
                 var bedHeight = profile.BedHeightUnits;
-                if (bedHeight < 0
-                    || bedHeight > solidHeights[columnIndex]
-                    || solidHeights[columnIndex] - bedHeight
-                        > MaximumChannelCutUnits)
+                if (bedHeight < 0)
                 {
                     return false;
                 }
 
                 terrainTargets[columnIndex] = bedHeight;
+            }
+
+            if (!TryBuildRiverCorridorTerrain(
+                    world,
+                    settings,
+                    generationProfile.TerrainStyle,
+                    solidHeights,
+                    seaWaterSurfaces,
+                    basinByWetColumn,
+                    channelColumnSet,
+                    channelCells,
+                    sourceTransitionTops,
+                    terrainTargets))
+            {
+                return false;
             }
 
             foreach (var pair in channelCells)
@@ -787,10 +1031,15 @@ namespace MiniCivilization.World.Generation
                         == trace.Target.WetColumnIndex
                         && profile.IsCenterline
                         && profile.PathIndex == trace.Path.Count - 1;
+                    var isStartBody = nextIndex
+                        == trace.StartTarget.WetColumnIndex
+                        && profile.IsCenterline
+                        && profile.PathIndex == 0;
                     if (seaWaterSurfaces[nextIndex] > 0
                         || basinByWetColumn[nextIndex] >= 0)
                     {
                         if (!isTargetBody
+                            && !isStartBody
                             && !(outlet.HasValue
                                 && nextIndex
                                     == outlet.Value.BasinWetColumnIndex
@@ -803,35 +1052,26 @@ namespace MiniCivilization.World.Generation
                         continue;
                     }
 
-                    var bankHeight = Math.Max(
-                        solidHeights[nextIndex],
-                        profile.SurfaceHeightUnits);
-                    if (bankHeight - solidHeights[nextIndex]
-                        > MaximumBankRaiseUnits)
-                    {
-                        return false;
-                    }
-
-                    if (terrainTargets.TryGetValue(
-                            nextIndex,
-                            out var existingTarget))
-                    {
-                        terrainTargets[nextIndex] = Math.Max(
-                            existingTarget,
-                            bankHeight);
-                    }
-                    else
-                    {
-                        terrainTargets[nextIndex] = bankHeight;
-                    }
                 }
+            }
+
+            if (generationProfile.WaterMode == RiverWaterMode.Source
+                && !TryAddSourceContainmentBanks(
+                    world,
+                    solidHeights,
+                    seaWaterSurfaces,
+                    basinByWetColumn,
+                    channelColumnSet,
+                    channelCells,
+                    sourceTransitionTops,
+                    terrainTargets))
+            {
+                return false;
             }
 
             var result = new ChannelPlan(
                 world.Size,
-                world.Height,
-                archetype,
-                WaterPlanRepairPolicy.Default);
+                world.Height);
             foreach (var pair in terrainTargets)
             {
                 var x = pair.Key % world.Size;
@@ -839,45 +1079,48 @@ namespace MiniCivilization.World.Generation
                 result.SetTerrainColumn(new PlannedTerrainColumn(
                     x,
                     z,
-                    solidHeights[pair.Key],
-                    pair.Value,
-                    MaximumChannelCutUnits,
-                    MaximumBankRaiseUnits));
-            }
-
-            for (var pathIndex = 0; pathIndex < trace.Path.Count; pathIndex++)
-            {
-                var columnIndex = trace.Path[pathIndex];
-                var bedHeight = bedHeights[pathIndex];
-                result.AddSection(new ChannelSectionPlan(
-                    columnIndex,
-                    widths[pathIndex],
-                    levels[pathIndex] - bedHeight,
-                    levels[pathIndex],
-                    hydrology.GetFlowAccumulation(columnIndex)));
+                    pair.Value));
             }
 
             foreach (var pair in channelCells)
             {
                 result.AddChannelColumn(pair.Key);
+                var maximumWaterTop = pair.Value.MaximumWaterTopUnits;
+                if (sourceTransitionTops != null
+                    && sourceTransitionTops.TryGetValue(
+                        pair.Key,
+                        out var transitionTop))
+                {
+                    maximumWaterTop = Math.Max(
+                        maximumWaterTop,
+                        transitionTop);
+                }
+
                 AddChannelWetCells(
                     result,
                     world.Size,
                     pair.Key,
                     pair.Value.BedHeightUnits,
-                    pair.Value.MaximumWaterTopUnits);
+                    maximumWaterTop);
             }
 
-            if (archetype == RiverChannelArchetype.SourceChannel)
+            if (generationProfile.WaterMode == RiverWaterMode.Source)
             {
-                if (!AddPersistentChannelSources(result, channelCells))
+                if (!AddPersistentChannelSources(
+                        result,
+                        channelCells,
+                        sourceTransitionTops))
                 {
                     return false;
                 }
             }
             else if (hasHeadwaterSource)
             {
-                AddHeadwaterSource(result, trace.Path, levels);
+                AddHeadwaterSources(
+                    result,
+                    trace.Path,
+                    bedHeights,
+                    levels);
             }
 
             if (outlet.HasValue)
@@ -885,36 +1128,23 @@ namespace MiniCivilization.World.Generation
                 result.AddConnection(outlet.Value);
             }
 
+
+            if (trace.StartTarget.BasinId >= 0)
+            {
+                var shore = trace.Path[0];
+                result.AddConnection(new BasinConnectionPort(
+                    trace.StartTarget.WetColumnIndex,
+                    shore,
+                    trace.StartTarget.SurfaceHeightUnits));
+            }
+
             if (trace.Target.BasinId >= 0)
             {
                 var shore = trace.Path[^1];
-                var external = trace.Path.Count > 1
-                    ? trace.Path[^2]
-                    : shore;
                 result.AddConnection(new BasinConnectionPort(
-                    trace.Target.BasinId,
-                    BasinConnectionType.Inlet,
                     trace.Target.WetColumnIndex,
                     shore,
-                    external,
-                    trace.Target.SurfaceHeightUnits,
-                    ToDirection(
-                        world.Size,
-                        shore,
-                        trace.Target.WetColumnIndex)));
-            }
-
-            if (!HydrologyFeaturePlan.TryCreate(
-                    world.Size,
-                    world.Height,
-                    basins,
-                    new[] { result },
-                    out var validationPlan)
-                || !WaterPlanValidator.Validate(
-                    world,
-                    validationPlan).IsValid)
-            {
-                return false;
+                    trace.Target.SurfaceHeightUnits));
             }
 
             channel = result;
@@ -938,14 +1168,23 @@ namespace MiniCivilization.World.Generation
                         columnIndex,
                         out var existing))
                 {
+                    var mergedSurface = generationProfile.WaterMode
+                            == RiverWaterMode.Source
+                        ? Math.Min(
+                            existing.SurfaceHeightUnits,
+                            surfaceHeight)
+                        : Math.Max(
+                            existing.SurfaceHeightUnits,
+                            surfaceHeight);
                     channelCells[columnIndex] = new ChannelCellProfile(
                         Math.Min(existing.BedHeightUnits, bedHeight),
-                        Math.Max(
-                            existing.SurfaceHeightUnits,
-                            surfaceHeight),
-                        Math.Max(
-                            existing.MaximumWaterTopUnits,
-                            maximumWaterTop),
+                        mergedSurface,
+                        generationProfile.WaterMode
+                                == RiverWaterMode.Source
+                            ? mergedSurface
+                            : Math.Max(
+                                existing.MaximumWaterTopUnits,
+                                maximumWaterTop),
                         Math.Min(existing.PathIndex, pathIndex),
                         existing.IsCenterline || isCenterline);
                 }
@@ -964,23 +1203,33 @@ namespace MiniCivilization.World.Generation
         }
 
         private static int[] BuildSurfaceProfile(
+            WorldData world,
             ChannelTrace trace,
+            IReadOnlyList<int> widths,
+            HydrologyMap hydrology,
             IReadOnlyList<int> solidHeights,
-            IReadOnlyList<int> depthUnits,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
             int? fixedStartSurface,
-            RiverChannelArchetype archetype)
+            RiverGenerationProfile generationProfile)
         {
             var levels = new int[trace.Path.Count];
+            if (generationProfile.WaterMode == RiverWaterMode.Source)
+            {
+                return BuildSourceCorridorSurfaceProfile(
+                    world,
+                    trace,
+                    widths,
+                    hydrology,
+                    solidHeights,
+                    seaWaterSurfaces,
+                    basinByWetColumn,
+                    fixedStartSurface);
+            }
+
             var targetSurfaceHeight = trace.Target.HasWaterBody
                 ? trace.Target.SurfaceHeightUnits
                 : ResolveIndependentTerminalSurface();
-            if (archetype == RiverChannelArchetype.SourceChannel
-                && (targetSurfaceHeight
-                    % WorldGrid.HeightStepsPerCell) != 0)
-            {
-                return null;
-            }
-
             levels[^1] = targetSurfaceHeight;
             for (var index = trace.Path.Count - 2; index >= 0; index--)
             {
@@ -1026,19 +1275,21 @@ namespace MiniCivilization.World.Generation
                 }
             }
 
+            if (generationProfile.WaterMode == RiverWaterMode.Dynamic
+                && !HasReachableDynamicSurfaceProfile(levels))
+            {
+                return null;
+            }
+
             return levels;
 
             int ResolveIndependentTerminalSurface()
             {
                 var lastIndex = trace.Path.Count - 1;
                 var solidHeight = solidHeights[trace.Path[lastIndex]];
-                if (archetype == RiverChannelArchetype.SourceChannel)
-                {
-                    return AlignToCellCeiling(solidHeight);
-                }
-
-                var surface = solidHeight + depthUnits[lastIndex];
-                return archetype == RiverChannelArchetype.SteppedDynamic
+                var surface = solidHeight;
+                return generationProfile.TerrainStyle
+                        == RiverTerrainStyle.Stepped
                     ? surface
                         / WorldGrid.HeightStepsPerCell
                         * WorldGrid.HeightStepsPerCell
@@ -1048,17 +1299,15 @@ namespace MiniCivilization.World.Generation
             int ResolveNaturalSurface(int index)
             {
                 var solidHeight = solidHeights[trace.Path[index]];
-                var natural = archetype
-                    == RiverChannelArchetype.SourceChannel
-                        ? AlignToCellCeiling(solidHeight)
-                        : solidHeight + depthUnits[index];
-                if (archetype == RiverChannelArchetype.LowlandDynamic
+                var natural = solidHeight;
+                if (generationProfile.TerrainStyle
+                        == RiverTerrainStyle.Lowland
                     && index + 1 < levels.Length)
                 {
                     natural = Math.Min(natural, levels[index + 1] + 1);
                 }
-                else if (archetype
-                    == RiverChannelArchetype.SteppedDynamic)
+                else if (generationProfile.TerrainStyle
+                    == RiverTerrainStyle.Stepped)
                 {
                     natural = natural
                         / WorldGrid.HeightStepsPerCell
@@ -1067,13 +1316,206 @@ namespace MiniCivilization.World.Generation
 
                 return natural;
             }
+
+            bool HasReachableDynamicSurfaceProfile(
+                IReadOnlyList<int> surfaceLevels)
+            {
+                var maximumFlatRun = Math.Max(
+                    1,
+                    WaterFlowReachability.GetSafeHorizontalSpreadCount(
+                        world.WaterFlowRules));
+                var flatRun = 1;
+                for (var index = 1; index < surfaceLevels.Count; index++)
+                {
+                    if (surfaceLevels[index] > surfaceLevels[index - 1])
+                    {
+                        return false;
+                    }
+
+                    flatRun = surfaceLevels[index]
+                            == surfaceLevels[index - 1]
+                        ? flatRun + 1
+                        : 1;
+                    if (flatRun > maximumFlatRun)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        private static int[] BuildSourceCorridorSurfaceProfile(
+            WorldData world,
+            ChannelTrace trace,
+            IReadOnlyList<int> widths,
+            HydrologyMap hydrology,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
+            int? fixedStartSurface)
+        {
+            var count = trace.Path.Count;
+            var naturalCorridorHeights = new int[count];
+            for (var pathIndex = 0; pathIndex < count; pathIndex++)
+            {
+                ResolvePerpendicular(
+                    trace.Path,
+                    world.Size,
+                    pathIndex,
+                    out var perpendicularX,
+                    out var perpendicularZ);
+                var centerIndex = trace.Path[pathIndex];
+                var centerX = centerIndex % world.Size;
+                var centerZ = centerIndex / world.Size;
+                var sampleRadius = widths[pathIndex] / 2 + 1;
+                var minimumHeight = solidHeights[centerIndex];
+                for (var offset = -sampleRadius;
+                     offset <= sampleRadius;
+                     offset++)
+                {
+                    var x = centerX + perpendicularX * offset;
+                    var z = centerZ + perpendicularZ * offset;
+                    if (!hydrology.Contains(x, z))
+                    {
+                        continue;
+                    }
+
+                    var columnIndex = hydrology.ToIndex(x, z);
+                    if (seaWaterSurfaces[columnIndex] > 0
+                        || basinByWetColumn[columnIndex] >= 0)
+                    {
+                        continue;
+                    }
+
+                    minimumHeight = Math.Min(
+                        minimumHeight,
+                        solidHeights[columnIndex]);
+                }
+
+                naturalCorridorHeights[pathIndex] = minimumHeight;
+            }
+
+            var smoothed = new int[count];
+            var smoothingRadius = Math.Clamp(count / 12, 2, 6);
+            for (var pathIndex = 0; pathIndex < count; pathIndex++)
+            {
+                var start = Math.Max(0, pathIndex - smoothingRadius);
+                var end = Math.Min(count - 1, pathIndex + smoothingRadius);
+                var sum = 0;
+                var minimum = int.MaxValue;
+                for (var sampleIndex = start;
+                     sampleIndex <= end;
+                     sampleIndex++)
+                {
+                    var height = naturalCorridorHeights[sampleIndex];
+                    sum += height;
+                    minimum = Math.Min(minimum, height);
+                }
+
+                var average = sum / (end - start + 1);
+                smoothed[pathIndex] = (average * 2 + minimum) / 3;
+            }
+
+            var hasStartAnchor = fixedStartSurface.HasValue
+                || trace.StartTarget.HasWaterBody;
+            var rawStartAnchor = fixedStartSurface
+                ?? (trace.StartTarget.HasWaterBody
+                    ? trace.StartTarget.SurfaceHeightUnits
+                    : 0);
+            var startAnchor = hasStartAnchor
+                ? AlignToCellCeiling(rawStartAnchor)
+                : 0;
+            var hasEndAnchor = trace.Target.HasWaterBody;
+            var endAnchor = hasEndAnchor
+                ? AlignToCellCeiling(
+                    trace.Target.SurfaceHeightUnits)
+                : 0;
+            var maximumGradeUnits = 1;
+            if (hasStartAnchor && hasEndAnchor && count > 1)
+            {
+                maximumGradeUnits = Math.Max(
+                    maximumGradeUnits,
+                    (Math.Abs(endAnchor - startAnchor) + count - 2)
+                    / (count - 1));
+                if (maximumGradeUnits > WorldGrid.HeightStepsPerCell)
+                {
+                    return null;
+                }
+            }
+
+            for (var pass = 0; pass < 8; pass++)
+            {
+                if (hasStartAnchor)
+                {
+                    smoothed[0] = startAnchor;
+                }
+
+                for (var pathIndex = 1;
+                     pathIndex < count;
+                     pathIndex++)
+                {
+                    if (hasEndAnchor && pathIndex == count - 1)
+                    {
+                        continue;
+                    }
+
+                    smoothed[pathIndex] = Math.Clamp(
+                        smoothed[pathIndex],
+                        smoothed[pathIndex - 1] - maximumGradeUnits,
+                        smoothed[pathIndex - 1] + maximumGradeUnits);
+                }
+
+                if (hasEndAnchor)
+                {
+                    smoothed[^1] = endAnchor;
+                }
+
+                for (var pathIndex = count - 2;
+                     pathIndex >= 0;
+                     pathIndex--)
+                {
+                    if (hasStartAnchor && pathIndex == 0)
+                    {
+                        continue;
+                    }
+
+                    smoothed[pathIndex] = Math.Clamp(
+                        smoothed[pathIndex],
+                        smoothed[pathIndex + 1] - maximumGradeUnits,
+                        smoothed[pathIndex + 1] + maximumGradeUnits);
+                }
+            }
+
+            var levels = new int[count];
+            for (var pathIndex = 0; pathIndex < count; pathIndex++)
+            {
+                levels[pathIndex] = Math.Max(
+                    WorldGrid.HeightStepsPerCell,
+                    AlignToCellFloor(smoothed[pathIndex]));
+            }
+
+            if (hasStartAnchor)
+            {
+                levels[0] = startAnchor;
+            }
+
+            if (hasEndAnchor)
+            {
+                levels[^1] = endAnchor;
+            }
+
+            return levels;
         }
 
         private static int[] BuildSectionWidths(
             ChannelTrace trace,
             HydrologyMap hydrology,
             int maximumWidth,
-            RiverChannelArchetype archetype)
+            RiverWaterMode waterMode,
+            RiverTerrainStyle terrainStyle,
+            int worldSeed)
         {
             maximumWidth = Math.Max(1, maximumWidth);
             if ((maximumWidth & 1) == 0)
@@ -1106,8 +1548,18 @@ namespace MiniCivilization.World.Generation
             }
 
             var widthTierCount = (maximumWidth - 1) / 2;
-            for (var pathIndex = 1;
-                 pathIndex < trace.Path.Count - 1;
+            var variationSeed = DeterministicNoise.DeriveSeed(
+                worldSeed,
+                "river-channel-width");
+            var fullWidthLength = Math.Max(
+                4d,
+                hydrology.Size * 0.75d);
+            var relativeLength = Math.Clamp(
+                (trace.Path.Count - 2d) / (fullWidthLength - 2d),
+                0d,
+                1d);
+            for (var pathIndex = 0;
+                 pathIndex < trace.Path.Count;
                  pathIndex++)
             {
                 var logAccumulation = Math.Log(
@@ -1119,28 +1571,51 @@ namespace MiniCivilization.World.Generation
                     ? (logAccumulation - minimumLogAccumulation)
                         / accumulationRange
                     : 0d;
-                var progress = pathIndex
+                var columnIndex = trace.Path[pathIndex];
+                var x = columnIndex % hydrology.Size;
+                var z = columnIndex / hydrology.Size;
+                var variation = DeterministicNoise.ValueNoise(
+                    x * 0.2f,
+                    z * 0.2f,
+                    variationSeed);
+                var pathPosition = pathIndex
                     / (double)(trace.Path.Count - 1);
-                var widthSignal = archetype switch
+                var centerWeight = Math.Sin(Math.PI * pathPosition);
+                var structuralWidth = relativeLength
+                    * (0.25d + centerWeight * 0.75d);
+                var styleBias = terrainStyle switch
                 {
-                    RiverChannelArchetype.LowlandDynamic => Math.Max(
-                        Math.Sqrt(relativeAccumulation),
-                        progress * 0.8d),
-                    RiverChannelArchetype.SourceChannel => Math.Max(
-                        relativeAccumulation,
-                        progress * 0.65d),
-                    RiverChannelArchetype.MountainDynamic => Math.Max(
-                        relativeAccumulation * 0.7d,
-                        progress * 0.4d),
+                    RiverTerrainStyle.Lowland => 0.1d,
+                    RiverTerrainStyle.Mountain => -0.1d,
                     _ => 0d
                 };
+                var accumulationWeight = waterMode
+                        == RiverWaterMode.Source
+                    ? 0.1d
+                    : 0.25d;
+                var structuralWeight = waterMode
+                        == RiverWaterMode.Source
+                    ? 0.75d
+                    : 0.6d;
+                var variationWeight = 1d
+                    - accumulationWeight
+                    - structuralWeight;
+                var widthSignal = Math.Clamp(
+                    relativeAccumulation * accumulationWeight
+                    + structuralWidth * structuralWeight
+                    + variation * variationWeight
+                    + styleBias,
+                    0d,
+                    1d);
                 var widthTier = Math.Clamp(
-                    (int)Math.Floor(
-                        widthSignal * (widthTierCount + 1)),
+                    (int)Math.Round(widthSignal * widthTierCount),
                     0,
                     widthTierCount);
                 widths[pathIndex] = 1 + widthTier * 2;
             }
+
+            widths[0] = 1;
+            widths[^1] = 1;
 
             for (var pathIndex = 1;
                  pathIndex < widths.Length;
@@ -1163,116 +1638,551 @@ namespace MiniCivilization.World.Generation
             return widths;
         }
 
+        private static bool TryBuildRiverCorridorTerrain(
+            WorldData world,
+            WorldGenerationSettings settings,
+            RiverTerrainStyle terrainStyle,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
+            HashSet<int> channelColumns,
+            IReadOnlyDictionary<int, ChannelCellProfile> channelCells,
+            IReadOnlyDictionary<int, int> transitionTops,
+            Dictionary<int, int> terrainTargets)
+        {
+            var columnCount = checked(world.Size * world.Size);
+            var distances = new int[columnCount];
+            var owners = new int[columnCount];
+            Array.Fill(distances, -1);
+            Array.Fill(owners, -1);
+            var frontier = new Queue<int>();
+            foreach (var columnIndex in channelColumns)
+            {
+                distances[columnIndex] = 0;
+                owners[columnIndex] = columnIndex;
+                frontier.Enqueue(columnIndex);
+            }
+
+            var maximumBlendDistance = Math.Max(
+                6,
+                settings.MaximumRiverWidthCells * 2);
+            while (frontier.Count > 0)
+            {
+                var current = frontier.Dequeue();
+                var distance = distances[current];
+                if (distance >= maximumBlendDistance)
+                {
+                    continue;
+                }
+
+                var x = current % world.Size;
+                var z = current / world.Size;
+                for (var directionIndex = 0;
+                     directionIndex < Directions.Length;
+                     directionIndex++)
+                {
+                    var nextX = x + Directions[directionIndex].x;
+                    var nextZ = z + Directions[directionIndex].z;
+                    if (!world.ContainsColumn(nextX, nextZ))
+                    {
+                        continue;
+                    }
+
+                    var nextIndex = nextX + world.Size * nextZ;
+                    if (seaWaterSurfaces[nextIndex] > 0
+                        || basinByWetColumn[nextIndex] >= 0)
+                    {
+                        continue;
+                    }
+
+                    var nextDistance = distance + 1;
+                    if (distances[nextIndex] >= 0
+                        && distances[nextIndex] <= nextDistance)
+                    {
+                        continue;
+                    }
+
+                    distances[nextIndex] = nextDistance;
+                    owners[nextIndex] = owners[current];
+                    frontier.Enqueue(nextIndex);
+                }
+            }
+
+            var maximumWorldHeight = checked(
+                world.Height * WorldGrid.HeightStepsPerCell);
+            for (var columnIndex = 0;
+                 columnIndex < columnCount;
+                 columnIndex++)
+            {
+                var distance = distances[columnIndex];
+                if (distance <= 0 || distance > maximumBlendDistance)
+                {
+                    continue;
+                }
+
+                var ownerIndex = owners[columnIndex];
+                if (ownerIndex < 0
+                    || !channelCells.TryGetValue(
+                        ownerIndex,
+                        out var ownerProfile))
+                {
+                    continue;
+                }
+
+                var ownerSurfaceHeight = ownerProfile.SurfaceHeightUnits;
+                if (transitionTops != null
+                    && transitionTops.TryGetValue(
+                        ownerIndex,
+                        out var transitionTop))
+                {
+                    ownerSurfaceHeight = Math.Max(
+                        ownerSurfaceHeight,
+                        transitionTop);
+                }
+
+                var localTerrainStyle = ResolveLocalTerrainStyle(
+                    ownerIndex);
+                var blendDistance = localTerrainStyle switch
+                {
+                    RiverTerrainStyle.Lowland => Math.Max(
+                        6,
+                        settings.MaximumRiverWidthCells * 2),
+                    RiverTerrainStyle.Mountain => Math.Max(
+                        3,
+                        settings.MaximumRiverWidthCells),
+                    _ => Math.Max(
+                        4,
+                        settings.MaximumRiverWidthCells + 2)
+                };
+                if (distance > blendDistance)
+                {
+                    continue;
+                }
+
+                var originalHeight = solidHeights[columnIndex];
+                var innerHeight = localTerrainStyle switch
+                {
+                    RiverTerrainStyle.Mountain => Math.Max(
+                        ownerSurfaceHeight,
+                        Math.Min(
+                            originalHeight,
+                            ownerSurfaceHeight
+                            + WorldGrid.HeightStepsPerCell)),
+                    RiverTerrainStyle.Stepped => Math.Max(
+                        ownerSurfaceHeight,
+                        Math.Min(
+                            originalHeight,
+                            ownerSurfaceHeight + 2)),
+                    _ => ownerSurfaceHeight
+                };
+                var blend = blendDistance <= 1
+                    ? 1f
+                    : (distance - 1f) / (blendDistance - 1f);
+                var targetHeight = distance == 1
+                    ? innerHeight
+                    : (int)MathF.Round(
+                        innerHeight
+                        + (originalHeight - innerHeight) * blend);
+                targetHeight = Math.Clamp(
+                    targetHeight,
+                    WorldGrid.HeightStepsPerCell,
+                    maximumWorldHeight);
+                if (targetHeight != originalHeight)
+                {
+                    terrainTargets[columnIndex] = targetHeight;
+                }
+            }
+
+            return true;
+
+            RiverTerrainStyle ResolveLocalTerrainStyle(int columnIndex)
+            {
+                var centerX = columnIndex % world.Size;
+                var centerZ = columnIndex / world.Size;
+                var minimumHeight = int.MaxValue;
+                var maximumHeight = int.MinValue;
+                for (var offsetZ = -2; offsetZ <= 2; offsetZ++)
+                for (var offsetX = -2; offsetX <= 2; offsetX++)
+                {
+                    var x = centerX + offsetX;
+                    var z = centerZ + offsetZ;
+                    if (!world.ContainsColumn(x, z))
+                    {
+                        continue;
+                    }
+
+                    var height = solidHeights[x + world.Size * z];
+                    minimumHeight = Math.Min(minimumHeight, height);
+                    maximumHeight = Math.Max(maximumHeight, height);
+                }
+
+                var relief = maximumHeight - minimumHeight;
+                if (relief >= WorldGrid.HeightStepsPerCell * 3)
+                {
+                    return RiverTerrainStyle.Mountain;
+                }
+
+                if (relief <= WorldGrid.HeightStepsPerCell)
+                {
+                    return RiverTerrainStyle.Lowland;
+                }
+
+                return terrainStyle;
+            }
+        }
+
+        private static bool TryAddSourceContainmentBanks(
+            WorldData world,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn,
+            HashSet<int> channelColumns,
+            IReadOnlyDictionary<int, ChannelCellProfile> channelCells,
+            IReadOnlyDictionary<int, int> transitionTops,
+            Dictionary<int, int> terrainTargets)
+        {
+            var maximumWorldHeight = checked(
+                world.Height * WorldGrid.HeightStepsPerCell);
+            foreach (var pair in channelCells)
+            {
+                var columnIndex = pair.Key;
+                var profile = pair.Value;
+                if (transitionTops != null
+                    && transitionTops.TryGetValue(
+                        columnIndex,
+                        out var transitionTop)
+                    && transitionTop > profile.SurfaceHeightUnits)
+                {
+                    profile = new ChannelCellProfile(
+                        profile.BedHeightUnits,
+                        transitionTop,
+                        transitionTop,
+                        profile.PathIndex,
+                        profile.IsCenterline);
+                }
+                var x = columnIndex % world.Size;
+                var z = columnIndex / world.Size;
+                for (var directionIndex = 0;
+                     directionIndex < Directions.Length;
+                     directionIndex++)
+                {
+                    var nextX = x + Directions[directionIndex].x;
+                    var nextZ = z + Directions[directionIndex].z;
+                    if (!world.ContainsColumn(nextX, nextZ))
+                    {
+                        continue;
+                    }
+
+                    var nextIndex = nextX + world.Size * nextZ;
+                    if (channelColumns.Contains(nextIndex)
+                        || seaWaterSurfaces[nextIndex] > 0
+                        || basinByWetColumn[nextIndex] >= 0)
+                    {
+                        continue;
+                    }
+
+                    var targetHeight = terrainTargets.TryGetValue(
+                        nextIndex,
+                        out var plannedHeight)
+                        ? plannedHeight
+                        : solidHeights[nextIndex];
+                    if (!CanSourceReachTerrainColumn(
+                            world,
+                            columnIndex,
+                            profile,
+                            nextIndex,
+                            targetHeight))
+                    {
+                        continue;
+                    }
+
+                    targetHeight = Math.Max(
+                        targetHeight,
+                        profile.SurfaceHeightUnits);
+                    if (targetHeight > maximumWorldHeight)
+                    {
+                        return false;
+                    }
+
+                    terrainTargets[nextIndex] = targetHeight;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool CanSourceReachTerrainColumn(
+            WorldData world,
+            int sourceColumnIndex,
+            ChannelCellProfile sourceProfile,
+            int targetColumnIndex,
+            int targetHeightUnits)
+        {
+            if (sourceProfile.SurfaceHeightUnits
+                    <= sourceProfile.BedHeightUnits
+                || sourceProfile.SurfaceHeightUnits
+                    % WorldGrid.HeightStepsPerCell != 0)
+            {
+                return false;
+            }
+
+            var y = sourceProfile.SurfaceHeightUnits
+                / WorldGrid.HeightStepsPerCell - 1;
+            if ((uint)y >= world.Height)
+            {
+                return false;
+            }
+
+            var baseHeight = y * WorldGrid.HeightStepsPerCell;
+            var sourceCell = new CellData
+            {
+                SolidFill = checked((byte)Math.Clamp(
+                    sourceProfile.BedHeightUnits - baseHeight,
+                    0,
+                    WorldGrid.HeightStepsPerCell))
+            };
+            var sourceWater = new WaterCellData
+            {
+                Amount = WaterAmount.Full,
+                Role = WaterCellRole.Source
+            };
+            var targetCell = new CellData
+            {
+                SolidFill = checked((byte)Math.Clamp(
+                    targetHeightUnits - baseHeight,
+                    0,
+                    WorldGrid.HeightStepsPerCell))
+            };
+            return WaterFlowReachability.CanReachHorizontally(
+                new CellCoordinate(
+                    sourceColumnIndex % world.Size,
+                    y,
+                    sourceColumnIndex / world.Size),
+                sourceCell,
+                sourceWater,
+                new CellCoordinate(
+                    targetColumnIndex % world.Size,
+                    y,
+                    targetColumnIndex / world.Size),
+                targetCell,
+                WaterAmount.Full);
+        }
+
+        private static void ConstrainSectionWidths(
+            int[] widths,
+            ChannelTrace trace,
+            HydrologyMap hydrology,
+            IReadOnlyList<int> seaWaterSurfaces,
+            int[] basinByWetColumn)
+        {
+            for (var pathIndex = 0;
+                 pathIndex < widths.Length;
+                 pathIndex++)
+            {
+                while (widths[pathIndex] > 1
+                    && !CanUseWidth(pathIndex, widths[pathIndex]))
+                {
+                    widths[pathIndex] -= 2;
+                }
+            }
+
+            for (var pathIndex = 1;
+                 pathIndex < widths.Length;
+                 pathIndex++)
+            {
+                widths[pathIndex] = Math.Min(
+                    widths[pathIndex],
+                    widths[pathIndex - 1] + 2);
+            }
+
+            for (var pathIndex = widths.Length - 2;
+                 pathIndex >= 0;
+                 pathIndex--)
+            {
+                widths[pathIndex] = Math.Min(
+                    widths[pathIndex],
+                    widths[pathIndex + 1] + 2);
+            }
+
+            bool CanUseWidth(int pathIndex, int width)
+            {
+                ResolvePerpendicular(
+                    trace.Path,
+                    hydrology.Size,
+                    pathIndex,
+                    out var perpendicularX,
+                    out var perpendicularZ);
+                var centerIndex = trace.Path[pathIndex];
+                var centerX = centerIndex % hydrology.Size;
+                var centerZ = centerIndex / hydrology.Size;
+                var radius = width / 2;
+                for (var offset = -radius; offset <= radius; offset++)
+                {
+                    var x = centerX + perpendicularX * offset;
+                    var z = centerZ + perpendicularZ * offset;
+                    if (!hydrology.Contains(x, z))
+                    {
+                        return false;
+                    }
+
+                    var columnIndex = hydrology.ToIndex(x, z);
+                    if (seaWaterSurfaces[columnIndex] > 0
+                        || basinByWetColumn[columnIndex] >= 0)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
         private static int[] BuildSectionDepths(
             IReadOnlyList<int> widths,
             WorldGenerationSettings settings,
-            RiverChannelArchetype archetype)
+            RiverTerrainStyle terrainStyle,
+            int worldSeed,
+            int worldSize,
+            ChannelTrace trace)
         {
             var result = new int[widths.Count];
+            var shapeSeed = DeterministicNoise.DeriveSeed(
+                worldSeed,
+                "river-cross-section");
             for (var index = 0; index < widths.Count; index++)
             {
-                var widthDepth = (widths[index] - 1) / 2;
-                var desiredDepth = archetype switch
+                var desiredDepth = widths[index] switch
                 {
-                    RiverChannelArchetype.MountainDynamic =>
-                        settings.RiverDepthSteps + 1 + widthDepth,
-                    RiverChannelArchetype.LowlandDynamic =>
-                        Math.Max(1, settings.RiverDepthSteps - 1)
-                        + widthDepth,
-                    RiverChannelArchetype.SteppedDynamic =>
-                        settings.MaximumRiverDepthSteps,
-                    RiverChannelArchetype.SourceChannel =>
-                        settings.RiverDepthSteps + widthDepth,
-                    _ => settings.RiverDepthSteps
+                    3 => 2,
+                    >= 5 => ResolveWideCenterDepth(index),
+                    _ => terrainStyle == RiverTerrainStyle.Mountain
+                        ? settings.RiverDepthCells + 1
+                        : settings.RiverDepthCells
                 };
                 result[index] = Math.Clamp(
                     desiredDepth,
                     1,
-                    settings.MaximumRiverDepthSteps);
+                    settings.MaximumRiverDepthCells);
             }
 
             return result;
+
+            int ResolveWideCenterDepth(int pathIndex)
+            {
+                if (terrainStyle == RiverTerrainStyle.Lowland)
+                {
+                    return 2;
+                }
+
+                if (terrainStyle == RiverTerrainStyle.Mountain)
+                {
+                    return 3;
+                }
+
+                var columnIndex = trace.Path[pathIndex];
+                var x = columnIndex % worldSize;
+                var z = columnIndex / worldSize;
+                return DeterministicNoise.Value01(x, z, shapeSeed) < 0.5f
+                    ? 2
+                    : 3;
+            }
         }
 
-        private static RiverChannelArchetype ResolveArchetype(
-            WorldData world,
-            ChannelTrace trace,
-            IReadOnlyList<int> solidHeights,
-            int archetypeSlot)
+        private static int ResolveCrossSectionDepth(
+            int width,
+            int centerDepth,
+            int lateralOffset)
         {
-            var startIndex = trace.Path[0];
-            var startHeight = solidHeights[startIndex];
-            var relief = Math.Max(
-                0,
-                startHeight - (trace.Target.HasWaterBody
-                    ? trace.Target.SurfaceHeightUnits
-                    : solidHeights[trace.Path[^1]]));
-            var slope = relief / (float)Math.Max(1, trace.Path.Count);
-            var x = startIndex % world.Size;
-            var z = startIndex / world.Size;
-            var seed = DeterministicNoise.DeriveSeed(
-                world.Seed,
-                "river-channel-archetype");
-            var value = DeterministicNoise.Value01(x, z, seed);
-            switch (Math.Abs(archetypeSlot) % 4)
+            if (lateralOffset <= 0)
+            {
+                return centerDepth;
+            }
+
+            if (width <= 3 || lateralOffset >= width / 2)
+            {
+                return 1;
+            }
+
+            return Math.Min(2, centerDepth);
+        }
+
+        private static RiverGenerationProfile ResolveGenerationProfile(
+            HydrologyMap hydrology,
+            int startIndex,
+            IReadOnlyList<int> solidHeights,
+            int profileSlot,
+            int worldSeed)
+        {
+            var receiver = hydrology.GetReceiverColumnIndex(startIndex);
+            var localRelief = receiver >= 0
+                ? Math.Abs(
+                    solidHeights[startIndex]
+                    - solidHeights[receiver])
+                : 0;
+            RiverTerrainStyle terrainStyle;
+            switch (Math.Abs(profileSlot) % 3)
             {
                 case 1:
-                    return RiverChannelArchetype.SourceChannel;
+                    terrainStyle = RiverTerrainStyle.Lowland;
+                    break;
                 case 2:
-                    return slope > 0.5f
-                        ? RiverChannelArchetype.SteppedDynamic
-                        : RiverChannelArchetype.LowlandDynamic;
-                case 3:
-                    return RiverChannelArchetype.MountainDynamic;
+                    terrainStyle = RiverTerrainStyle.Stepped;
+                    break;
+                default:
+                    terrainStyle = localRelief >= 3
+                        ? RiverTerrainStyle.Mountain
+                        : localRelief <= 1
+                            ? RiverTerrainStyle.Lowland
+                            : RiverTerrainStyle.Stepped;
+                    break;
             }
 
-            if (value < 0.2f)
-            {
-                return RiverChannelArchetype.SourceChannel;
-            }
-
-            if (slope >= 1.5f)
-            {
-                return value < 0.55f
-                    ? RiverChannelArchetype.SteppedDynamic
-                    : RiverChannelArchetype.MountainDynamic;
-            }
-
-            if (slope <= 0.5f)
-            {
-                return RiverChannelArchetype.LowlandDynamic;
-            }
-
-            return value < 0.6f
-                ? RiverChannelArchetype.LowlandDynamic
-                : RiverChannelArchetype.MountainDynamic;
+            var x = startIndex % hydrology.Size;
+            var z = startIndex / hydrology.Size;
+            var waterModeSeed = DeterministicNoise.DeriveSeed(
+                worldSeed,
+                "river-water-mode");
+            var waterMode = DeterministicNoise.Value01(
+                    x,
+                    z,
+                    waterModeSeed + profileSlot) < 0.5f
+                ? RiverWaterMode.Dynamic
+                : RiverWaterMode.Source;
+            return new RiverGenerationProfile(waterMode, terrainStyle);
         }
 
-        private static IReadOnlyList<RiverChannelArchetype>
-            BuildArchetypeOrder(RiverChannelArchetype preferred)
+        private static IReadOnlyList<RiverGenerationProfile>
+            BuildGenerationProfileOrder(RiverGenerationProfile preferred)
         {
-            var result = new List<RiverChannelArchetype>(4)
+            var result = new List<RiverGenerationProfile>(3)
             {
                 preferred
             };
-            AddIfMissing(RiverChannelArchetype.LowlandDynamic);
-            AddIfMissing(RiverChannelArchetype.MountainDynamic);
-            AddIfMissing(RiverChannelArchetype.SteppedDynamic);
-            AddIfMissing(RiverChannelArchetype.SourceChannel);
+            AddIfMissing(preferred.WaterMode, RiverTerrainStyle.Lowland);
+            AddIfMissing(preferred.WaterMode, RiverTerrainStyle.Mountain);
+            AddIfMissing(preferred.WaterMode, RiverTerrainStyle.Stepped);
             return result;
 
-            void AddIfMissing(RiverChannelArchetype archetype)
+            void AddIfMissing(
+                RiverWaterMode waterMode,
+                RiverTerrainStyle terrainStyle)
             {
-                if (!result.Contains(archetype))
+                for (var index = 0; index < result.Count; index++)
                 {
-                    result.Add(archetype);
+                    if (result[index].WaterMode == waterMode
+                        && result[index].TerrainStyle == terrainStyle)
+                    {
+                        return;
+                    }
                 }
+
+                result.Add(new RiverGenerationProfile(
+                    waterMode,
+                    terrainStyle));
             }
         }
 
-        private static int ResolveArchetypeMaximumWidth(
-            RiverChannelArchetype archetype,
-            int configuredMaximumWidth)
+        private static int ResolveMaximumWidth(int configuredMaximumWidth)
         {
             configuredMaximumWidth = Math.Max(1, configuredMaximumWidth);
             if ((configuredMaximumWidth & 1) == 0)
@@ -1280,17 +2190,7 @@ namespace MiniCivilization.World.Generation
                 configuredMaximumWidth--;
             }
 
-            return archetype switch
-            {
-                RiverChannelArchetype.SteppedDynamic => 1,
-                RiverChannelArchetype.MountainDynamic => Math.Min(
-                    3,
-                    configuredMaximumWidth),
-                RiverChannelArchetype.SourceChannel => Math.Min(
-                    3,
-                    configuredMaximumWidth),
-                _ => configuredMaximumWidth
-            };
+            return configuredMaximumWidth;
         }
 
         private static void ResolvePerpendicular(
@@ -1326,6 +2226,69 @@ namespace MiniCivilization.World.Generation
             }
         }
 
+        private static Dictionary<int, int> BuildSourceTransitionTops(
+            ChannelTrace trace,
+            IReadOnlyList<int> widths,
+            IReadOnlyList<int> surfaceLevels,
+            HydrologyMap hydrology,
+            HashSet<int> channelColumns)
+        {
+            var result = new Dictionary<int, int>();
+            for (var pathIndex = 1;
+                 pathIndex < trace.Path.Count;
+                 pathIndex++)
+            {
+                var previousSurface = surfaceLevels[pathIndex - 1];
+                var currentSurface = surfaceLevels[pathIndex];
+                if (previousSurface == currentSurface)
+                {
+                    continue;
+                }
+
+                var transitionIndex = currentSurface < previousSurface
+                    ? pathIndex
+                    : pathIndex - 1;
+                var maximumWaterTop = Math.Max(
+                    previousSurface,
+                    currentSurface);
+                ResolvePerpendicular(
+                    trace.Path,
+                    hydrology.Size,
+                    transitionIndex,
+                    out var perpendicularX,
+                    out var perpendicularZ);
+                var centerIndex = trace.Path[transitionIndex];
+                var centerX = centerIndex % hydrology.Size;
+                var centerZ = centerIndex / hydrology.Size;
+                var radius = widths[transitionIndex] / 2;
+                for (var offset = -radius; offset <= radius; offset++)
+                {
+                    var x = centerX + perpendicularX * offset;
+                    var z = centerZ + perpendicularZ * offset;
+                    if (!hydrology.Contains(x, z))
+                    {
+                        continue;
+                    }
+
+                    var columnIndex = hydrology.ToIndex(x, z);
+                    if (!channelColumns.Contains(columnIndex))
+                    {
+                        continue;
+                    }
+
+                    if (!result.TryGetValue(
+                            columnIndex,
+                            out var existingTop)
+                        || maximumWaterTop > existingTop)
+                    {
+                        result[columnIndex] = maximumWaterTop;
+                    }
+                }
+            }
+
+            return result;
+        }
+
         private static void AddChannelWetCells(
             ChannelPlan plan,
             int size,
@@ -1350,28 +2313,42 @@ namespace MiniCivilization.World.Generation
             plan.AddRequiredWetCell(new CellCoordinate(x, firstY, z));
         }
 
-        private static void AddHeadwaterSource(
+        private static void AddHeadwaterSources(
             ChannelPlan plan,
             IReadOnlyList<int> path,
+            IReadOnlyList<int> bedHeights,
             IReadOnlyList<int> levels)
         {
             var columnIndex = path[0];
             var x = columnIndex % plan.WorldSize;
             var z = columnIndex / plan.WorldSize;
-            var section = plan.Sections[columnIndex];
-            var bedHeight = levels[0] - section.CenterDepthUnits;
-            var y = bedHeight / WorldGrid.HeightStepsPerCell;
-            plan.AddSourceCell(new PlannedWaterCell(
-                new CellCoordinate(x, y, z),
-                WaterFlowDirectionMask.None));
+            var firstY = Math.Max(
+                0,
+                bedHeights[0] / WorldGrid.HeightStepsPerCell);
+            var lastY = Math.Min(
+                plan.WorldHeight - 1,
+                (levels[0] - 1) / WorldGrid.HeightStepsPerCell);
+            for (var y = firstY; y <= lastY; y++)
+            {
+                plan.AddSourceCell(new PlannedWaterCell(
+                    new CellCoordinate(x, y, z),
+                    WaterFlowDirectionMask.None));
+            }
         }
 
         private static bool AddPersistentChannelSources(
             ChannelPlan plan,
-            IReadOnlyDictionary<int, ChannelCellProfile> channelCells)
+            IReadOnlyDictionary<int, ChannelCellProfile> channelCells,
+            IReadOnlyDictionary<int, int> transitionTops)
         {
             foreach (var pair in channelCells)
             {
+                if (transitionTops != null
+                    && transitionTops.ContainsKey(pair.Key))
+                {
+                    continue;
+                }
+
                 var profile = pair.Value;
                 if (profile.SurfaceHeightUnits <= 0
                     || profile.SurfaceHeightUnits
@@ -1380,18 +2357,25 @@ namespace MiniCivilization.World.Generation
                     return false;
                 }
 
-                var y = profile.SurfaceHeightUnits
+                var firstY = Math.Max(
+                    0,
+                    profile.BedHeightUnits
+                    / WorldGrid.HeightStepsPerCell);
+                var lastY = profile.SurfaceHeightUnits
                     / WorldGrid.HeightStepsPerCell - 1;
-                if ((uint)y >= plan.WorldHeight)
+                if ((uint)lastY >= plan.WorldHeight)
                 {
                     return false;
                 }
 
                 var x = pair.Key % plan.WorldSize;
                 var z = pair.Key / plan.WorldSize;
-                plan.AddSourceCell(new PlannedWaterCell(
-                    new CellCoordinate(x, y, z),
-                    WaterFlowDirectionMask.None));
+                for (var y = firstY; y <= lastY; y++)
+                {
+                    plan.AddSourceCell(new PlannedWaterCell(
+                        new CellCoordinate(x, y, z),
+                        WaterFlowDirectionMask.None));
+                }
             }
 
             return true;
@@ -1400,30 +2384,180 @@ namespace MiniCivilization.World.Generation
         private static void TryAcceptChannel(
             WorldData world,
             IReadOnlyList<BasinPlan> basins,
+            IReadOnlyList<int> solidHeights,
             ChannelPlan channel,
             List<ChannelPlan> acceptedChannels,
-            HashSet<int> usedColumns)
+            HashSet<int> usedColumns,
+            WaterPlanValidationContext validationContext)
         {
-            var candidateChannels = new List<ChannelPlan>(acceptedChannels)
+            for (var repairPass = 0;
+                 repairPass <= MaximumBankRepairPasses;
+                 repairPass++)
             {
-                channel
-            };
-            if (!HydrologyFeaturePlan.TryCreate(
-                    world.Size,
-                    world.Height,
-                    basins,
-                    candidateChannels,
-                    out var merged)
-                || !WaterPlanValidator.Validate(world, merged).IsValid)
+                var candidateChannels = new List<ChannelPlan>(
+                    acceptedChannels)
+                {
+                    channel
+                };
+                if (!HydrologyFeaturePlan.TryCreate(
+                        world.Size,
+                        world.Height,
+                        basins,
+                        candidateChannels,
+                        out var candidatePlan))
+                {
+                    return;
+                }
+
+                var validation = WaterPlanValidator.Validate(
+                    world,
+                    candidatePlan,
+                    validationContext);
+                if (validation.IsValid)
+                {
+                    acceptedChannels.Add(channel);
+                    foreach (var columnIndex in channel.ChannelColumnIndices)
+                    {
+                        usedColumns.Add(columnIndex);
+                    }
+
+                    return;
+                }
+
+                if (repairPass == MaximumBankRepairPasses
+                    || !TryReinforceLeakingBanks(
+                        world,
+                        solidHeights,
+                        basins,
+                        channel,
+                        validation.LeakedCellIndices))
+                {
+                    return;
+                }
+            }
+        }
+
+        private static bool TryReinforceLeakingBanks(
+            WorldData world,
+            IReadOnlyList<int> solidHeights,
+            IReadOnlyList<BasinPlan> basins,
+            ChannelPlan channel,
+            IReadOnlyList<int> leakedCellIndices)
+        {
+            if (leakedCellIndices == null
+                || leakedCellIndices.Count == 0)
             {
-                return;
+                return false;
             }
 
-            acceptedChannels.Add(channel);
-            foreach (var columnIndex in channel.ChannelColumnIndices)
+            var basinWetColumns = new HashSet<int>();
+            var channelColumns = new HashSet<int>(
+                channel.ChannelColumnIndices);
+            for (var basinIndex = 0;
+                 basinIndex < basins.Count;
+                 basinIndex++)
             {
-                usedColumns.Add(columnIndex);
+                var wetColumns = basins[basinIndex].WetColumnIndices;
+                for (var wetIndex = 0;
+                     wetIndex < wetColumns.Count;
+                     wetIndex++)
+                {
+                    basinWetColumns.Add(wetColumns[wetIndex]);
+                }
             }
+
+            var requiredBankHeights = new Dictionary<int, int>();
+            var maximumWorldHeight = checked(
+                world.Height * WorldGrid.HeightStepsPerCell);
+            for (var leakIndex = 0;
+                 leakIndex < leakedCellIndices.Count;
+                 leakIndex++)
+            {
+                var coordinate = WorldIndex.DecodeCell(
+                    world,
+                    leakedCellIndices[leakIndex]);
+                var columnIndex = coordinate.X
+                    + world.Size * coordinate.Z;
+                if (channelColumns.Contains(columnIndex)
+                    || basinWetColumns.Contains(columnIndex)
+                    || !IsAdjacentToChannel(
+                        world.Size,
+                        columnIndex,
+                        channelColumns))
+                {
+                    continue;
+                }
+
+                var requiredHeight = Math.Min(
+                    maximumWorldHeight,
+                    (coordinate.Y + 1)
+                    * WorldGrid.HeightStepsPerCell);
+                if (!requiredBankHeights.TryGetValue(
+                        columnIndex,
+                        out var existingHeight)
+                    || requiredHeight > existingHeight)
+                {
+                    requiredBankHeights[columnIndex] = requiredHeight;
+                }
+            }
+
+            var changed = false;
+            foreach (var pair in requiredBankHeights)
+            {
+                var targetHeight = Math.Max(
+                    solidHeights[pair.Key],
+                    pair.Value);
+                if (channel.TerrainColumns.TryGetValue(
+                        pair.Key,
+                        out var existingColumn))
+                {
+                    targetHeight = Math.Max(
+                        targetHeight,
+                        existingColumn.TargetHeightUnits);
+                    if (targetHeight
+                        == existingColumn.TargetHeightUnits)
+                    {
+                        continue;
+                    }
+                }
+
+                var x = pair.Key % world.Size;
+                var z = pair.Key / world.Size;
+                channel.SetTerrainColumn(new PlannedTerrainColumn(
+                    x,
+                    z,
+                    targetHeight));
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static bool IsAdjacentToChannel(
+            int size,
+            int columnIndex,
+            HashSet<int> channelColumns)
+        {
+            var x = columnIndex % size;
+            var z = columnIndex / size;
+            for (var directionIndex = 0;
+                 directionIndex < Directions.Length;
+                 directionIndex++)
+            {
+                var nextX = x + Directions[directionIndex].x;
+                var nextZ = z + Directions[directionIndex].z;
+                if ((uint)nextX >= size || (uint)nextZ >= size)
+                {
+                    continue;
+                }
+
+                if (channelColumns.Contains(nextX + size * nextZ))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static int[] BuildBasinLookup(
@@ -1542,35 +2676,31 @@ namespace MiniCivilization.World.Generation
                 $"Basin {basinId} was not found.");
         }
 
-        private static WaterFlowDirectionMask ToDirection(
-            int size,
-            int fromIndex,
-            int toIndex)
-        {
-            var fromX = fromIndex % size;
-            var fromZ = fromIndex / size;
-            var toX = toIndex % size;
-            var toZ = toIndex / size;
-            if (toX > fromX) return WaterFlowDirectionMask.East;
-            if (toX < fromX) return WaterFlowDirectionMask.West;
-            if (toZ > fromZ) return WaterFlowDirectionMask.North;
-            if (toZ < fromZ) return WaterFlowDirectionMask.South;
-            return WaterFlowDirectionMask.None;
-        }
-
         private static int AlignToCellCeiling(int heightUnits)
         {
             var step = WorldGrid.HeightStepsPerCell;
             return ((heightUnits + step - 1) / step) * step;
         }
 
+        private static int AlignToCellFloor(int heightUnits)
+        {
+            var step = WorldGrid.HeightStepsPerCell;
+            return Math.Max(0, heightUnits) / step * step;
+        }
+
         private static int CompareHeadwaters(
             HeadwaterCandidate left,
             HeadwaterCandidate right)
         {
-            var scoreComparison = right.Score.CompareTo(left.Score);
-            return scoreComparison != 0
-                ? scoreComparison
+            var orderComparison = left.Order.CompareTo(right.Order);
+            if (orderComparison != 0)
+            {
+                return orderComparison;
+            }
+
+            var fitnessComparison = right.Fitness.CompareTo(left.Fitness);
+            return fitnessComparison != 0
+                ? fitnessComparison
                 : left.ColumnIndex.CompareTo(right.ColumnIndex);
         }
 
@@ -1602,14 +2732,40 @@ namespace MiniCivilization.World.Generation
         private readonly struct ChannelTrace
         {
             public readonly IReadOnlyList<int> Path;
+            public readonly ChannelTerminal StartTarget;
             public readonly ChannelTerminal Target;
 
             public ChannelTrace(
                 IReadOnlyList<int> path,
+                ChannelTerminal target) : this(
+                    path,
+                    ChannelTerminal.Independent,
+                    target)
+            {
+            }
+
+            public ChannelTrace(
+                IReadOnlyList<int> path,
+                ChannelTerminal startTarget,
                 ChannelTerminal target)
             {
                 Path = path;
+                StartTarget = startTarget;
                 Target = target;
+            }
+        }
+
+        private readonly struct RiverGenerationProfile
+        {
+            public readonly RiverWaterMode WaterMode;
+            public readonly RiverTerrainStyle TerrainStyle;
+
+            public RiverGenerationProfile(
+                RiverWaterMode waterMode,
+                RiverTerrainStyle terrainStyle)
+            {
+                WaterMode = waterMode;
+                TerrainStyle = terrainStyle;
             }
         }
 
@@ -1665,12 +2821,17 @@ namespace MiniCivilization.World.Generation
         private readonly struct HeadwaterCandidate
         {
             public readonly int ColumnIndex;
-            public readonly float Score;
+            public readonly float Fitness;
+            public readonly float Order;
 
-            public HeadwaterCandidate(int columnIndex, float score)
+            public HeadwaterCandidate(
+                int columnIndex,
+                float fitness,
+                float order)
             {
                 ColumnIndex = columnIndex;
-                Score = score;
+                Fitness = fitness;
+                Order = order;
             }
         }
 
