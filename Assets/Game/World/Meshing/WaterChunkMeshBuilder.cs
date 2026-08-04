@@ -466,7 +466,7 @@ namespace MiniCivilization.World.Meshing
                     z,
                     localX,
                     localZ),
-                ResolveFlowData(world.GetCell(x, y, z).Water));
+                ResolveTopFlowData(world.GetCell(x, y, z).Water));
 
         private static SurfaceVertex CreateSideVertex(
             WorldData world,
@@ -518,24 +518,34 @@ namespace MiniCivilization.World.Meshing
             int directionX,
             int directionZ)
         {
-            var flow = ResolveFlowData(water);
+            var horizontal = ResolveHorizontalFlow(water.Direction);
             var horizontalUvFlow = directionX < 0
-                ? flow.y
+                ? horizontal.y
                 : directionX > 0
-                    ? -flow.y
+                    ? -horizontal.y
                     : directionZ < 0
-                        ? -flow.x
-                        : flow.x;
+                        ? -horizontal.x
+                        : horizontal.x;
             return new Vector4(
                 horizontalUvFlow,
-                0f,
-                flow.z,
-                flow.w);
+                water.IsFalling ? -1f : 0f,
+                1f,
+                water.IsFlowing ? 1f : 0f);
         }
 
-        private static Vector4 ResolveFlowData(WaterCellData water)
+        private static Vector4 ResolveTopFlowData(WaterCellData water)
         {
-            var direction = water.Direction;
+            var horizontal = ResolveHorizontalFlow(water.Direction);
+            return new Vector4(
+                horizontal.x,
+                horizontal.y,
+                0f,
+                water.IsFlowing ? 1f : 0f);
+        }
+
+        private static Vector2 ResolveHorizontalFlow(
+            WaterFlowDirectionMask direction)
+        {
             var horizontal = Vector2.zero;
             if ((direction & WaterFlowDirectionMask.East) != 0)
             {
@@ -557,16 +567,7 @@ namespace MiniCivilization.World.Meshing
                 horizontal.y -= 1f;
             }
 
-            if (horizontal.sqrMagnitude > 0.0001f)
-            {
-                horizontal.Normalize();
-            }
-
-            return new Vector4(
-                horizontal.x,
-                horizontal.y,
-                water.IsFalling ? 1f : 0f,
-                water.IsFlowing ? 1f : 0f);
+            return horizontal;
         }
 
         private static void GetBoundaryCoordinates(

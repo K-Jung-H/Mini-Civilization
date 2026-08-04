@@ -56,23 +56,24 @@ Shader "Mini Civilization/World Water Lit"
             UNITY_SETUP_INSTANCE_ID(input);
             UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-            float2 flowDirection = input.flow.xy;
-            float flowSpeed = _HorizontalFlowSpeed;
-            if (input.flow.z > 0.5)
+            float2 uvVelocity = 0.0;
+            if (input.flow.w > 0.5)
             {
-                flowDirection = float2(0.0, -1.0);
-                flowSpeed = _VerticalFlowSpeed;
+                float2 flowSpeed = input.flow.z > 0.5
+                    ? float2(_HorizontalFlowSpeed, _VerticalFlowSpeed)
+                    : _HorizontalFlowSpeed.xx;
+                uvVelocity = input.flow.xy * flowSpeed;
             }
-            else if (dot(flowDirection, flowDirection) < 0.0001)
+            else if (input.flow.z < 0.5)
             {
                 float2 staticDirection = _StaticFlowDirection.xy;
-                flowDirection = staticDirection
+                uvVelocity = staticDirection
                     / max(length(staticDirection), 0.0001);
-                flowSpeed = _StaticFlowSpeed;
+                uvVelocity *= _StaticFlowSpeed;
             }
 
             float2 animatedUv = input.uv
-                + flowDirection * flowSpeed * _Time.y;
+                - uvVelocity * _Time.y;
             float2 textureWeights = NormalizeSurfaceWeights(input.textureWeights);
             half4 albedoSample = SampleSurfaceAlbedo(
                 animatedUv, input.textureLayers, textureWeights, input.textureScales);
