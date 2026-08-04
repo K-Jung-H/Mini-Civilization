@@ -51,10 +51,20 @@ namespace MiniCivilization.World.Generation
         [SerializeField, Range(0, 12)] private int riverCount = 4;
         [Tooltip("강바닥을 수면보다 낮게 깎는 양자화 높이 단계 수입니다. 한 단계는 월드 높이 0.2입니다.")]
         [SerializeField, Range(1, 3)] private int riverDepthSteps = 2;
+        [Tooltip("유량 누적에 따라 확장할 수 있는 최대 강 폭입니다. 홀수 Cell 폭으로 적용됩니다.")]
+        [SerializeField, Range(1, 5)] private int maximumRiverWidthCells = 3;
+        [Tooltip("유량 누적에 따라 깊어질 수 있는 최대 강바닥 깊이 단계입니다.")]
+        [SerializeField, Range(1, WorldGrid.HeightStepsPerCell)]
+        private int maximumRiverDepthSteps = 4;
         [Tooltip("생성을 시도할 내륙 호수의 수입니다. 적합한 위치가 부족하면 실제 생성 수는 더 적을 수 있습니다.")]
         [SerializeField, Range(0, 8)] private int lakeCount = 2;
-        [Tooltip("호수를 깎고 물을 채우는 수평 반지름입니다. 단위는 타일입니다.")]
-        [SerializeField, Range(1, 5)] private int lakeRadius = 2;
+        [Tooltip("생성할 내륙 호수와 바다 사이에 필요한 최소 D4 Cell 거리입니다.")]
+        [SerializeField, Range(1, 32)] private int minimumInlandLakeDistance = 6;
+        [Tooltip("내륙 분지가 호수로 채택되기 위한 최소 수면 Column 수입니다.")]
+        [SerializeField, Range(1, 64)] private int minimumInlandLakeArea = 3;
+        [Tooltip("내륙 분지가 호수로 채택되기 위한 최소 깊이 단계입니다.")]
+        [SerializeField, Range(1, WorldGrid.HeightStepsPerCell)]
+        private int minimumInlandLakeDepthSteps = 1;
         [Tooltip("WaterAmount lost whenever water spreads to a horizontal Cell. Downward spread does not lose Amount.")]
         [SerializeField, Range(WaterAmount.Unit, 1f)]
         private float spreadAmountLoss = 0.05f;
@@ -94,8 +104,15 @@ namespace MiniCivilization.World.Generation
         public int SeaLevelUnits => seaLevelCell * WorldGrid.HeightStepsPerCell + seaLevelStep;
         public int RiverCount => riverCount;
         public int RiverDepthSteps => riverDepthSteps;
+        public int MaximumRiverWidthCells => maximumRiverWidthCells;
+        public int MaximumRiverDepthSteps => Math.Max(
+            riverDepthSteps,
+            maximumRiverDepthSteps);
         public int LakeCount => lakeCount;
-        public int LakeRadius => lakeRadius;
+        public int MinimumInlandLakeDistance => minimumInlandLakeDistance;
+        public int MinimumInlandLakeArea => minimumInlandLakeArea;
+        public int MinimumInlandLakeDepthSteps =>
+            minimumInlandLakeDepthSteps;
         public float SpreadAmountLoss => spreadAmountLoss;
         public float MinimumSpreadAmount => minimumSpreadAmount;
         public float DissipationAmountLoss => dissipationAmountLoss;
@@ -175,6 +192,27 @@ namespace MiniCivilization.World.Generation
             terrainAmplitudeCells = Math.Clamp(terrainAmplitudeCells, 1, worldHeight - 1);
             mountainStrengthCells = Math.Clamp(mountainStrengthCells, 0, worldHeight - 1);
             seaLevelCell = Math.Clamp(seaLevelCell, 0, worldHeight - 1);
+            minimumInlandLakeDistance = Math.Max(
+                1,
+                minimumInlandLakeDistance);
+            minimumInlandLakeArea = Math.Max(1, minimumInlandLakeArea);
+            minimumInlandLakeDepthSteps = Math.Clamp(
+                minimumInlandLakeDepthSteps,
+                1,
+                WorldGrid.HeightStepsPerCell);
+            maximumRiverWidthCells = Math.Clamp(
+                maximumRiverWidthCells,
+                1,
+                5);
+            if ((maximumRiverWidthCells & 1) == 0)
+            {
+                maximumRiverWidthCells--;
+            }
+
+            maximumRiverDepthSteps = Math.Clamp(
+                maximumRiverDepthSteps,
+                riverDepthSteps,
+                WorldGrid.HeightStepsPerCell);
             spreadAmountLoss = Math.Clamp(
                 spreadAmountLoss,
                 WaterAmount.Unit,

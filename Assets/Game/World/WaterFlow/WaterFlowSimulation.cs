@@ -333,10 +333,18 @@ namespace MiniCivilization.World.WaterFlow
             if (current.Role == WaterCellRole.Source)
             {
                 current.Amount = WaterAmount.Full;
-                current.Direction &= WaterFlowDirectionMask.Horizontal;
+                current.Direction = WaterFlowDirectionMask.None;
                 if (CanFlowDown(world, state, coordinate))
                 {
                     current.Direction |= WaterFlowDirectionMask.Down;
+                }
+                else
+                {
+                    current.Direction |= ResolveSourceOutflowDirections(
+                        world,
+                        state,
+                        cellIndex,
+                        parameters);
                 }
 
                 current.Normalize();
@@ -468,6 +476,62 @@ namespace MiniCivilization.World.WaterFlow
             return ApplyDissipation(current, desired, parameters);
         }
 
+        private static WaterFlowDirectionMask ResolveSourceOutflowDirections(
+            WorldData world,
+            WaterFlowState state,
+            int sourceIndex,
+            in WaterFlowParameters parameters)
+        {
+            if (WaterAmount.Full <= parameters.SpreadAmountLoss)
+            {
+                return WaterFlowDirectionMask.None;
+            }
+
+            var candidateAmount = checked((byte)(
+                WaterAmount.Full - parameters.SpreadAmountLoss));
+            if (candidateAmount < parameters.MinimumSpreadAmount)
+            {
+                return WaterFlowDirectionMask.None;
+            }
+
+            var source = WorldIndex.DecodeCell(world, sourceIndex);
+            var result = WaterFlowDirectionMask.None;
+            for (var directionIndex = 0;
+                 directionIndex < HorizontalDirections.Length;
+                 directionIndex++)
+            {
+                var offset = HorizontalDirections[directionIndex];
+                var targetX = source.X + offset.x;
+                var targetZ = source.Z + offset.z;
+                if (!world.Contains(targetX, source.Y, targetZ))
+                {
+                    continue;
+                }
+
+                var targetIndex = WorldIndex.EncodeCell(
+                    world,
+                    targetX,
+                    source.Y,
+                    targetZ);
+                var targetWater = state.GetWater(targetIndex);
+                if (targetWater.Role == WaterCellRole.Source
+                    || targetWater.Amount > candidateAmount
+                    || !CanReachHorizontally(
+                        world,
+                        state,
+                        sourceIndex,
+                        targetIndex,
+                        candidateAmount))
+                {
+                    continue;
+                }
+
+                result |= ToDirection(offset.x, offset.z);
+            }
+
+            return result;
+        }
+
         private static WaterCellData ApplyDissipation(
             WaterCellData current,
             WaterCellData desired,
@@ -532,7 +596,11 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate.X,
                 coordinate.Y - 1,
                 coordinate.Z);
-            return state.GetWater(belowIndex).Amount < WaterAmount.Full;
+            var belowWater = state.GetWater(belowIndex);
+            return WaterFlowReachability.CanFlowDown(
+                coordinate.Y,
+                below,
+                belowWater);
         }
 
         /// <summary>
@@ -550,11 +618,13 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            return world.GetCell(
-                    coordinate.X,
-                    coordinate.Y - 1,
-                    coordinate.Z)
-                .SolidFill < WorldGrid.HeightStepsPerCell;
+            var below = world.GetCell(
+                coordinate.X,
+                coordinate.Y - 1,
+                coordinate.Z);
+            return WaterFlowReachability.HasVerticalDropBelow(
+                coordinate.Y,
+                below);
         }
 
         private static bool CanReachHorizontally(
@@ -575,20 +645,13 @@ namespace MiniCivilization.World.WaterFlow
                 targetCoordinate.Y,
                 targetCoordinate.Z);
             var donorWater = state.GetWater(donorIndex);
-            var donorCapacity =
-                WorldGrid.HeightStepsPerCell - donorCell.SolidFill;
-            var donorTopUnits = donorCoordinate.Y
-                * WorldGrid.HeightStepsPerCell
-                + donorCell.SolidFill
-                + donorWater.Amount
-                * donorCapacity
-                / (float)WaterAmount.Full;
-            var targetFloorUnits = targetCoordinate.Y
-                * WorldGrid.HeightStepsPerCell
-                + targetCell.SolidFill;
-            return candidateAmount > 0
-                && targetCell.SolidFill < WorldGrid.HeightStepsPerCell
-                && targetFloorUnits < donorTopUnits;
+            return WaterFlowReachability.CanReachHorizontally(
+                donorCoordinate,
+                donorCell,
+                donorWater,
+                targetCoordinate,
+                targetCell,
+                candidateAmount);
         }
 
         private static bool HasReachablePreferredDirection(

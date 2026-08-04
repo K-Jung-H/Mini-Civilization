@@ -13374,7 +13374,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationController
   settings: {fileID: 11400000, guid: b6f6b194b8934c81a7e9b7e0ca000001, type: 2}
-  seed: -998996043
+  seed: 331837051
 --- !u!114 &1900000004
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -13392,6 +13392,7 @@ MonoBehaviour:
   waterMaterial: {fileID: 2100000, guid: b6f6b194b8934c81a7e9b7e0ca000004, type: 2}
   renderRoot: {fileID: 1900000011}
   renderPatchSizeXZ: 8
+  maxPatchRebuildsPerFrame: 2
 --- !u!114 &1900000005
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14157,6 +14158,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2bf90131140e44f4ad17e714d8d3785b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.WaterFlow.WorldWaterFlowController
+  simulationStepInterval: 0.1
+  maxCellsPerFrame: 2048
 --- !u!1 &1928212989
 GameObject:
   m_ObjectHideFlags: 0

@@ -9,8 +9,6 @@ Shader "Mini Civilization/World Water Lit"
         [HDR] _EmissionColor("Emission", Color) = (0, 0, 0, 0)
         _HorizontalFlowSpeed("Horizontal Flow Speed", Float) = 0.18
         _VerticalFlowSpeed("Vertical Flow Speed", Float) = 0.35
-        _StaticFlowSpeed("Static Flow Speed", Float) = 0.035
-        _StaticFlowDirection("Static Flow Direction", Vector) = (0.707, 0.707, 0, 0)
         [HideInInspector] _Cull("Cull", Float) = 2
         _DepthBiasFactor("Depth Bias Factor", Float) = 0
         _DepthBiasUnits("Depth Bias Units", Float) = 0
@@ -45,8 +43,6 @@ Shader "Mini Civilization/World Water Lit"
             half _Cull;
             float _HorizontalFlowSpeed;
             float _VerticalFlowSpeed;
-            float _StaticFlowSpeed;
-            float4 _StaticFlowDirection;
         CBUFFER_END
 
         #include "Assets/Game/World/Presentation/Shaders/WorldSurfaceLitCommon.hlsl"
@@ -64,14 +60,6 @@ Shader "Mini Civilization/World Water Lit"
                     : _HorizontalFlowSpeed.xx;
                 uvVelocity = input.flow.xy * flowSpeed;
             }
-            else if (input.flow.z < 0.5)
-            {
-                float2 staticDirection = _StaticFlowDirection.xy;
-                uvVelocity = staticDirection
-                    / max(length(staticDirection), 0.0001);
-                uvVelocity *= _StaticFlowSpeed;
-            }
-
             float2 animatedUv = input.uv
                 - uvVelocity * _Time.y;
             float2 textureWeights = NormalizeSurfaceWeights(input.textureWeights);
