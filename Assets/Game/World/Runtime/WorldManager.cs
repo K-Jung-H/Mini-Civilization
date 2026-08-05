@@ -88,12 +88,15 @@ namespace MiniCivilization.World.Runtime
 
             try
             {
+                Debug.Log("[WorldStartup] Generation begin", this);
                 var generatedAsset = generator.GenerateDataAsset();
+                Debug.Log("[WorldStartup] Generation complete", this);
                 saveController.ClearActiveSavePath();
                 ActivateWorldAsset(
                     generatedAsset,
                     preferPreparedScene: false,
                     markDirty: true);
+                Debug.Log("[WorldStartup] Activation complete", this);
                 return true;
             }
             catch (Exception exception)

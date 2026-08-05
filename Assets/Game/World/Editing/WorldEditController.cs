@@ -231,7 +231,7 @@ namespace MiniCivilization.World.Editing
                         change.ColumnIndex,
                         out var x,
                         out var z);
-                    boundWorld.SetColumnEnvironment(x, z, change.Current);
+                    boundWorld.SetEnvironment(x, z, change.Current);
                     changedColumns.Add(change.ColumnIndex);
                 }
 
@@ -242,7 +242,7 @@ namespace MiniCivilization.World.Editing
                         columnIndex,
                         out var x,
                         out var z);
-                    if (!boundWorld.HasSolidCell(x, z))
+                    if (!boundWorld.HasTerrainCell(x, z))
                     {
                         throw new InvalidOperationException(
                             $"World edit would remove every solid cell from column ({x}, {z}).");
@@ -359,21 +359,26 @@ namespace MiniCivilization.World.Editing
                     change.ColumnIndex,
                     out var x,
                     out var z);
-                boundWorld.SetColumnEnvironment(x, z, change.Previous);
+                boundWorld.SetEnvironment(x, z, change.Previous);
             }
         }
 
         private void RebuildColumns(IEnumerable<int> columnIndices)
         {
-            foreach (var columnIndex in columnIndices)
+            var changedColumns = columnIndices as IReadOnlyCollection<int>
+                ?? new HashSet<int>(columnIndices);
+            foreach (var columnIndex in changedColumns)
             {
                 WorldIndex.DecodeColumn(
                     boundWorld,
                     columnIndex,
                     out var x,
                     out var z);
-                boundWorld.RebuildSurfaceColumn(x, z);
+                boundWorld.Cache.RebuildSurfaceHeight(x, z);
             }
+
+            boundWorld.Cache.RebuildPathColumns(changedColumns);
+            boundWorld.Cache.RebuildWaterDistances();
         }
 
         private ChunkCoordinate[] BuildAffectedChunks(
@@ -520,16 +525,16 @@ namespace MiniCivilization.World.Editing
             CellData current)
         {
             var types = WorldChangeType.None;
-            if (previous.SolidFill != current.SolidFill
-                || previous.WaterFill != current.WaterFill)
+            if (previous.Terrain.SolidHeight != current.Terrain.SolidHeight
+                || previous.WaterHeight != current.WaterHeight)
             {
                 types |= WorldChangeType.CellStructure
                     | WorldChangeType.Surface
                     | WorldChangeType.Navigation;
             }
 
-            if (previous.Material != current.Material
-                || previous.Surface != current.Surface)
+            if (previous.Terrain.Material != current.Terrain.Material
+                || previous.Terrain.Surface != current.Terrain.Surface)
             {
                 types |= WorldChangeType.Material
                     | WorldChangeType.Surface
@@ -716,7 +721,7 @@ namespace MiniCivilization.World.Editing
 
             var removalY = lowestSolidY + 1;
             if (removalY >= world.Height
-                || !GetPendingCell(x, removalY, z).HasSolid
+                || !GetPendingCell(x, removalY, z).HasTerrain
                 || !TryGetHighestPendingSolidY(
                     x,
                     z,
@@ -756,7 +761,7 @@ namespace MiniCivilization.World.Editing
                 return false;
             }
 
-            if (current.HasSolid
+            if (current.HasTerrain
                 && TryGetLowestPendingSolidY(x, z, out var lowestSolidY)
                 && y == lowestSolidY)
             {
@@ -787,28 +792,27 @@ namespace MiniCivilization.World.Editing
                     0,
                     WorldGrid.HeightStepsPerCell);
                 var cell = GetPendingCell(x, y, z);
-                cell.SolidFill = fill;
+                cell.Terrain.SolidHeight = fill;
                 if (fill > 0)
                 {
-                    cell.Material =
+                    cell.Terrain.Material =
                         y < Math.Max(
                             0,
                             heightUnits / WorldGrid.HeightStepsPerCell - 2)
-                            ? CellMaterialType.Rock
-                            : CellMaterialType.Soil;
-                    cell.Geology = CellMaterialType.Rock;
-                    cell.Surface =
+                            ? MaterialType.Rock
+                            : MaterialType.Soil;
+                    cell.Terrain.Geology = MaterialType.Rock;
+                    cell.Terrain.Surface =
                         fill < WorldGrid.HeightStepsPerCell
                         || baseUnits + fill == heightUnits
                             ? surface
                             : SurfaceType.None;
-                    cell.Flags |= CellFlags.Generated;
                 }
                 else
                 {
-                    cell.Material = CellMaterialType.None;
-                    cell.Surface = SurfaceType.None;
-                    cell.Geology = CellMaterialType.None;
+                    cell.Terrain.Material = MaterialType.None;
+                    cell.Terrain.Surface = SurfaceType.None;
+                    cell.Terrain.Geology = MaterialType.None;
                 }
 
                 SetCell(x, y, z, cell);
@@ -831,28 +835,24 @@ namespace MiniCivilization.World.Editing
                 var baseUnits = y * WorldGrid.HeightStepsPerCell;
                 var cell = GetPendingCell(x, y, z);
                 var available =
-                    WorldGrid.HeightStepsPerCell - cell.SolidFill;
+                    WorldGrid.HeightStepsPerCell - cell.Terrain.SolidHeight;
                 var desiredTop = Math.Clamp(
                     waterSurfaceUnits - baseUnits,
                     0,
                     WorldGrid.HeightStepsPerCell);
                 var waterFill = (byte)Math.Clamp(
-                    desiredTop - cell.SolidFill,
+                    desiredTop - cell.Terrain.SolidHeight,
                     0,
                     available);
                 cell.Water = waterFill > 0
-                    ? new WaterCellData
+                    ? new WaterData
                     {
                         Amount = WaterAmount.FromRenderFill(
                             waterFill,
                             available),
-                        Role = WaterCellRole.Source
+                        Role = WaterRole.Source
                     }
                     : default;
-                if (waterFill > 0)
-                {
-                    cell.Flags |= CellFlags.Generated;
-                }
                 SetCell(x, y, z, cell);
             }
         }
@@ -866,12 +866,12 @@ namespace MiniCivilization.World.Editing
             for (var y = world.Height - 1; y >= 0; y--)
             {
                 var cell = GetPendingCell(x, y, z);
-                if (!cell.HasSolid)
+                if (!cell.HasTerrain)
                 {
                     continue;
                 }
 
-                cell.Surface = surface;
+                cell.Terrain.Surface = surface;
                 SetCell(x, y, z, cell);
                 return;
             }
@@ -888,7 +888,7 @@ namespace MiniCivilization.World.Editing
         public void SetEnvironment(
             int x,
             int z,
-            ColumnEnvironmentData environment)
+            EnvironmentData environment)
         {
             EnsureOpen();
             EnsureColumn(x, z);
@@ -912,7 +912,7 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            var previous = world.GetColumnEnvironment(x, z);
+            var previous = world.GetEnvironment(x, z);
             if (EnvironmentEquals(previous, environment))
             {
                 return;
@@ -981,7 +981,7 @@ namespace MiniCivilization.World.Editing
             EnsureColumn(x, z);
             for (var y = 0; y < world.Height; y++)
             {
-                if (GetPendingCell(x, y, z).HasSolid)
+                if (GetPendingCell(x, y, z).HasTerrain)
                 {
                     lowestY = y;
                     return true;
@@ -1000,7 +1000,7 @@ namespace MiniCivilization.World.Editing
             EnsureColumn(x, z);
             for (var y = world.Height - 1; y >= 0; y--)
             {
-                if (GetPendingCell(x, y, z).HasSolid)
+                if (GetPendingCell(x, y, z).HasTerrain)
                 {
                     highestY = y;
                     return true;
@@ -1029,75 +1029,40 @@ namespace MiniCivilization.World.Editing
 
         private readonly struct TerrainCellState
         {
-            private readonly CellMaterialType material;
-            private readonly SurfaceType surface;
-            private readonly CellMaterialType geology;
-            private readonly ushort depositIndex;
-            private readonly byte solidFill;
-            private readonly CellFlags flags;
-
-            private bool HasSolid => solidFill > 0;
+            private readonly MiniCivilization.World.Domain.TerrainData terrain;
 
             private TerrainCellState(
-                CellMaterialType material,
-                SurfaceType surface,
-                CellMaterialType geology,
-                ushort depositIndex,
-                byte solidFill,
-                CellFlags flags)
-            {
-                this.material = material;
-                this.surface = surface;
-                this.geology = geology;
-                this.depositIndex = depositIndex;
-                this.solidFill = solidFill;
-                this.flags = flags & CellFlags.Generated;
-            }
+                MiniCivilization.World.Domain.TerrainData terrain) =>
+                this.terrain = terrain;
 
             public static TerrainCellState FromCell(in CellData cell) =>
-                new(
-                    cell.Material,
-                    cell.Surface,
-                    cell.Geology,
-                    cell.DepositIndex,
-                    cell.SolidFill,
-                    cell.Flags);
+                new(cell.Terrain);
 
-            public TerrainCellState CreateFoundation() =>
-                new(
-                    material,
-                    SurfaceType.None,
-                    geology,
-                    depositIndex,
-                    (byte)WorldGrid.HeightStepsPerCell,
-                    flags);
+            public TerrainCellState CreateFoundation()
+            {
+                var foundation = terrain;
+                foundation.Surface = SurfaceType.None;
+                foundation.SolidHeight = WorldGrid.HeightStepsPerCell;
+                return new TerrainCellState(foundation);
+            }
 
             public void ApplyTo(ref CellData cell)
             {
-                cell.Material = material;
-                cell.Surface = surface;
-                cell.Geology = geology;
-                cell.DepositIndex = depositIndex;
-                cell.SolidFill = solidFill;
-                cell.Flags = (cell.Flags & CellFlags.Generated) | flags;
+                cell.Terrain = terrain;
 
-                if (HasSolid)
+                if (terrain.HasTerrain)
                 {
                     ClearWater(ref cell);
-                }
-                else if (!cell.HasWater)
-                {
-                    cell.Flags = CellFlags.None;
                 }
             }
         }
 
-        private ColumnEnvironmentData GetPendingEnvironment(int x, int z)
+        private EnvironmentData GetPendingEnvironment(int x, int z)
         {
             var columnIndex = WorldIndex.EncodeColumn(world, x, z);
             return environmentChanges.TryGetValue(columnIndex, out var change)
                 ? change.Current
-                : world.GetColumnEnvironment(x, z);
+                : world.GetEnvironment(x, z);
         }
 
         private void EnsureColumn(int x, int z)
@@ -1121,8 +1086,8 @@ namespace MiniCivilization.World.Editing
         }
 
         private static bool EnvironmentEquals(
-            ColumnEnvironmentData left,
-            ColumnEnvironmentData right)
+            EnvironmentData left,
+            EnvironmentData right)
         {
             return left.Biome == right.Biome
                 && left.Temperature == right.Temperature
@@ -1154,13 +1119,13 @@ namespace MiniCivilization.World.Editing
     internal readonly struct EnvironmentEdit
     {
         public readonly int ColumnIndex;
-        public readonly ColumnEnvironmentData Previous;
-        public readonly ColumnEnvironmentData Current;
+        public readonly EnvironmentData Previous;
+        public readonly EnvironmentData Current;
 
         public EnvironmentEdit(
             int columnIndex,
-            ColumnEnvironmentData previous,
-            ColumnEnvironmentData current)
+            EnvironmentData previous,
+            EnvironmentData current)
         {
             ColumnIndex = columnIndex;
             Previous = previous;

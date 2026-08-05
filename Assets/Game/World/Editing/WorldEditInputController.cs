@@ -364,7 +364,7 @@ namespace MiniCivilization.World.Editing
                 return Mathf.Clamp(fallbackY, 0, world.Height - 1);
             }
 
-            var column = world.GetSurfaceColumn(x, z);
+            var column = world.Cache.GetSurfaceHeight(x, z);
             if (surfaceType == SurfaceInteractionType.Water)
             {
                 return column.HasWater
@@ -372,8 +372,8 @@ namespace MiniCivilization.World.Editing
                     : Mathf.Clamp(fallbackY, 0, world.Height - 1);
             }
 
-            return column.HasSurface
-                ? column.SurfaceCellY
+            return column.HasGround
+                ? column.GroundCellY
                 : Mathf.Clamp(fallbackY, 0, world.Height - 1);
         }
 

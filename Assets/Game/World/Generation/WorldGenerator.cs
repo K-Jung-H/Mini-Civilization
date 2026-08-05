@@ -16,6 +16,11 @@ namespace MiniCivilization.World.Generation
             WorldGenerationSettings settings,
             int seed)
         {
+            var generationTimer = System.Diagnostics.Stopwatch.StartNew();
+            void Trace(string stage) => UnityEngine.Debug.Log(
+                $"[WorldGeneration] {stage}: {generationTimer.ElapsedMilliseconds} ms");
+
+            Trace("Start");
             if (settings == null)
             {
                 throw new ArgumentNullException(nameof(settings));
@@ -34,39 +39,49 @@ namespace MiniCivilization.World.Generation
                 settings.ChunkSizeXZ,
                 seed);
             world.ConfigureWaterFlow(settings.WaterFlowRules);
+            world.ConfigureWaterTypes(settings.PondMaximumArea);
 
             var columnCount = settings.WorldSize * settings.WorldSize;
             var solidHeights = new int[columnCount];
             var waterSurfaces = new int[columnCount];
-            var waterRoles = new WaterCellRole[columnCount];
+            var waterRoles = new WaterRole[columnCount];
+            var waterTypes = new WaterType[columnCount];
             var waterBedSurfaces = new SurfaceType[columnCount];
 
             GenerateBaseTerrain(world, settings, seed, solidHeights);
+            Trace("Base terrain complete");
             InitializeSea(
                 world,
                 settings,
                 solidHeights,
                 waterSurfaces,
                 waterRoles,
+                waterTypes,
                 waterBedSurfaces);
+            Trace("Sea plan complete");
             ApplyColumns(
                 world,
                 solidHeights,
                 waterSurfaces,
-                waterRoles);
+                waterRoles,
+                waterTypes);
+            Trace("Base columns complete");
             var hydrology = HydrologyMapBuilder.Build(
                 world.Size,
                 settings.SeaLevelUnits,
                 solidHeights,
                 waterSurfaces);
+            Trace("Hydrology map complete");
             var waterValidationContext =
                 WaterPlanValidator.CreateContext(world);
+            Trace("Validation context complete");
             var lakePlans = InlandLakePlanner.BuildPlans(
                 world,
                 settings,
                 hydrology,
                 seed,
                 waterValidationContext);
+            Trace("Lake plans complete");
             var hydrologyFeaturePlan =
                 DynamicRiverPlanner.BuildFeaturePlan(
                     world,
@@ -77,21 +92,32 @@ namespace MiniCivilization.World.Generation
                     waterSurfaces,
                     seed,
                     waterValidationContext);
+            Trace("River plans complete");
             DynamicRiverPlanner.ApplyFeaturePlan(
                 hydrologyFeaturePlan,
                 solidHeights,
                 waterSurfaces,
                 waterRoles,
+                waterTypes,
                 waterBedSurfaces);
+            Trace("Water feature plan applied");
             ApplyColumns(
                 world,
                 solidHeights,
                 waterSurfaces,
-                waterRoles);
+                waterRoles,
+                waterTypes);
+            Trace("Final columns complete");
             VerifyAppliedFeaturePlan(world, hydrologyFeaturePlan);
+            WaterTypeResolver.RefreshAll(world);
+            Trace("Water types complete");
             world.WaterSources.InitializeFromGeneratedWorld(world);
             WaterFlowSolver.PrepareGeneratedWorld(world);
+            Trace("Water sources complete");
             ApplyBiomes(world, settings, seed, waterBedSurfaces);
+            Trace("Biomes complete");
+            world.Cache.RebuildAllPathData();
+            Trace("Path cache complete");
 
             return world;
         }
@@ -168,7 +194,8 @@ namespace MiniCivilization.World.Generation
             WorldGenerationSettings settings,
             int[] solidHeights,
             int[] waterSurfaces,
-            WaterCellRole[] waterRoles,
+            WaterRole[] waterRoles,
+            WaterType[] waterTypes,
             SurfaceType[] waterBedSurfaces)
         {
             var visited = new bool[solidHeights.Length];
@@ -191,7 +218,8 @@ namespace MiniCivilization.World.Generation
                 var current = queue.Dequeue();
                 var currentIndex = ToColumnIndex(world.Size, current.x, current.z);
                 waterSurfaces[currentIndex] = settings.SeaLevelUnits;
-                waterRoles[currentIndex] = WaterCellRole.Source;
+                waterRoles[currentIndex] = WaterRole.Source;
+                waterTypes[currentIndex] = WaterType.Sea;
                 waterBedSurfaces[currentIndex] = SurfaceType.Seabed;
 
                 for (var i = 0; i < CardinalDirections.Length; i++)
@@ -222,7 +250,8 @@ namespace MiniCivilization.World.Generation
             WorldData world,
             int[] solidHeights,
             int[] waterSurfaces,
-            WaterCellRole[] waterRoles)
+            WaterRole[] waterRoles,
+            WaterType[] waterTypes)
         {
             var writer = new WorldBulkWriter(world);
             for (var z = 0; z < world.Size; z++)
@@ -239,7 +268,8 @@ namespace MiniCivilization.World.Generation
                     SurfaceType.Ground,
                     waterSurface,
                     waterRoles[index],
-                    WaterFlowDirectionMask.None);
+                    waterTypes[index],
+                    FlowDirection.None);
             }
 
             writer.Complete();
@@ -252,10 +282,10 @@ namespace MiniCivilization.World.Generation
             foreach (var pair in featurePlan.TerrainColumns)
             {
                 var planned = pair.Value;
-                var column = world.GetSurfaceColumn(
+                var column = world.Cache.GetSurfaceHeight(
                     planned.X,
                     planned.Z);
-                if (column.SolidTopUnits != planned.TargetHeightUnits)
+                if (column.GroundHeight != planned.TargetHeightUnits)
                 {
                     throw new InvalidOperationException(
                         "Applied terrain does not match the accepted water feature plan.");
@@ -293,14 +323,14 @@ namespace MiniCivilization.World.Generation
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
-                var column = world.GetSurfaceColumn(x, z);
-                if (!column.HasSurface)
+                var column = world.Cache.GetSurfaceHeight(x, z);
+                if (!column.HasGround)
                 {
                     continue;
                 }
 
                 var latitude = world.Size > 1 ? MathF.Abs(z / (float)(world.Size - 1) * 2f - 1f) : 0f;
-                var altitude = column.SolidTopUnits / (float)(world.Height * WorldGrid.HeightStepsPerCell);
+                var altitude = column.GroundHeight / (float)(world.Height * WorldGrid.HeightStepsPerCell);
                 var temperature = Math.Clamp(1f - latitude * 0.7f - altitude * 0.45f, 0f, 1f);
                 var moistureNoise = DeterministicNoise.FractalNoise(x * 0.025f, z * 0.025f, climateSeed, 3, 2f, 0.5f);
                 var waterDistance = waterDistances[ToColumnIndex(world.Size, x, z)];
@@ -338,7 +368,7 @@ namespace MiniCivilization.World.Generation
                 {
                     surface = waterBed;
                 }
-                else if (IsAdjacentToWater(world, x, z) && Math.Abs(column.SolidTopUnits - settings.SeaLevelUnits) <= 2)
+                else if (IsAdjacentToWater(world, x, z) && Math.Abs(column.GroundHeight - settings.SeaLevelUnits) <= 2)
                 {
                     surface = SurfaceType.Shore;
                 }
@@ -347,9 +377,7 @@ namespace MiniCivilization.World.Generation
                     surface = SurfaceType.Ground;
                 }
 
-                column.Surface = surface;
-                world.SetSurfaceColumn(x, z, column);
-                world.SetColumnEnvironment(x, z, new ColumnEnvironmentData
+                world.SetEnvironment(x, z, new EnvironmentData
                 {
                     Biome = biome,
                     Temperature = (byte)MathF.Round(temperature * byte.MaxValue),
@@ -361,9 +389,9 @@ namespace MiniCivilization.World.Generation
                             1f) * byte.MaxValue)
                 });
 
-                var topCell = world.GetCell(x, column.SurfaceCellY, z);
-                topCell.Surface = surface;
-                world.SetCellBulk(x, column.SurfaceCellY, z, topCell);
+                var topCell = world.GetCell(x, column.GroundCellY, z);
+                topCell.Terrain.Surface = surface;
+                world.SetCellBulk(x, column.GroundCellY, z, topCell);
             }
         }
 
@@ -380,7 +408,7 @@ namespace MiniCivilization.World.Generation
             for (var x = 0; x < world.Size; x++)
             {
                 var index = ToColumnIndex(world.Size, x, z);
-                if (world.GetSurfaceColumn(x, z).HasWater
+                if (world.Cache.GetSurfaceHeight(x, z).HasWater
                     || plannedWaterBeds[index] != SurfaceType.None)
                 {
                     distances[index] = 0;
@@ -429,7 +457,7 @@ namespace MiniCivilization.World.Generation
             {
                 var nextX = x + CardinalDirections[i].x;
                 var nextZ = z + CardinalDirections[i].z;
-                if (world.ContainsColumn(nextX, nextZ) && world.GetSurfaceColumn(nextX, nextZ).HasWater)
+                if (world.ContainsColumn(nextX, nextZ) && world.Cache.GetSurfaceHeight(nextX, nextZ).HasWater)
                 {
                     return true;
                 }
@@ -463,8 +491,9 @@ namespace MiniCivilization.World.Generation
             int solidHeightUnits,
             SurfaceType surface,
             int waterSurfaceUnits,
-            WaterCellRole waterRole,
-            WaterFlowDirectionMask waterDirection)
+            WaterRole waterRole,
+            WaterType waterType,
+            FlowDirection waterDirection)
         {
             if (completed)
             {
@@ -489,23 +518,25 @@ namespace MiniCivilization.World.Generation
                     WorldGrid.HeightStepsPerCell);
                 var cell = new CellData
                 {
-                    SolidFill = solidFill
+                    Terrain = new TerrainData
+                    {
+                        SolidHeight = solidFill
+                    }
                 };
 
                 if (solidFill > 0)
                 {
-                    cell.Material = y < Math.Max(
+                    cell.Terrain.Material = y < Math.Max(
                             0,
                             solidHeightUnits / WorldGrid.HeightStepsPerCell - 2)
-                        ? CellMaterialType.Rock
-                        : CellMaterialType.Soil;
-                    cell.Geology = CellMaterialType.Rock;
-                    cell.Surface =
+                        ? MaterialType.Rock
+                        : MaterialType.Soil;
+                    cell.Terrain.Geology = MaterialType.Rock;
+                    cell.Terrain.Surface =
                         solidFill < WorldGrid.HeightStepsPerCell
                         || baseUnits + solidFill == solidHeightUnits
                             ? surface
                             : SurfaceType.None;
-                    cell.Flags = CellFlags.Generated;
                 }
 
                 var available = WorldGrid.HeightStepsPerCell - solidFill;
@@ -518,17 +549,17 @@ namespace MiniCivilization.World.Generation
                     0,
                     available);
                 if (waterFill > 0
-                    && waterRole == WaterCellRole.Source)
+                    && waterRole == WaterRole.Source)
                 {
-                    cell.Water = new WaterCellData
+                    cell.Water = new WaterData
                     {
                         Amount = WaterAmount.FromRenderFill(
                             waterFill,
                             available),
                         Role = waterRole,
-                        Direction = waterDirection
+                        Type = waterType,
+                        Flow = waterDirection
                     };
-                    cell.Flags |= CellFlags.Generated;
                 }
 
                 world.SetCellBulk(x, y, z, cell);
@@ -543,7 +574,7 @@ namespace MiniCivilization.World.Generation
             }
 
             completed = true;
-            world.RebuildAllSurfaceColumns();
+            world.Cache.RebuildAllSurfaceHeights();
         }
     }
 }

@@ -99,6 +99,9 @@ namespace MiniCivilization.World.Generation
         [InspectorName("최소 호수 깊이")]
         [SerializeField, Range(1, WorldGrid.HeightStepsPerCell)]
         private int minimumInlandLakeDepthSteps = 1;
+        [Tooltip("연결된 수면 Column 수가 이 값 이하이면 Pond, 더 크면 Lake로 분류합니다.")]
+        [InspectorName("연못 최대 크기")]
+        [SerializeField, Range(1, 64)] private int pondMaximumArea = 8;
 
         [Header("유체 확산 및 소멸")]
         [Tooltip("물이 수평 인접 Cell로 한 번 확산될 때 감소하는 WaterAmount입니다. 아래 방향 확산에는 적용되지 않습니다.")]
@@ -156,6 +159,7 @@ namespace MiniCivilization.World.Generation
         public int MinimumInlandLakeArea => minimumInlandLakeArea;
         public int MinimumInlandLakeDepthSteps =>
             minimumInlandLakeDepthSteps;
+        public int PondMaximumArea => pondMaximumArea;
         public float SpreadAmountLoss => spreadAmountLoss;
         public float MinimumSpreadAmount => minimumSpreadAmount;
         public float DissipationAmountLoss => dissipationAmountLoss;
@@ -243,6 +247,7 @@ namespace MiniCivilization.World.Generation
                 minimumInlandLakeDepthSteps,
                 1,
                 WorldGrid.HeightStepsPerCell);
+            pondMaximumArea = Math.Max(1, pondMaximumArea);
             maximumRiverWidthCells = Math.Clamp(
                 maximumRiverWidthCells,
                 1,

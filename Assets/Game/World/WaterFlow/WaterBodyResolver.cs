@@ -20,7 +20,7 @@ namespace MiniCivilization.World.WaterFlow
             for (var x = 0; x < world.Size; x++)
             {
                 var index = ToIndex(world, x, z);
-                if (visited[index] || !world.GetSurfaceColumn(x, z).HasWater)
+                if (visited[index] || !world.Cache.GetSurfaceHeight(x, z).HasWater)
                 {
                     continue;
                 }
@@ -49,7 +49,7 @@ namespace MiniCivilization.World.WaterFlow
                         }
 
                         var nextIndex = ToIndex(world, nextX, nextZ);
-                        if (visited[nextIndex] || !world.GetSurfaceColumn(nextX, nextZ).HasWater)
+                        if (visited[nextIndex] || !world.Cache.GetSurfaceHeight(nextX, nextZ).HasWater)
                         {
                             continue;
                         }
@@ -113,8 +113,8 @@ namespace MiniCivilization.World.WaterFlow
 
         private static void AddExposedColumn(WorldData world, int x, int z, WaterBody body)
         {
-            var column = world.GetSurfaceColumn(x, z);
-            var solidTopUnits = column.SolidTopUnits;
+            var column = world.Cache.GetSurfaceHeight(x, z);
+            var solidTopUnits = column.GroundHeight;
 
             for (var y = 0; y <= column.WaterCellY; y++)
             {
@@ -149,9 +149,9 @@ namespace MiniCivilization.World.WaterFlow
             return CalculateExposedUnits(
                 cell,
                 coordinate.Y,
-                world.GetSurfaceColumn(
+                world.Cache.GetSurfaceHeight(
                     coordinate.X,
-                    coordinate.Z).SolidTopUnits);
+                    coordinate.Z).GroundHeight);
         }
 
         private static int CalculateExposedUnits(
@@ -165,8 +165,8 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             var waterBottomUnits = y * WorldGrid.HeightStepsPerCell
-                + cell.SolidFill;
-            var waterTopUnits = waterBottomUnits + cell.WaterFill;
+                + cell.Terrain.SolidHeight;
+            var waterTopUnits = waterBottomUnits + cell.WaterHeight;
             return System.Math.Max(
                 0,
                 waterTopUnits - System.Math.Max(

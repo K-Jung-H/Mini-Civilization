@@ -92,7 +92,8 @@ namespace MiniCivilization.World.Generation
             HydrologyFeaturePlan featurePlan,
             int[] solidHeights,
             int[] waterSurfaces,
-            WaterCellRole[] waterRoles,
+            WaterRole[] waterRoles,
+            WaterType[] waterTypes,
             SurfaceType[] waterBedSurfaces)
         {
             if (featurePlan == null)
@@ -110,6 +111,7 @@ namespace MiniCivilization.World.Generation
                 featurePlan.WorldSize,
                 waterSurfaces,
                 waterRoles,
+                waterTypes,
                 waterBedSurfaces);
 
             for (var channelIndex = 0;
@@ -120,6 +122,7 @@ namespace MiniCivilization.World.Generation
                 foreach (var columnIndex in channel.ChannelColumnIndices)
                 {
                     waterBedSurfaces[columnIndex] = SurfaceType.Riverbed;
+                    waterTypes[columnIndex] = WaterType.River;
                 }
 
                 foreach (var pair in channel.SourceCells)
@@ -132,7 +135,8 @@ namespace MiniCivilization.World.Generation
                     waterSurfaces[columnIndex] = Math.Max(
                         waterSurfaces[columnIndex],
                         sourceSurface);
-                    waterRoles[columnIndex] = WaterCellRole.Source;
+                    waterRoles[columnIndex] = WaterRole.Source;
+                    waterTypes[columnIndex] = WaterType.River;
                 }
             }
         }
@@ -1936,22 +1940,28 @@ namespace MiniCivilization.World.Generation
             var baseHeight = y * WorldGrid.HeightStepsPerCell;
             var sourceCell = new CellData
             {
-                SolidFill = checked((byte)Math.Clamp(
-                    sourceProfile.BedHeightUnits - baseHeight,
-                    0,
-                    WorldGrid.HeightStepsPerCell))
+                Terrain = new TerrainData
+                {
+                    SolidHeight = checked((byte)Math.Clamp(
+                        sourceProfile.BedHeightUnits - baseHeight,
+                        0,
+                        WorldGrid.HeightStepsPerCell))
+                }
             };
-            var sourceWater = new WaterCellData
+            var sourceWater = new WaterData
             {
                 Amount = WaterAmount.Full,
-                Role = WaterCellRole.Source
+                Role = WaterRole.Source
             };
             var targetCell = new CellData
             {
-                SolidFill = checked((byte)Math.Clamp(
-                    targetHeightUnits - baseHeight,
-                    0,
-                    WorldGrid.HeightStepsPerCell))
+                Terrain = new TerrainData
+                {
+                    SolidHeight = checked((byte)Math.Clamp(
+                        targetHeightUnits - baseHeight,
+                        0,
+                        WorldGrid.HeightStepsPerCell))
+                }
             };
             return WaterFlowReachability.CanReachHorizontally(
                 new CellCoordinate(
@@ -2332,7 +2342,8 @@ namespace MiniCivilization.World.Generation
             {
                 plan.AddSourceCell(new PlannedWaterCell(
                     new CellCoordinate(x, y, z),
-                    WaterFlowDirectionMask.None));
+                    FlowDirection.None,
+                    WaterType.River));
             }
         }
 
@@ -2374,7 +2385,8 @@ namespace MiniCivilization.World.Generation
                 {
                     plan.AddSourceCell(new PlannedWaterCell(
                         new CellCoordinate(x, y, z),
-                        WaterFlowDirectionMask.None));
+                        FlowDirection.None,
+                        WaterType.River));
                 }
             }
 

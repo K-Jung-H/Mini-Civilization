@@ -68,6 +68,18 @@ namespace MiniCivilization.World.WaterFlow
                 pendingBodyColumnIndices.Add(columnIndex);
             }
 
+            if (result.HasTopologyChanges
+                || waterBodyTopologyRefreshRequested)
+            {
+                WaterTypeResolver.RefreshChanged(
+                    boundWorld,
+                    pendingBodyColumnIndices,
+                    result.LogicalChangedCellIndices,
+                    result.RenderChangedCellIndices,
+                    result.WaterTypeChangedCellIndices,
+                    result.ChangedColumnIndices);
+            }
+
             // Completing a wave changes the persisted frontier even when no
             // Cell changes, so it must still advance the world change state.
             CommitResolvedChanges(result);
@@ -218,9 +230,9 @@ namespace MiniCivilization.World.WaterFlow
                     continue;
                 }
 
-                if (cell.Water.Role == WaterCellRole.None)
+                if (cell.Water.Role == WaterRole.None)
                 {
-                    cell.Water.Role = WaterCellRole.Source;
+                    cell.Water.Role = WaterRole.Source;
                     boundWorld.SetCellForEdit(
                         coordinate.X,
                         coordinate.Y,
@@ -245,7 +257,13 @@ namespace MiniCivilization.World.WaterFlow
                     changedColumns[index],
                     out var x,
                     out var z);
-                boundWorld.RebuildSurfaceColumn(x, z);
+                boundWorld.Cache.RebuildSurfaceHeight(x, z);
+            }
+
+            if (result.HasTopologyChanges
+                || waterBodyTopologyRefreshRequested)
+            {
+                boundWorld.Cache.RebuildWaterDistances();
             }
 
             var logicalCells = ToSortedArray(
@@ -272,6 +290,11 @@ namespace MiniCivilization.World.WaterFlow
                 changeTypes |= WorldChangeType.WaterTopology
                     | WorldChangeType.Navigation
                     | WorldChangeType.Ecology;
+            }
+
+            if (result.WaterTypeChangedCellIndices.Count > 0)
+            {
+                changeTypes |= WorldChangeType.Ecology;
             }
 
             var changeSet = new WorldChangeSet(

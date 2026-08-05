@@ -150,19 +150,19 @@ namespace MiniCivilization.World.Meshing
 
             var localHeightUnit = heightUnit
                 - y * WorldGrid.HeightStepsPerCell;
-            return localHeightUnit < cell.SolidFill;
+            return localHeightUnit < cell.Terrain.SolidHeight;
         }
 
         public static HeightInterval GetSolidInterval(int y, in CellData cell)
         {
             var bottom = y * WorldGrid.HeightStepsPerCell;
-            return new HeightInterval(bottom, bottom + cell.SolidFill);
+            return new HeightInterval(bottom, bottom + cell.Terrain.SolidHeight);
         }
 
         public static HeightInterval GetWaterInterval(int y, in CellData cell)
         {
-            var bottom = y * WorldGrid.HeightStepsPerCell + cell.SolidFill;
-            return new HeightInterval(bottom, bottom + cell.WaterFill);
+            var bottom = y * WorldGrid.HeightStepsPerCell + cell.Terrain.SolidHeight;
+            return new HeightInterval(bottom, bottom + cell.WaterHeight);
         }
 
         public static CellExposureFlags ResolveExposure(
@@ -177,7 +177,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             var flags = CellExposureFlags.None;
-            if (cell.HasSolid)
+            if (cell.HasTerrain)
             {
                 if (IsSolidTopExposed(world, x, y, z, cell))
                 {
@@ -231,18 +231,18 @@ namespace MiniCivilization.World.Meshing
             int z,
             in CellData cell)
         {
-            if (!cell.HasSolid)
+            if (!cell.HasTerrain)
             {
                 return false;
             }
 
-            if (cell.SolidFill < WorldGrid.HeightStepsPerCell)
+            if (cell.Terrain.SolidHeight < WorldGrid.HeightStepsPerCell)
             {
                 return true;
             }
 
             return !world.TryGetCell(x, y + 1, z, out var above)
-                || !above.HasSolid;
+                || !above.HasTerrain;
         }
 
         public static bool IsSolidBottomExposed(
@@ -258,7 +258,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             return !world.TryGetCell(x, y - 1, z, out var below)
-                || below.SolidFill < WorldGrid.HeightStepsPerCell;
+                || below.Terrain.SolidHeight < WorldGrid.HeightStepsPerCell;
         }
 
         public static bool TryGetSolidSideExposure(
@@ -279,7 +279,7 @@ namespace MiniCivilization.World.Meshing
                     z + directionZ,
                     out var neighbor))
             {
-                neighborTop += neighbor.SolidFill;
+                neighborTop += neighbor.Terrain.SolidHeight;
             }
 
             exposed = new HeightInterval(
@@ -312,12 +312,12 @@ namespace MiniCivilization.World.Meshing
                 return true;
             }
 
-            if (above.HasSolid)
+            if (above.HasTerrain)
             {
                 return false;
             }
 
-            return !above.HasWater || above.SolidFill > 0;
+            return !above.HasWater || above.Terrain.SolidHeight > 0;
         }
 
         public static bool TryGetWaterSideExposure(
@@ -338,7 +338,7 @@ namespace MiniCivilization.World.Meshing
                     z + directionZ,
                     out var neighbor))
             {
-                coveredTop += neighbor.SolidFill + neighbor.WaterFill;
+                coveredTop += neighbor.Terrain.SolidHeight + neighbor.WaterHeight;
             }
 
             exposed = new HeightInterval(
@@ -354,7 +354,7 @@ namespace MiniCivilization.World.Meshing
             int z,
             in CellData cell)
         {
-            if (!cell.HasWater || cell.HasSolid)
+            if (!cell.HasWater || cell.HasTerrain)
             {
                 return false;
             }
@@ -365,7 +365,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             return !world.TryGetCell(x, y - 1, z, out var below)
-                || below.SolidFill + below.WaterFill
+                || below.Terrain.SolidHeight + below.WaterHeight
                     < WorldGrid.HeightStepsPerCell;
         }
     }

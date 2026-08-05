@@ -142,7 +142,7 @@ namespace MiniCivilization.World.Generation
                 clone.SetCellBulk(x, y, z, source.GetCell(x, y, z));
             }
 
-            clone.RebuildAllSurfaceColumns();
+            clone.Cache.RebuildAllSurfaceHeights();
             return clone;
         }
 
@@ -150,7 +150,7 @@ namespace MiniCivilization.World.Generation
             WorldData preview,
             int maximumWaves)
         {
-            preview.RebuildAllSurfaceColumns();
+            preview.Cache.RebuildAllSurfaceHeights();
             preview.WaterSources.InitializeFromGeneratedWorld(preview);
             WaterFlowSolver.PrepareGeneratedWorld(preview);
             var flowState = new WaterFlowState(
@@ -225,7 +225,7 @@ namespace MiniCivilization.World.Generation
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z);
-                if (cell.SolidFill >= WorldGrid.HeightStepsPerCell)
+                if (cell.Terrain.SolidHeight >= WorldGrid.HeightStepsPerCell)
                 {
                     continue;
                 }
@@ -249,7 +249,7 @@ namespace MiniCivilization.World.Generation
             for (var y = 0; y < world.Height; y++)
             {
                 var cell = world.GetCell(x, y, z);
-                cell.SolidFill = (byte)Math.Clamp(
+                cell.Terrain.SolidHeight = (byte)Math.Clamp(
                     heightUnits - y * WorldGrid.HeightStepsPerCell,
                     0,
                     WorldGrid.HeightStepsPerCell);

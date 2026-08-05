@@ -46,18 +46,21 @@ namespace MiniCivilization.World.WaterFlow
     internal readonly struct WaterVisualState : IEquatable<WaterVisualState>
     {
         private readonly byte waterFill;
-        private readonly WaterCellRole waterRole;
+        private readonly WaterRole waterRole;
+        private readonly WaterType waterType;
         private readonly byte connectionMask;
-        private readonly WaterFlowDirectionMask direction;
+        private readonly FlowDirection direction;
 
         private WaterVisualState(
             byte waterFill,
-            WaterCellRole waterRole,
+            WaterRole waterRole,
+            WaterType waterType,
             byte connectionMask,
-            WaterFlowDirectionMask direction)
+            FlowDirection direction)
         {
             this.waterFill = waterFill;
             this.waterRole = waterRole;
+            this.waterType = waterType;
             this.connectionMask = connectionMask;
             this.direction = direction;
         }
@@ -84,10 +87,11 @@ namespace MiniCivilization.World.WaterFlow
             AddConnection(0, 0, 1, 1 << 4);
             AddConnection(0, 0, -1, 1 << 5);
             return new WaterVisualState(
-                cell.WaterFill,
+                cell.WaterHeight,
                 cell.Water.Role,
+                cell.Water.Type,
                 connections,
-                cell.Water.Direction);
+                cell.Water.Flow);
 
             void AddConnection(
                 int offsetX,
@@ -110,6 +114,7 @@ namespace MiniCivilization.World.WaterFlow
         public bool Equals(WaterVisualState other) =>
             waterFill == other.waterFill
             && waterRole == other.waterRole
+            && waterType == other.waterType
             && connectionMask == other.connectionMask
             && direction == other.direction;
 
@@ -119,6 +124,7 @@ namespace MiniCivilization.World.WaterFlow
         public override int GetHashCode() => HashCode.Combine(
             waterFill,
             waterRole,
+            waterType,
             connectionMask,
             direction);
     }
@@ -128,6 +134,7 @@ namespace MiniCivilization.World.WaterFlow
         public readonly HashSet<int> LogicalChangedCellIndices = new();
         public readonly HashSet<int> RenderChangedCellIndices = new();
         public readonly HashSet<int> TopologyChangedCellIndices = new();
+        public readonly HashSet<int> WaterTypeChangedCellIndices = new();
         public readonly HashSet<int> ChangedColumnIndices = new();
 
         public bool HasRenderChanges =>
@@ -140,6 +147,7 @@ namespace MiniCivilization.World.WaterFlow
             LogicalChangedCellIndices.Clear();
             RenderChangedCellIndices.Clear();
             TopologyChangedCellIndices.Clear();
+            WaterTypeChangedCellIndices.Clear();
             ChangedColumnIndices.Clear();
         }
     }
@@ -311,7 +319,7 @@ namespace MiniCivilization.World.WaterFlow
             return true;
         }
 
-        private static WaterCellData ResolveDesiredWater(
+        private static WaterData ResolveDesiredWater(
             WorldData world,
             WaterFlowState state,
             int cellIndex,
@@ -324,23 +332,23 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate.Z);
             var current = state.GetWater(cellIndex);
             var capacitySteps =
-                WorldGrid.HeightStepsPerCell - cell.SolidFill;
+                WorldGrid.HeightStepsPerCell - cell.Terrain.SolidHeight;
             if (capacitySteps <= 0)
             {
                 return default;
             }
 
-            if (current.Role == WaterCellRole.Source)
+            if (current.Role == WaterRole.Source)
             {
                 current.Amount = WaterAmount.Full;
-                current.Direction = WaterFlowDirectionMask.None;
+                current.Flow = FlowDirection.None;
                 if (CanFlowDown(world, state, coordinate))
                 {
-                    current.Direction |= WaterFlowDirectionMask.Down;
+                    current.Flow |= FlowDirection.Down;
                 }
                 else
                 {
-                    current.Direction |= ResolveSourceOutflowDirections(
+                    current.Flow |= ResolveSourceOutflowDirections(
                         world,
                         state,
                         cellIndex,
@@ -351,7 +359,7 @@ namespace MiniCivilization.World.WaterFlow
                 return current;
             }
 
-            var desired = default(WaterCellData);
+            var desired = default(WaterData);
             var hasHorizontalInflow = false;
             var connectsToSourceBelow = IsSourceImmediatelyBelow(
                 world,
@@ -376,9 +384,10 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     desired = CreateDynamicWater(
                         above.Amount,
-                        (above.Direction
-                            & WaterFlowDirectionMask.Horizontal)
-                        | WaterFlowDirectionMask.Down);
+                        (above.Flow
+                            & FlowDirection.Horizontal)
+                        | FlowDirection.Down,
+                        above.Type);
                 }
             }
 
@@ -402,8 +411,8 @@ namespace MiniCivilization.World.WaterFlow
                 var donor = state.GetWater(donorIndex);
                 if (donor.Amount <= parameters.SpreadAmountLoss
                     || donor.Amount < parameters.MinimumSpreadAmount
-                    || (donor.Role == WaterCellRole.Dynamic
-                        && (donor.IsFalling
+                    || (donor.Role == WaterRole.Dynamic
+                        && (donor.Falls
                             || IsSourceImmediatelyBelow(
                                 world,
                                 state,
@@ -436,12 +445,12 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 var outgoingDirection = ToDirection(offset.x, offset.z);
-                var donorHeading = donor.Direction
-                    & WaterFlowDirectionMask.Horizontal;
+                var donorHeading = donor.Flow
+                    & FlowDirection.Horizontal;
                 var targetDescends = HasVerticalDropBelow(
                     world,
                     coordinate);
-                if (donor.Role == WaterCellRole.Dynamic
+                if (donor.Role == WaterRole.Dynamic
                     && IsSingleDirection(donorHeading)
                     && donorHeading != outgoingDirection
                     && !targetDescends
@@ -459,13 +468,17 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     desired = CreateDynamicWater(
                         candidateAmount,
-                        outgoingDirection);
+                        outgoingDirection,
+                        donor.Type);
                     hasHorizontalInflow = true;
                 }
                 else if (candidateAmount == desired.Amount
                          && candidateAmount > 0)
                 {
-                    desired.Direction |= outgoingDirection;
+                    desired.Flow |= outgoingDirection;
+                    desired.Type = MergeWaterType(
+                        desired.Type,
+                        donor.Type);
                     hasHorizontalInflow = true;
                 }
             }
@@ -477,29 +490,29 @@ namespace MiniCivilization.World.WaterFlow
                     || (hasHorizontalInflow
                         && HasVerticalDropBelow(world, coordinate)))
                 {
-                    desired.Direction |= WaterFlowDirectionMask.Down;
+                    desired.Flow |= FlowDirection.Down;
                 }
                 else
                 {
-                    desired.Direction &= WaterFlowDirectionMask.Horizontal;
+                    desired.Flow &= FlowDirection.Horizontal;
                 }
 
                 desired.Normalize();
             }
 
             if (connectsToSourceBelow
-                && current.Role == WaterCellRole.Dynamic)
+                && current.Role == WaterRole.Dynamic)
             {
-                current.Direction =
-                    (current.Direction & WaterFlowDirectionMask.Horizontal)
-                    | WaterFlowDirectionMask.Down;
+                current.Flow =
+                    (current.Flow & FlowDirection.Horizontal)
+                    | FlowDirection.Down;
                 current.Normalize();
             }
 
             return ApplyDissipation(current, desired, parameters);
         }
 
-        private static WaterFlowDirectionMask ResolveSourceOutflowDirections(
+        private static FlowDirection ResolveSourceOutflowDirections(
             WorldData world,
             WaterFlowState state,
             int sourceIndex,
@@ -507,18 +520,18 @@ namespace MiniCivilization.World.WaterFlow
         {
             if (WaterAmount.Full <= parameters.SpreadAmountLoss)
             {
-                return WaterFlowDirectionMask.None;
+                return FlowDirection.None;
             }
 
             var candidateAmount = checked((byte)(
                 WaterAmount.Full - parameters.SpreadAmountLoss));
             if (candidateAmount < parameters.MinimumSpreadAmount)
             {
-                return WaterFlowDirectionMask.None;
+                return FlowDirection.None;
             }
 
             var source = WorldIndex.DecodeCell(world, sourceIndex);
-            var result = WaterFlowDirectionMask.None;
+            var result = FlowDirection.None;
             for (var directionIndex = 0;
                  directionIndex < HorizontalDirections.Length;
                  directionIndex++)
@@ -537,7 +550,7 @@ namespace MiniCivilization.World.WaterFlow
                     source.Y,
                     targetZ);
                 var targetWater = state.GetWater(targetIndex);
-                if (targetWater.Role == WaterCellRole.Source
+                if (targetWater.Role == WaterRole.Source
                     || targetWater.Amount > candidateAmount
                     || !CanReachHorizontally(
                         world,
@@ -571,15 +584,15 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate.Y - 1,
                 coordinate.Z);
             return state.GetWater(belowIndex).Role
-                == WaterCellRole.Source;
+                == WaterRole.Source;
         }
 
-        private static WaterCellData ApplyDissipation(
-            WaterCellData current,
-            WaterCellData desired,
+        private static WaterData ApplyDissipation(
+            WaterData current,
+            WaterData desired,
             in WaterFlowParameters parameters)
         {
-            if (current.Role != WaterCellRole.Dynamic
+            if (current.Role != WaterRole.Dynamic
                 || desired.Amount >= current.Amount)
             {
                 return desired;
@@ -605,13 +618,43 @@ namespace MiniCivilization.World.WaterFlow
             return desired;
         }
 
-        private static WaterCellData CreateDynamicWater(
+        private static WaterData CreateDynamicWater(
             byte amount,
-            WaterFlowDirectionMask direction) => new()
+            FlowDirection direction,
+            WaterType type) => new()
         {
             Amount = amount,
-            Role = WaterCellRole.Dynamic,
-            Direction = direction
+            Role = WaterRole.Dynamic,
+            Type = type,
+            Flow = direction
+        };
+
+        private static WaterType MergeWaterType(
+            WaterType current,
+            WaterType candidate)
+        {
+            if (current == candidate || candidate == WaterType.None)
+            {
+                return current;
+            }
+
+            if (current == WaterType.None)
+            {
+                return candidate;
+            }
+
+            return TypePriority(candidate) > TypePriority(current)
+                ? candidate
+                : current;
+        }
+
+        private static int TypePriority(WaterType type) => type switch
+        {
+            WaterType.River => 4,
+            WaterType.Sea => 3,
+            WaterType.Lake => 2,
+            WaterType.Pond => 1,
+            _ => 0
         };
 
         private static bool CanFlowDown(
@@ -628,7 +671,7 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate.X,
                 coordinate.Y - 1,
                 coordinate.Z);
-            if (below.SolidFill >= WorldGrid.HeightStepsPerCell)
+            if (below.Terrain.SolidHeight >= WorldGrid.HeightStepsPerCell)
             {
                 return false;
             }
@@ -700,7 +743,7 @@ namespace MiniCivilization.World.WaterFlow
             WorldData world,
             WaterFlowState state,
             int donorIndex,
-            WaterFlowDirectionMask preferredDirection,
+            FlowDirection preferredDirection,
             byte candidateAmount)
         {
             var donor = WorldIndex.DecodeCell(world, donorIndex);
@@ -737,9 +780,9 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         private static bool IsSingleDirection(
-            WaterFlowDirectionMask direction)
+            FlowDirection direction)
         {
-            var value = (byte)(direction & WaterFlowDirectionMask.Horizontal);
+            var value = (byte)(direction & FlowDirection.Horizontal);
             return value != 0 && (value & (value - 1)) == 0;
         }
 
@@ -865,13 +908,13 @@ namespace MiniCivilization.World.WaterFlow
             }
         }
 
-        private static WaterFlowDirectionMask ToDirection(int x, int z)
+        private static FlowDirection ToDirection(int x, int z)
         {
-            if (x > 0) return WaterFlowDirectionMask.East;
-            if (x < 0) return WaterFlowDirectionMask.West;
-            if (z > 0) return WaterFlowDirectionMask.North;
-            if (z < 0) return WaterFlowDirectionMask.South;
-            return WaterFlowDirectionMask.None;
+            if (x > 0) return FlowDirection.East;
+            if (x < 0) return FlowDirection.West;
+            if (z > 0) return FlowDirection.North;
+            if (z < 0) return FlowDirection.South;
+            return FlowDirection.None;
         }
 
         private void ValidateWorldAndState(
@@ -918,7 +961,7 @@ namespace MiniCivilization.World.WaterFlow
             {
                 var cell = world.GetCell(x, y, z);
                 if (!cell.HasWater
-                    || cell.Water.Role != WaterCellRole.Source)
+                    || cell.Water.Role != WaterRole.Source)
                 {
                     continue;
                 }

@@ -128,7 +128,7 @@ namespace MiniCivilization.World.Meshing
                 return false;
             }
 
-            if (!cell.HasSolid && !cell.HasWater)
+            if (!cell.HasTerrain && !cell.HasWater)
             {
                 return false;
             }
@@ -145,7 +145,7 @@ namespace MiniCivilization.World.Meshing
                 coordinate.Y,
                 coordinate.Z);
 
-            if (cell.HasSolid)
+            if (cell.HasTerrain)
             {
                 RaycastSolid(
                     coordinate.X,

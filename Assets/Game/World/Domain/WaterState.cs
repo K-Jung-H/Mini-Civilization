@@ -96,9 +96,9 @@ namespace MiniCivilization.World.Domain
                     continue;
                 }
 
-                if (cell.Water.Role == WaterCellRole.None)
+                if (cell.Water.Role == WaterRole.None)
                 {
-                    cell.Water.Role = WaterCellRole.Source;
+                    cell.Water.Role = WaterRole.Source;
                     world.SetCellBulk(x, y, z, cell);
                 }
             }
@@ -179,6 +179,6 @@ namespace MiniCivilization.World.Domain
         }
 
         private static bool IsSource(CellData cell) =>
-            cell.HasWater && cell.Water.Role == WaterCellRole.Source;
+            cell.HasWater && cell.Water.Role == WaterRole.Source;
     }
 }

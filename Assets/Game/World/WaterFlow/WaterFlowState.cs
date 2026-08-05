@@ -15,7 +15,7 @@ namespace MiniCivilization.World.WaterFlow
         private readonly int worldHeight;
         private readonly int[] waterBodyIdsByColumn;
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
-        private readonly Dictionary<int, WaterCellData> stagedCells = new();
+        private readonly Dictionary<int, WaterData> stagedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
 
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
@@ -61,15 +61,15 @@ namespace MiniCivilization.World.WaterFlow
         internal bool TryGetWaterBody(int id, out WaterBody waterBody) =>
             waterBodiesById.TryGetValue(id, out waterBody);
 
-        public WaterFlowDirectionMask GetFlowDirection(
+        public FlowDirection GetFlowDirection(
             int x,
             int y,
             int z) =>
             ContainsCell(x, y, z)
-                ? GetWater(WorldIndex.EncodeCell(world, x, y, z)).Direction
-                : WaterFlowDirectionMask.None;
+                ? GetWater(WorldIndex.EncodeCell(world, x, y, z)).Flow
+                : FlowDirection.None;
 
-        internal WaterCellData GetWater(int cellIndex)
+        internal WaterData GetWater(int cellIndex)
         {
             var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             return world.GetCell(
@@ -78,10 +78,10 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate.Z).Water;
         }
 
-        internal WaterFlowDirectionMask GetFlowDirection(int cellIndex) =>
-            GetWater(cellIndex).Direction;
+        internal FlowDirection GetFlowDirection(int cellIndex) =>
+            GetWater(cellIndex).Flow;
 
-        internal bool StageResolvedCell(int cellIndex, WaterCellData water)
+        internal bool StageResolvedCell(int cellIndex, WaterData water)
         {
             water.Normalize();
             if (GetWater(cellIndex).Equals(water))
@@ -99,7 +99,7 @@ namespace MiniCivilization.World.WaterFlow
         internal void SynchronizeFromPersistent(int cellIndex) =>
             stagedCells.Remove(cellIndex);
 
-        internal IEnumerable<KeyValuePair<int, WaterCellData>>
+        internal IEnumerable<KeyValuePair<int, WaterData>>
             EnumerateStagedCells() => stagedCells;
 
         internal void ReplaceWaterBodies(IReadOnlyList<WaterBody> bodies)

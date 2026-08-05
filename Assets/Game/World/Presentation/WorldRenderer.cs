@@ -387,7 +387,7 @@ namespace MiniCivilization.World.Presentation
                 for (var x = changed.X - 1; x <= changed.X + 1; x++)
                 {
                     if (!boundWorld.TryGetCell(x, y, z, out var cell)
-                        || !cell.HasSolid)
+                        || !cell.HasTerrain)
                     {
                         continue;
                     }

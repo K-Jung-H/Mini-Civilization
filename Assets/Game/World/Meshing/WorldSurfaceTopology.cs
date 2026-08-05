@@ -216,7 +216,7 @@ namespace MiniCivilization.World.Meshing
 
     internal readonly struct WaterSurfaceProfile
     {
-        public readonly WaterFlowDirectionMask Direction;
+        public readonly FlowDirection Direction;
         public readonly HeightInterval Interval;
         public readonly SurfaceBoundaryProfile NegativeXBoundary;
         public readonly SurfaceBoundaryProfile PositiveXBoundary;
@@ -226,7 +226,7 @@ namespace MiniCivilization.World.Meshing
         public readonly bool ConnectsFromAbove;
 
         public WaterSurfaceProfile(
-            WaterFlowDirectionMask direction,
+            FlowDirection direction,
             in HeightInterval interval,
             in SurfaceBoundaryProfile negativeXBoundary,
             in SurfaceBoundaryProfile positiveXBoundary,
@@ -245,8 +245,8 @@ namespace MiniCivilization.World.Meshing
             ConnectsFromAbove = connectsFromAbove;
         }
 
-        public bool IsFalling =>
-            (Direction & WaterFlowDirectionMask.Down) != 0;
+        public bool Falls =>
+            (Direction & FlowDirection.Down) != 0;
 
         public SurfaceBoundaryProfile GetBoundary(
             int directionX,
@@ -474,7 +474,7 @@ namespace MiniCivilization.World.Meshing
 
             var y = (heightUnits - 1) / WorldGrid.HeightStepsPerCell;
             if (!world.TryGetCell(x, y, z, out var cell)
-                || !cell.HasSolid
+                || !cell.HasTerrain
                 || GetSolidTop(y, cell) != heightUnits
                 || !CellOccupancyResolver.IsSolidTopExposed(
                     world, x, y, z, cell))
@@ -519,7 +519,7 @@ namespace MiniCivilization.World.Meshing
                 negativeZ,
                 positiveZ,
                 IsWaterTopExposed(x, y, z, interval),
-                IsFallingWater(x, y + 1, z));
+                FallsWater(x, y + 1, z));
             waterProfiles[index] = profile;
             return true;
         }
@@ -535,7 +535,7 @@ namespace MiniCivilization.World.Meshing
             boundary = default;
             if (!TryResolveWater(x, y, z, out var profile)
                 || !profile.TopExposed
-                || profile.IsFalling)
+                || profile.Falls)
             {
                 return false;
             }
@@ -563,9 +563,9 @@ namespace MiniCivilization.World.Meshing
             }
 
             var coveredTop = (float)cellBottom;
-            if (neighbor.HasSolid)
+            if (neighbor.HasTerrain)
             {
-                coveredTop = cellBottom + neighbor.SolidFill;
+                coveredTop = cellBottom + neighbor.Terrain.SolidHeight;
                 if (CellOccupancyResolver.IsSolidTopExposed(
                         world,
                         neighborX,
@@ -602,7 +602,7 @@ namespace MiniCivilization.World.Meshing
             in CellData cell,
             in WaterSurfaceProfile profile)
         {
-            if (cell.HasSolid || y <= 0)
+            if (cell.HasTerrain || y <= 0)
             {
                 return false;
             }
@@ -613,7 +613,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             var coveredTop = (y - 1) * WorldGrid.HeightStepsPerCell
-                + below.SolidFill;
+                + below.Terrain.SolidHeight;
             if (below.HasWater
                 && TryResolveWater(x, y - 1, z, out var belowProfile))
             {
@@ -886,13 +886,13 @@ namespace MiniCivilization.World.Meshing
                         cell,
                         direction);
                     var stableWater =
-                        cell.Water.Role == WaterCellRole.Source;
-                    var connectsFromAbove = IsFallingWater(
+                        cell.Water.Role == WaterRole.Source;
+                    var connectsFromAbove = FallsWater(
                         cellX,
                         key.Y + 1,
                         cellZ);
                     var flowsDown =
-                        (direction & WaterFlowDirectionMask.Down) != 0;
+                        (direction & FlowDirection.Down) != 0;
                     var downstreamCorner = flowsDown
                         && IsDownstreamCorner(
                             cellX,
@@ -929,7 +929,7 @@ namespace MiniCivilization.World.Meshing
                     continue;
                 }
 
-                if (!cell.HasSolid
+                if (!cell.HasTerrain
                     && IsDirectedIntoCornerSpace(key, cellX, cellZ))
                 {
                     descentWeightedHeight += cellBottom;
@@ -1012,46 +1012,46 @@ namespace MiniCivilization.World.Meshing
             int cellX,
             int cellZ,
             in WaterCornerKey corner,
-            WaterFlowDirectionMask direction)
+            FlowDirection direction)
         {
             var horizontal = direction
-                & WaterFlowDirectionMask.Horizontal;
-            if (horizontal == WaterFlowDirectionMask.None)
+                & FlowDirection.Horizontal;
+            if (horizontal == FlowDirection.None)
             {
                 return true;
             }
 
-            return ((horizontal & WaterFlowDirectionMask.East) != 0
+            return ((horizontal & FlowDirection.East) != 0
                     && corner.X == cellX + 1)
-                || ((horizontal & WaterFlowDirectionMask.West) != 0
+                || ((horizontal & FlowDirection.West) != 0
                     && corner.X == cellX)
-                || ((horizontal & WaterFlowDirectionMask.North) != 0
+                || ((horizontal & FlowDirection.North) != 0
                     && corner.Z == cellZ + 1)
-                || ((horizontal & WaterFlowDirectionMask.South) != 0
+                || ((horizontal & FlowDirection.South) != 0
                     && corner.Z == cellZ);
         }
 
-        private WaterFlowDirectionMask ResolveWaterDirection(
+        private FlowDirection ResolveWaterDirection(
             int x,
             int y,
             int z,
             in CellData cell) =>
             flowState != null
                 ? flowState.GetFlowDirection(x, y, z)
-                : cell.Water.Direction;
+                : cell.Water.Flow;
 
         private HeightInterval ResolveWaterInterval(
             int x,
             int y,
             int z,
             in CellData cell,
-            WaterFlowDirectionMask direction)
+            FlowDirection direction)
         {
             var logical = CellOccupancyResolver.GetWaterInterval(y, cell);
             var cellBottom = y * WorldGrid.HeightStepsPerCell;
             var ceiling = (y + 1) * WorldGrid.HeightStepsPerCell;
-            var fallingAbove = IsFallingWater(x, y + 1, z);
-            if ((direction & WaterFlowDirectionMask.Down) != 0)
+            var fallingAbove = FallsWater(x, y + 1, z);
+            if ((direction & FlowDirection.Down) != 0)
             {
                 return new HeightInterval(
                     cellBottom,
@@ -1080,7 +1080,7 @@ namespace MiniCivilization.World.Meshing
                 return true;
             }
 
-            if (above.HasSolid)
+            if (above.HasTerrain)
             {
                 return false;
             }
@@ -1100,11 +1100,11 @@ namespace MiniCivilization.World.Meshing
             return aboveInterval.BottomUnits > interval.TopUnits;
         }
 
-        private bool IsFallingWater(int x, int y, int z) =>
+        private bool FallsWater(int x, int y, int z) =>
             world.TryGetCell(x, y, z, out var cell)
             && cell.HasWater
             && (ResolveWaterDirection(x, y, z, cell)
-                & WaterFlowDirectionMask.Down) != 0;
+                & FlowDirection.Down) != 0;
 
         private bool ShouldPinSolidTopToWaterBoundary(int x, int y, int z)
         {
@@ -1118,10 +1118,10 @@ namespace MiniCivilization.World.Meshing
                 return true;
             }
 
-            return cell.SolidFill == WorldGrid.HeightStepsPerCell
+            return cell.Terrain.SolidHeight == WorldGrid.HeightStepsPerCell
                 && world.TryGetCell(x, y + 1, z, out var above)
                 && above.HasWater
-                && above.SolidFill == 0;
+                && above.Terrain.SolidHeight == 0;
         }
 
         private bool TryGetConnectedSolidSurfaceHeight(
@@ -1140,7 +1140,7 @@ namespace MiniCivilization.World.Meshing
             }
 
             if (world.TryGetCell(targetX, y, targetZ, out var same)
-                && same.HasSolid)
+                && same.HasTerrain)
             {
                 height = ResolveContinuousSolidTop(targetX, y, targetZ, same);
                 return true;
@@ -1151,14 +1151,14 @@ namespace MiniCivilization.World.Meshing
                 var source = world.GetCell(sourceX, scanY, sourceZ);
                 var sourceCeiling = (scanY + 1)
                     * WorldGrid.HeightStepsPerCell;
-                if (!source.HasSolid
+                if (!source.HasTerrain
                     || GetSolidTop(scanY, source) != sourceCeiling)
                 {
                     break;
                 }
 
                 var candidate = world.GetCell(targetX, scanY, targetZ);
-                if (candidate.HasSolid)
+                if (candidate.HasTerrain)
                 {
                     height = GetSolidTop(scanY, candidate);
                     return true;
@@ -1179,7 +1179,7 @@ namespace MiniCivilization.World.Meshing
             var scanY = y;
             while (height == (scanY + 1) * WorldGrid.HeightStepsPerCell
                 && world.TryGetCell(x, scanY + 1, z, out var above)
-                && above.HasSolid
+                && above.HasTerrain
                 && (scanY + 1) * WorldGrid.HeightStepsPerCell == height)
             {
                 scanY++;
@@ -1196,7 +1196,7 @@ namespace MiniCivilization.World.Meshing
         }
 
         private static int GetSolidTop(int y, in CellData cell) =>
-            y * WorldGrid.HeightStepsPerCell + cell.SolidFill;
+            y * WorldGrid.HeightStepsPerCell + cell.Terrain.SolidHeight;
 
         private static SolidSurfaceProfile CreateFlatSolidProfile(int height)
         {
@@ -1214,14 +1214,14 @@ namespace MiniCivilization.World.Meshing
         }
 
         private static bool HasDirection(
-            WaterFlowDirectionMask direction,
+            FlowDirection direction,
             int x,
             int z)
         {
-            if (x > 0) return (direction & WaterFlowDirectionMask.East) != 0;
-            if (x < 0) return (direction & WaterFlowDirectionMask.West) != 0;
-            if (z > 0) return (direction & WaterFlowDirectionMask.North) != 0;
-            if (z < 0) return (direction & WaterFlowDirectionMask.South) != 0;
+            if (x > 0) return (direction & FlowDirection.East) != 0;
+            if (x < 0) return (direction & FlowDirection.West) != 0;
+            if (z > 0) return (direction & FlowDirection.North) != 0;
+            if (z < 0) return (direction & FlowDirection.South) != 0;
             return false;
         }
 

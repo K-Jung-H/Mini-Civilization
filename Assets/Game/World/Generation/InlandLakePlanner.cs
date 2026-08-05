@@ -97,7 +97,8 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<BasinPlan> plans,
             int size,
             int[] waterSurfaces,
-            WaterCellRole[] waterRoles,
+            WaterRole[] waterRoles,
+            WaterType[] waterTypes,
             SurfaceType[] waterBedSurfaces)
         {
             if (plans == null)
@@ -122,7 +123,8 @@ namespace MiniCivilization.World.Generation
                     waterSurfaces[columnIndex] = Math.Max(
                         waterSurfaces[columnIndex],
                         plan.WaterSurfaceHeightUnits);
-                    waterRoles[columnIndex] = WaterCellRole.Source;
+                    waterRoles[columnIndex] = WaterRole.Source;
+                    waterTypes[columnIndex] = plan.Type;
                     waterBedSurfaces[columnIndex] = SurfaceType.Lakebed;
                 }
             }
@@ -190,7 +192,10 @@ namespace MiniCivilization.World.Generation
                 world.Height,
                 basin.Id,
                 waterSurface,
-                basin.OutletColumnIndex);
+                basin.OutletColumnIndex,
+                wetColumns.Count <= settings.PondMaximumArea
+                    ? WaterType.Pond
+                    : WaterType.Lake);
             for (var index = 0; index < wetColumns.Count; index++)
             {
                 var columnIndex = wetColumns[index];
@@ -240,7 +245,8 @@ namespace MiniCivilization.World.Generation
 
                 plan.AddSourceCell(new PlannedWaterCell(
                     new CellCoordinate(x, y, z),
-                    WaterFlowDirectionMask.None));
+                    FlowDirection.None,
+                    plan.Type));
             }
         }
 

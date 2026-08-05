@@ -172,7 +172,7 @@ namespace MiniCivilization.World.Editing
                                 coordinate.X,
                                 coordinate.Y,
                                 coordinate.Z);
-                            if (!current.HasSolid)
+                            if (!current.HasTerrain)
                             {
                                 transaction.SetCell(
                                     coordinate.X,
@@ -203,7 +203,7 @@ namespace MiniCivilization.World.Editing
                             if (!world.GetCell(
                                     coordinate.X,
                                     coordinate.Y,
-                                    coordinate.Z).HasSolid)
+                                    coordinate.Z).HasTerrain)
                             {
                                 continue;
                             }
@@ -372,14 +372,13 @@ namespace MiniCivilization.World.Editing
 
         private static CellData CreateTerrainCell(CellData current)
         {
-            current.Material = CellMaterialType.Soil;
-            current.Surface = SurfaceType.Ground;
-            current.Geology = current.Geology != CellMaterialType.None
-                ? current.Geology
-                : CellMaterialType.Rock;
-            current.SolidFill = (byte)WorldGrid.HeightStepsPerCell;
+            current.Terrain.Material = MaterialType.Soil;
+            current.Terrain.Surface = SurfaceType.Ground;
+            current.Terrain.Geology = current.Terrain.Geology != MaterialType.None
+                ? current.Terrain.Geology
+                : MaterialType.Rock;
+            current.Terrain.SolidHeight = (byte)WorldGrid.HeightStepsPerCell;
             current.Water = default;
-            current.Flags |= CellFlags.Generated;
             return current;
         }
 

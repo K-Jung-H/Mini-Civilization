@@ -10,14 +10,7 @@ namespace MiniCivilization.World.Domain
         public static float ToWorldHeight(int heightUnits) => heightUnits * HeightStep;
     }
 
-    [Flags]
-    public enum CellFlags : ushort
-    {
-        None = 0,
-        Generated = 1 << 0
-    }
-
-    public enum CellMaterialType : ushort
+    public enum MaterialType : ushort
     {
         None = 0,
         Soil = 1,
@@ -47,15 +40,24 @@ namespace MiniCivilization.World.Domain
         Shore = 7
     }
 
-    public enum WaterCellRole : byte
+    public enum WaterRole : byte
     {
         None = 0,
         Dynamic = 1,
         Source = 2
     }
 
+    public enum WaterType : byte
+    {
+        None = 0,
+        Pond = 1,
+        Lake = 2,
+        Sea = 3,
+        River = 4
+    }
+
     [Flags]
-    public enum WaterFlowDirectionMask : byte
+    public enum FlowDirection : byte
     {
         None = 0,
         East = 1 << 0,
@@ -187,81 +189,131 @@ namespace MiniCivilization.World.Domain
     }
 
     [Serializable]
-    public struct WaterCellData : IEquatable<WaterCellData>
+    public struct WaterData : IEquatable<WaterData>
     {
         public byte Amount;
-        public WaterCellRole Role;
-        public WaterFlowDirectionMask Direction;
+        public WaterRole Role;
+        public WaterType Type;
+        public FlowDirection Flow;
 
         public readonly bool HasWater => Amount > 0;
-        public readonly bool IsStatic =>
-            HasWater && Direction == WaterFlowDirectionMask.None;
-        public readonly bool IsFalling =>
-            (Direction & WaterFlowDirectionMask.Down) != 0;
-        public readonly bool IsFlowing =>
-            HasWater && Direction != WaterFlowDirectionMask.None;
+        public readonly bool Falls =>
+            (Flow & FlowDirection.Down) != 0;
+        public readonly bool Flows =>
+            HasWater && Flow != FlowDirection.None;
 
         public void Normalize()
         {
             Amount = Math.Min(Amount, WaterAmount.Full);
-            Direction &= WaterFlowDirectionMask.Horizontal
-                | WaterFlowDirectionMask.Down;
+            Flow &= FlowDirection.Horizontal | FlowDirection.Down;
             if (Amount == 0)
             {
-                Role = WaterCellRole.None;
-                Direction = WaterFlowDirectionMask.None;
+                Role = WaterRole.None;
+                Type = WaterType.None;
+                Flow = FlowDirection.None;
             }
-            else if (Role == WaterCellRole.None)
+            else if (Role == WaterRole.None)
             {
-                Role = WaterCellRole.Source;
+                Role = WaterRole.Source;
+            }
+
+            if (Role is not WaterRole.Source and not WaterRole.Dynamic)
+            {
+                Role = WaterRole.Source;
+            }
+
+            if (Type is not WaterType.Pond
+                and not WaterType.Lake
+                and not WaterType.Sea
+                and not WaterType.River)
+            {
+                Type = WaterType.Pond;
             }
         }
 
-        public readonly bool Equals(WaterCellData other) =>
+        public readonly bool Equals(WaterData other) =>
             Amount == other.Amount
             && Role == other.Role
-            && Direction == other.Direction;
+            && Type == other.Type
+            && Flow == other.Flow;
 
         public override readonly bool Equals(object obj) =>
-            obj is WaterCellData other && Equals(other);
+            obj is WaterData other && Equals(other);
 
         public override readonly int GetHashCode() => HashCode.Combine(
             Amount,
             Role,
-            Direction);
+            Type,
+            Flow);
+    }
+
+    [Serializable]
+    public struct TerrainData : IEquatable<TerrainData>
+    {
+        public MaterialType Material;
+        public SurfaceType Surface;
+        public MaterialType Geology;
+        public ushort ResourceId;
+        public byte SolidHeight;
+
+        public readonly bool HasTerrain => SolidHeight > 0;
+
+        public void Normalize()
+        {
+            SolidHeight = (byte)Math.Min(
+                WorldGrid.HeightStepsPerCell,
+                (int)SolidHeight);
+            if (SolidHeight > 0)
+            {
+                return;
+            }
+
+            Material = MaterialType.None;
+            Surface = SurfaceType.None;
+            Geology = MaterialType.None;
+            ResourceId = 0;
+        }
+
+        public readonly bool Equals(TerrainData other) =>
+            Material == other.Material
+            && Surface == other.Surface
+            && Geology == other.Geology
+            && ResourceId == other.ResourceId
+            && SolidHeight == other.SolidHeight;
+
+        public override readonly bool Equals(object obj) =>
+            obj is TerrainData other && Equals(other);
+
+        public override readonly int GetHashCode() => HashCode.Combine(
+            Material,
+            Surface,
+            Geology,
+            ResourceId,
+            SolidHeight);
     }
 
     [Serializable]
     public struct CellData : IEquatable<CellData>
     {
-        public CellMaterialType Material;
-        public SurfaceType Surface;
-        public CellMaterialType Geology;
-        public ushort DepositIndex;
-        public byte SolidFill;
-        public CellFlags Flags;
-        public WaterCellData Water;
+        public TerrainData Terrain;
+        public WaterData Water;
 
-        public readonly bool HasSolid => SolidFill > 0;
+        public readonly bool HasTerrain => Terrain.HasTerrain;
         public readonly bool HasWater => Water.HasWater;
-        public readonly byte WaterFill => Water.IsFalling
-            ? (byte)(WorldGrid.HeightStepsPerCell - SolidFill)
+        public readonly byte WaterHeight => Water.Falls
+            ? (byte)(WorldGrid.HeightStepsPerCell - Terrain.SolidHeight)
             : WaterAmount.ToRenderFill(
                 Water.Amount,
-                WorldGrid.HeightStepsPerCell - SolidFill);
+                WorldGrid.HeightStepsPerCell - Terrain.SolidHeight);
 
         public void Normalize()
         {
-            SolidFill = (byte)Math.Min(WorldGrid.HeightStepsPerCell, (int)SolidFill);
+            Terrain.Normalize();
             Water.Normalize();
 
-            if (SolidFill == 0)
-            {
-                Material = CellMaterialType.None;
-                Surface = SurfaceType.None;
-            }
-
-            if (!Water.HasWater || WorldGrid.HeightStepsPerCell - SolidFill <= 0)
+            if (!Water.HasWater
+                || WorldGrid.HeightStepsPerCell
+                    - Terrain.SolidHeight <= 0)
             {
                 Water = default;
             }
@@ -269,48 +321,45 @@ namespace MiniCivilization.World.Domain
 
         public readonly bool Equals(CellData other)
         {
-            return Material == other.Material
-                && Surface == other.Surface
-                && Geology == other.Geology
-                && DepositIndex == other.DepositIndex
-                && SolidFill == other.SolidFill
-                && Flags == other.Flags
+            return Terrain.Equals(other.Terrain)
                 && Water.Equals(other.Water);
         }
 
         public override readonly bool Equals(object obj) => obj is CellData other && Equals(other);
         public override readonly int GetHashCode() => HashCode.Combine(
-            Material,
-            Surface,
-            Geology,
-            DepositIndex,
-            SolidFill,
-            Flags,
+            Terrain,
             Water);
     }
 
     [Serializable]
-    public struct SurfaceColumnData
+    public struct SurfaceHeightData
     {
-        public short SurfaceCellY;
-        public byte SurfaceLevel;
-        public short WaterCellY;
-        public byte WaterLevel;
-        public SurfaceType Surface;
+        public int GroundHeight;
+        public int WaterHeight;
 
-        public readonly bool HasSurface => SurfaceCellY >= 0 && SurfaceLevel > 0;
-        public readonly bool HasWater => WaterCellY >= 0 && WaterLevel > 0;
-        public readonly int SolidTopUnits => HasSurface ? SurfaceCellY * WorldGrid.HeightStepsPerCell + SurfaceLevel : 0;
-        public readonly int WaterTopUnits => HasWater ? WaterCellY * WorldGrid.HeightStepsPerCell + WaterLevel : 0;
+        public readonly bool HasGround => GroundHeight > 0;
+        public readonly bool HasWater => WaterHeight > 0;
+        public readonly int GroundCellY => HasGround
+            ? (GroundHeight - 1) / WorldGrid.HeightStepsPerCell
+            : -1;
+        public readonly int WaterCellY => HasWater
+            ? (WaterHeight - 1) / WorldGrid.HeightStepsPerCell
+            : -1;
     }
 
     [Serializable]
-    public struct ColumnEnvironmentData
+    public struct EnvironmentData
     {
         public BiomeType Biome;
         public byte Temperature;
         public byte Moisture;
         public byte Fertility;
+    }
+
+    public struct PathData
+    {
+        public ushort OpenHeight;
+        public ushort WaterDistance;
     }
 
     public readonly struct CellCoordinate : IEquatable<CellCoordinate>

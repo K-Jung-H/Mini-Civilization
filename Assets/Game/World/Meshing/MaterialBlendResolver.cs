@@ -131,11 +131,12 @@ namespace MiniCivilization.World.Meshing
             ResolveAxis(localX, out var offsetX, out var blendX);
             ResolveAxis(localZ, out var offsetZ, out var blendZ);
 
-            var currentColumn = world.GetSurfaceColumn(x, z);
-            var currentSurface = surfaceOverride ?? currentColumn.Surface;
+            var currentColumn = world.Cache.GetSurfaceHeight(x, z);
+            var currentSurface = surfaceOverride
+                ?? ResolveColumnSurface(world, x, z, currentColumn);
             var current = ResolveTerrainAppearance(
                 catalog,
-                world.GetColumnEnvironment(x, z).Biome,
+                world.GetEnvironment(x, z).Biome,
                 currentSurface);
             var xAppearance = ResolveTerrainNeighbor(
                 world, catalog, x + offsetX, z, surfaceOverride, current);
@@ -181,16 +182,17 @@ namespace MiniCivilization.World.Meshing
                 return fallback;
             }
 
-            var column = world.GetSurfaceColumn(x, z);
-            if (!column.HasSurface)
+            var column = world.Cache.GetSurfaceHeight(x, z);
+            if (!column.HasGround)
             {
                 return fallback;
             }
 
             return ResolveTerrainAppearance(
                 catalog,
-                world.GetColumnEnvironment(x, z).Biome,
-                surfaceOverride ?? column.Surface);
+                world.GetEnvironment(x, z).Biome,
+                surfaceOverride
+                    ?? ResolveColumnSurface(world, x, z, column));
         }
 
         private static SurfaceAppearance ResolveTerrainCellAppearance(
@@ -208,19 +210,37 @@ namespace MiniCivilization.World.Meshing
                 return useFallback ? fallback : default;
             }
 
-            if (!world.TryGetCell(x, y, z, out var cell) || !cell.HasSolid)
+            if (!world.TryGetCell(x, y, z, out var cell) || !cell.HasTerrain)
             {
                 return useFallback ? fallback : default;
             }
 
-            var surface = cell.Surface != SurfaceType.None
-                ? cell.Surface
+            var surface = cell.Terrain.Surface != SurfaceType.None
+                ? cell.Terrain.Surface
                 : SurfaceType.Ground;
 
             return ResolveTerrainAppearance(
                 catalog,
-                world.GetColumnEnvironment(x, z).Biome,
+                world.GetEnvironment(x, z).Biome,
                 surfaceOverride ?? surface);
+        }
+
+        private static SurfaceType ResolveColumnSurface(
+            WorldData world,
+            int x,
+            int z,
+            SurfaceHeightData column)
+        {
+            if (!column.HasGround)
+            {
+                return SurfaceType.None;
+            }
+
+            var surface = world.GetCell(x, column.GroundCellY, z)
+                .Terrain.Surface;
+            return surface != SurfaceType.None
+                ? surface
+                : SurfaceType.Ground;
         }
     }
 }

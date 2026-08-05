@@ -179,18 +179,20 @@ namespace MiniCivilization.World.Generation
     internal readonly struct PlannedWaterCell
     {
         public readonly CellCoordinate Coordinate;
-        public readonly WaterCellData Water;
+        public readonly WaterData Water;
 
         public PlannedWaterCell(
             CellCoordinate coordinate,
-            WaterFlowDirectionMask direction)
+            FlowDirection direction,
+            WaterType type)
         {
             Coordinate = coordinate;
-            Water = new WaterCellData
+            Water = new WaterData
             {
                 Amount = WaterAmount.Full,
-                Role = WaterCellRole.Source,
-                Direction = direction
+                Role = WaterRole.Source,
+                Type = type,
+                Flow = direction
             };
         }
     }
@@ -363,6 +365,7 @@ namespace MiniCivilization.World.Generation
         public int BasinId { get; }
         public int WaterSurfaceHeightUnits { get; }
         public int OutletColumnIndex { get; }
+        public WaterType Type { get; }
         public IReadOnlyList<int> WetColumnIndices => wetColumnIndices;
 
         public BasinPlan(
@@ -370,11 +373,15 @@ namespace MiniCivilization.World.Generation
             int worldHeight,
             int basinId,
             int waterSurfaceHeightUnits,
-            int outletColumnIndex) : base(
+            int outletColumnIndex,
+            WaterType type) : base(
                 worldSize,
                 worldHeight)
         {
             BasinId = basinId;
+            Type = type is WaterType.Pond or WaterType.Lake
+                ? type
+                : throw new ArgumentOutOfRangeException(nameof(type));
             WaterSurfaceHeightUnits = Math.Max(
                 0,
                 waterSurfaceHeightUnits);

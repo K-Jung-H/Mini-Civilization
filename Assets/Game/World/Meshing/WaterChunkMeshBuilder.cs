@@ -514,11 +514,11 @@ namespace MiniCivilization.World.Meshing
         }
 
         private static Vector4 ResolveSideFlowData(
-            WaterCellData water,
+            WaterData water,
             int directionX,
             int directionZ)
         {
-            var horizontal = ResolveHorizontalFlow(water.Direction);
+            var horizontal = ResolveHorizontalFlow(water.Flow);
             var horizontalUvFlow = directionX < 0
                 ? horizontal.y
                 : directionX > 0
@@ -528,41 +528,41 @@ namespace MiniCivilization.World.Meshing
                         : horizontal.x;
             return new Vector4(
                 horizontalUvFlow,
-                water.IsFalling ? -1f : 0f,
+                water.Falls ? -1f : 0f,
                 1f,
-                water.IsFlowing ? 1f : 0f);
+                water.Flows ? 1f : 0f);
         }
 
-        private static Vector4 ResolveTopFlowData(WaterCellData water)
+        private static Vector4 ResolveTopFlowData(WaterData water)
         {
-            var horizontal = ResolveHorizontalFlow(water.Direction);
+            var horizontal = ResolveHorizontalFlow(water.Flow);
             return new Vector4(
                 horizontal.x,
                 horizontal.y,
                 0f,
-                water.IsFlowing ? 1f : 0f);
+                water.Flows ? 1f : 0f);
         }
 
         private static Vector2 ResolveHorizontalFlow(
-            WaterFlowDirectionMask direction)
+            FlowDirection direction)
         {
             var horizontal = Vector2.zero;
-            if ((direction & WaterFlowDirectionMask.East) != 0)
+            if ((direction & FlowDirection.East) != 0)
             {
                 horizontal.x += 1f;
             }
 
-            if ((direction & WaterFlowDirectionMask.West) != 0)
+            if ((direction & FlowDirection.West) != 0)
             {
                 horizontal.x -= 1f;
             }
 
-            if ((direction & WaterFlowDirectionMask.North) != 0)
+            if ((direction & FlowDirection.North) != 0)
             {
                 horizontal.y += 1f;
             }
 
-            if ((direction & WaterFlowDirectionMask.South) != 0)
+            if ((direction & FlowDirection.South) != 0)
             {
                 horizontal.y -= 1f;
             }

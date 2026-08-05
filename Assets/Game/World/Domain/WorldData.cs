@@ -65,8 +65,7 @@ namespace MiniCivilization.World.Domain
     public sealed class WorldData
     {
         private readonly ChunkData[,,] chunks;
-        private readonly SurfaceColumnData[] surfaceColumnMap;
-        private readonly ColumnEnvironmentData[] columnEnvironmentMap;
+        private readonly EnvironmentData[] environmentMap;
 
         public int Size { get; }
         public int Height { get; }
@@ -78,9 +77,12 @@ namespace MiniCivilization.World.Domain
         public int ChunkCountZ { get; }
         public int Seed { get; }
         public WaterFlowRules WaterFlowRules { get; private set; }
+        public int PondMaximumArea { get; private set; }
         public WorldChangeId CurrentChangeId { get; private set; }
         public WaterSourceCollection WaterSources { get; }
         public WaterFlowScheduleData WaterFlowSchedule { get; }
+        public WorldCache Cache { get; }
+        public WorldContext Context { get; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -107,12 +109,12 @@ namespace MiniCivilization.World.Domain
             Seed = seed;
             WaterFlowRules =
                 global::MiniCivilization.World.Domain.WaterFlowRules.Default;
+            PondMaximumArea = 8;
             ChunkCountX = size / chunkSizeX;
             ChunkCountY = height / chunkSizeY;
             ChunkCountZ = size / chunkSizeZ;
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
-            surfaceColumnMap = new SurfaceColumnData[size * size];
-            columnEnvironmentMap = new ColumnEnvironmentData[size * size];
+            environmentMap = new EnvironmentData[size * size];
             WaterSources = new WaterSourceCollection();
             WaterFlowSchedule = new WaterFlowScheduleData();
 
@@ -127,11 +129,8 @@ namespace MiniCivilization.World.Domain
                     chunkSizeZ);
             }
 
-            for (var i = 0; i < surfaceColumnMap.Length; i++)
-            {
-                surfaceColumnMap[i].SurfaceCellY = -1;
-                surfaceColumnMap[i].WaterCellY = -1;
-            }
+            Cache = new WorldCache(this);
+            Context = new WorldContext(this);
         }
 
         public void ConfigureWaterFlow(WaterFlowRules rules)
@@ -141,6 +140,9 @@ namespace MiniCivilization.World.Domain
                 rules.MinimumSpreadAmount,
                 rules.DissipationAmountLoss);
         }
+
+        public void ConfigureWaterTypes(int pondMaximumArea) =>
+            PondMaximumArea = Math.Max(1, pondMaximumArea);
 
         public bool Contains(int x, int y, int z) => (uint)x < Size && (uint)y < Height && (uint)z < Size;
         public bool ContainsColumn(int x, int z) => (uint)x < Size && (uint)z < Size;
@@ -191,17 +193,7 @@ namespace MiniCivilization.World.Domain
             }
         }
 
-        public SurfaceColumnData GetSurfaceColumn(int x, int z)
-        {
-            if (!ContainsColumn(x, z))
-            {
-                return new SurfaceColumnData { SurfaceCellY = -1, WaterCellY = -1 };
-            }
-
-            return surfaceColumnMap[x + Size * z];
-        }
-
-        public bool HasSolidCell(int x, int z)
+        public bool HasTerrainCell(int x, int z)
         {
             if (!ContainsColumn(x, z))
             {
@@ -210,7 +202,7 @@ namespace MiniCivilization.World.Domain
 
             for (var y = 0; y < Height; y++)
             {
-                if (GetCell(x, y, z).HasSolid)
+                if (GetCell(x, y, z).HasTerrain)
                 {
                     return true;
                 }
@@ -219,86 +211,24 @@ namespace MiniCivilization.World.Domain
             return false;
         }
 
-        public void SetSurfaceColumn(int x, int z, SurfaceColumnData column)
-        {
-            surfaceColumnMap[x + Size * z] = column;
-        }
-
-        public ColumnEnvironmentData GetColumnEnvironment(int x, int z)
+        public EnvironmentData GetEnvironment(int x, int z)
         {
             if (!ContainsColumn(x, z))
             {
                 return default;
             }
 
-            return columnEnvironmentMap[x + Size * z];
+            return environmentMap[x + Size * z];
         }
 
-        public void SetColumnEnvironment(int x, int z, ColumnEnvironmentData environment)
+        public void SetEnvironment(int x, int z, EnvironmentData environment)
         {
             if (!ContainsColumn(x, z))
             {
                 throw new ArgumentOutOfRangeException($"World column ({x}, {z}) is outside the world.");
             }
 
-            columnEnvironmentMap[x + Size * z] = environment;
-        }
-
-        public void RebuildAllSurfaceColumns()
-        {
-            for (var z = 0; z < Size; z++)
-            for (var x = 0; x < Size; x++)
-            {
-                RebuildSurfaceColumn(x, z);
-            }
-        }
-
-        public void RebuildSurfaceColumn(int x, int z)
-        {
-            var column = new SurfaceColumnData
-            {
-                SurfaceCellY = -1,
-                WaterCellY = -1
-            };
-
-            var solidTopUnits = 0;
-            var waterTopUnits = 0;
-
-            for (var y = Height - 1; y >= 0; y--)
-            {
-                var cell = GetCell(x, y, z);
-                if (column.WaterCellY < 0 && cell.WaterFill > 0)
-                {
-                    column.WaterCellY = (short)y;
-                    column.WaterLevel = (byte)(cell.SolidFill + cell.WaterFill);
-                    waterTopUnits = y * WorldGrid.HeightStepsPerCell + column.WaterLevel;
-                }
-
-                if (column.SurfaceCellY < 0 && cell.SolidFill > 0)
-                {
-                    column.SurfaceCellY = (short)y;
-                    column.SurfaceLevel = cell.SolidFill;
-                    column.Surface = cell.Surface != SurfaceType.None
-                        ? cell.Surface
-                        : SurfaceType.Ground;
-                    solidTopUnits = y * WorldGrid.HeightStepsPerCell + cell.SolidFill;
-                }
-
-                if (column.SurfaceCellY >= 0 && column.WaterCellY >= 0)
-                {
-                    break;
-                }
-            }
-
-            // Water at or below the highest solid surface is groundwater/buried data,
-            // not a renderable surface water layer.
-            if (column.WaterCellY >= 0 && waterTopUnits <= solidTopUnits)
-            {
-                column.WaterCellY = -1;
-                column.WaterLevel = 0;
-            }
-
-            SetSurfaceColumn(x, z, column);
+            environmentMap[x + Size * z] = environment;
         }
 
         private void GetChunkAndLocal(int x, int y, int z, out ChunkData chunk, out int localX, out int localY, out int localZ)
