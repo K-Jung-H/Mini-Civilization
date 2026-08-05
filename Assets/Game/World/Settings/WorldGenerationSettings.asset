@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97d524c8ea6b0e145a34679a81fd4244, type: 3}
   m_Name: WorldGenerationSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationSettings
-  worldSize: 256
+  worldSize: 128
   worldHeight: 32
   chunkSizeXZ: 8
   chunkHeight: 8
@@ -38,6 +38,7 @@ MonoBehaviour:
   minimumInlandLakeDistance: 6
   minimumInlandLakeArea: 3
   minimumInlandLakeDepthSteps: 1
+  pondMaximumArea: 8
   spreadAmountLoss: 0.01
   minimumSpreadAmount: 0.05
   dissipationAmountLoss: 0.05

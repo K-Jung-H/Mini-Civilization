@@ -338,10 +338,11 @@ namespace MiniCivilization.World.WaterFlow
                 return default;
             }
 
-            if (current.Role == WaterRole.Source)
+            if (current.HasWater && current.Role == WaterRole.Source)
             {
                 current.Amount = WaterAmount.Full;
                 current.Flow = FlowDirection.None;
+
                 if (CanFlowDown(world, state, coordinate))
                 {
                     current.Flow |= FlowDirection.Down;

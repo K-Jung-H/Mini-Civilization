@@ -211,6 +211,7 @@ namespace MiniCivilization.World.Domain
                 Role = WaterRole.None;
                 Type = WaterType.None;
                 Flow = FlowDirection.None;
+                return;
             }
             else if (Role == WaterRole.None)
             {
