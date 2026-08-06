@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
 using MiniCivilization.World.Generation;
@@ -22,9 +23,6 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldRenderer worldRenderer;
         [SerializeField] private WorldSaveController saveController;
 
-        private WorldEditController subscribedEditController;
-        private WorldWaterFlowController subscribedWaterFlowController;
-
         public WorldGenerationController Generator => generator;
         public WorldEditController EditController => editController;
         public WorldWaterFlowController WaterFlowController =>
@@ -32,12 +30,18 @@ namespace MiniCivilization.World.Runtime
         public WorldRenderer Renderer => worldRenderer;
         public WorldSaveController SaveController => saveController;
         public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
-        public WorldData CurrentWorldData { get; private set; }
+        public WorldRuntime CurrentWorldRuntime { get; private set; }
+        public WorldData CurrentWorldData => CurrentWorldRuntime?.Data;
         public bool HasWorld => CurrentWorldData != null;
         public bool IsDirty { get; private set; }
+        public WorldOperationProgress CurrentOperationProgress =>
+            activeWorldOperation?.Progress ?? default;
 
         public event Action<WorldDataAsset> WorldChanged;
         public event Action<bool> DirtyStateChanged;
+        public event Action<WorldOperationProgress> OperationProgressChanged;
+
+        private WorldOperation activeWorldOperation;
 
         private void Start()
         {
@@ -86,18 +90,15 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
+            if (!Application.isPlaying)
+            {
+                return GenerateWorldImmediately();
+            }
+
             try
             {
-                Debug.Log("[WorldStartup] Generation begin", this);
-                var generatedAsset = generator.GenerateDataAsset();
-                Debug.Log("[WorldStartup] Generation complete", this);
-                saveController.ClearActiveSavePath();
-                ActivateWorldAsset(
-                    generatedAsset,
-                    preferPreparedScene: false,
-                    markDirty: true);
-                Debug.Log("[WorldStartup] Activation complete", this);
-                return true;
+                return StartWorldOperation(
+                    new WorldGenerationOperation(generator.CreateBuildInput()));
             }
             catch (Exception exception)
             {
@@ -176,37 +177,20 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
+            if (!Application.isPlaying)
+            {
+                return LoadWorldImmediately(path);
+            }
+
             try
             {
-                var loadedAsset = saveController.LoadDataAsset(path);
-                ActivateWorldAsset(
-                    loadedAsset,
-                    preferPreparedScene: false,
-                    markDirty: false);
-                return true;
+                return StartWorldOperation(new WorldLoadOperation(path));
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception, this);
                 return false;
             }
-        }
-
-        public void ReplaceWorld(WorldData nextWorld)
-        {
-            if (nextWorld == null)
-            {
-                throw new ArgumentNullException(nameof(nextWorld));
-            }
-
-            var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
-            asset.name = $"World {nextWorld.Seed}";
-            asset.hideFlags = HideFlags.DontSave;
-            asset.Initialize(nextWorld);
-            ActivateWorldAsset(
-                asset,
-                preferPreparedScene: false,
-                markDirty: true);
         }
 
         public void SetCurrentWorldAsset(
@@ -220,6 +204,7 @@ namespace MiniCivilization.World.Runtime
                 return;
             }
 
+            CancelActiveWorldOperation();
             ActivateWorldAsset(asset, preferPreparedScene, markDirty);
         }
 
@@ -230,11 +215,10 @@ namespace MiniCivilization.World.Runtime
 
         public void UnloadWorld()
         {
-            worldRenderer?.Unbind();
-            waterFlowController?.Unbind();
-            editController?.Unbind();
+            CancelActiveWorldOperation();
+            UnbindRuntime();
             var previousAsset = currentWorldDataAsset;
-            CurrentWorldData = null;
+            CurrentWorldRuntime = null;
             currentWorldDataAsset = null;
             SetDirty(false);
             WorldChanged?.Invoke(null);
@@ -253,8 +237,6 @@ namespace MiniCivilization.World.Runtime
             waterFlowController = waterFlow;
             worldRenderer = renderer;
             saveController = saveLoad;
-            SubscribeToEditController();
-            SubscribeToWaterFlowController();
         }
 
         private void ActivateWorldAsset(
@@ -279,27 +261,36 @@ namespace MiniCivilization.World.Runtime
                     "WorldManager requires an assigned Renderer.");
             }
 
-            var previousAsset = currentWorldDataAsset;
-            currentWorldDataAsset = nextAsset;
-            CurrentWorldData = nextAsset.Data;
-            SubscribeToEditController();
-            SubscribeToWaterFlowController();
-            editController.Bind(nextAsset.Data);
-            waterFlowController.Bind(nextAsset.Data);
+            ActivatePreparedWorldAsset(
+                nextAsset,
+                WorldRuntime.CreatePrepared(nextAsset.Data),
+                preferPreparedScene,
+                markDirty);
+        }
 
-            var adoptedPreparedScene = preferPreparedScene
-                && nextAsset.HasPreparedRenderCache
-                && worldRenderer.TryAdoptPreparedWorld(
-                    nextAsset.Data,
-                    nextAsset.PreparedPatchSize,
-                    nextAsset.PreparedPatchCount,
-                    waterFlowController.State);
-            if (!adoptedPreparedScene)
+        private void ActivatePreparedWorldAsset(
+            WorldDataAsset nextAsset,
+            WorldRuntime runtime,
+            bool preferPreparedScene,
+            bool markDirty)
+        {
+            if (nextAsset == null)
             {
-                worldRenderer.BuildRuntimeWorld(
-                    nextAsset.Data,
-                    waterFlowController.State);
+                throw new ArgumentNullException(nameof(nextAsset));
             }
+
+            if (runtime == null || !ReferenceEquals(runtime.Data, nextAsset.Data))
+            {
+                throw new ArgumentException(
+                    "The prepared runtime does not belong to the supplied world asset.",
+                    nameof(runtime));
+            }
+
+            var previousAsset = currentWorldDataAsset;
+            UnbindRuntime();
+            BindRuntime(runtime, nextAsset, preferPreparedScene);
+            currentWorldDataAsset = nextAsset;
+            CurrentWorldRuntime = runtime;
 
             SetDirty(markDirty);
             WorldChanged?.Invoke(currentWorldDataAsset);
@@ -307,6 +298,170 @@ namespace MiniCivilization.World.Runtime
             {
                 ReleaseRuntimeAsset(previousAsset);
             }
+        }
+
+        private void Update()
+        {
+            var operation = activeWorldOperation;
+            if (operation == null)
+            {
+                return;
+            }
+
+            operation.Update();
+            PublishOperationProgress(operation);
+            if (operation.IsFailed)
+            {
+                Debug.LogException(operation.Failure, this);
+                FinishWorldOperation(operation);
+                return;
+            }
+
+            if (!operation.IsReadyForActivation)
+            {
+                return;
+            }
+
+            if (!operation.IsMeshStageStarted)
+            {
+                operation.BeginMeshStage();
+                PublishOperationProgress(operation);
+                return;
+            }
+
+            try
+            {
+                var runtime = operation.PreparedRuntime;
+                var asset = CreateRuntimeAsset(
+                    runtime.Data,
+                    operation.Kind == WorldOperationKind.Load
+                        ? Path.GetFileNameWithoutExtension(
+                            ((WorldLoadOperation)operation).Path)
+                        : $"World {runtime.Data.Seed}");
+                ActivatePreparedWorldAsset(
+                    asset,
+                    runtime,
+                    preferPreparedScene: false,
+                    markDirty: operation.Kind == WorldOperationKind.Generate);
+                if (operation.Kind == WorldOperationKind.Generate)
+                {
+                    saveController.ClearActiveSavePath();
+                    Debug.Log("[WorldStartup] Generation complete", this);
+                }
+                else
+                {
+                    saveController.SetActiveSavePath(
+                        ((WorldLoadOperation)operation).Path);
+                }
+
+                operation.Complete();
+                PublishOperationProgress(operation);
+                FinishWorldOperation(operation);
+            }
+            catch (Exception exception)
+            {
+                operation.FailBeforeActivation(exception);
+                PublishOperationProgress(operation);
+                Debug.LogException(exception, this);
+                FinishWorldOperation(operation);
+            }
+        }
+
+        private bool GenerateWorldImmediately()
+        {
+            try
+            {
+                var generatedAsset = generator.GenerateDataAsset();
+                saveController.ClearActiveSavePath();
+                ActivateWorldAsset(
+                    generatedAsset,
+                    preferPreparedScene: false,
+                    markDirty: true);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, this);
+                return false;
+            }
+        }
+
+        private bool LoadWorldImmediately(string path)
+        {
+            try
+            {
+                var loadedAsset = saveController.LoadDataAsset(path);
+                ActivateWorldAsset(
+                    loadedAsset,
+                    preferPreparedScene: false,
+                    markDirty: false);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception, this);
+                return false;
+            }
+        }
+
+        private bool StartWorldOperation(WorldOperation operation)
+        {
+            if (activeWorldOperation != null)
+            {
+                Debug.LogWarning(
+                    "A world generation or load operation is already running.",
+                    this);
+                operation.Dispose();
+                return false;
+            }
+
+            activeWorldOperation = operation;
+            return true;
+        }
+
+        private void PublishOperationProgress(WorldOperation operation)
+        {
+            if (operation != activeWorldOperation
+                || !operation.TryConsumeProgressChange(out var progress))
+            {
+                return;
+            }
+
+            OperationProgressChanged?.Invoke(progress);
+        }
+
+        private void FinishWorldOperation(WorldOperation operation)
+        {
+            if (operation != activeWorldOperation)
+            {
+                return;
+            }
+
+            operation.Dispose();
+            activeWorldOperation = null;
+        }
+
+        private void CancelActiveWorldOperation()
+        {
+            if (activeWorldOperation == null)
+            {
+                return;
+            }
+
+            activeWorldOperation.Dispose();
+            activeWorldOperation = null;
+            OperationProgressChanged?.Invoke(default);
+        }
+
+        private static WorldDataAsset CreateRuntimeAsset(
+            WorldData world,
+            string assetName)
+        {
+            var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
+            asset.name = assetName;
+            asset.hideFlags = HideFlags.DontSave;
+            asset.Initialize(world, captureSerializedData: false);
+            return asset;
         }
 
         private bool TryValidateReferences()
@@ -317,8 +472,6 @@ namespace MiniCivilization.World.Runtime
                 && worldRenderer != null
                 && saveController != null)
             {
-                SubscribeToEditController();
-                SubscribeToWaterFlowController();
                 return true;
             }
 
@@ -327,78 +480,6 @@ namespace MiniCivilization.World.Runtime
                 "Renderer, and Save components.",
                 this);
             return false;
-        }
-
-        private void SubscribeToEditController()
-        {
-            if (subscribedEditController == editController)
-            {
-                return;
-            }
-
-            if (subscribedEditController != null)
-            {
-                subscribedEditController.ChangeCommitted -= OnWorldEdited;
-            }
-
-            subscribedEditController = editController;
-            if (subscribedEditController != null)
-            {
-                subscribedEditController.ChangeCommitted += OnWorldEdited;
-            }
-        }
-
-        private void OnWorldEdited(WorldChangeSet changeSet)
-        {
-            if (changeSet == null || changeSet.World != CurrentWorldData)
-            {
-                return;
-            }
-
-            waterFlowController.ApplyChanges(changeSet);
-            worldRenderer.ApplyChanges(changeSet);
-            SetDirty(true);
-        }
-
-        private void SubscribeToWaterFlowController()
-        {
-            if (subscribedWaterFlowController == waterFlowController)
-            {
-                return;
-            }
-
-            if (subscribedWaterFlowController != null)
-            {
-                subscribedWaterFlowController.ChangeCommitted -=
-                    OnWaterFlowChanged;
-                subscribedWaterFlowController.StateChanged -=
-                    OnWaterFlowStateChanged;
-            }
-
-            subscribedWaterFlowController = waterFlowController;
-            if (subscribedWaterFlowController != null)
-            {
-                subscribedWaterFlowController.ChangeCommitted +=
-                    OnWaterFlowChanged;
-                subscribedWaterFlowController.StateChanged +=
-                    OnWaterFlowStateChanged;
-            }
-        }
-
-        private void OnWaterFlowStateChanged(WaterFlowState state)
-        {
-            worldRenderer?.SetWaterFlowState(state);
-        }
-
-        private void OnWaterFlowChanged(WorldChangeSet changeSet)
-        {
-            if (changeSet == null || changeSet.World != CurrentWorldData)
-            {
-                return;
-            }
-
-            worldRenderer.ApplyChanges(changeSet);
-            SetDirty(true);
         }
 
         private void SetDirty(bool value)
@@ -425,19 +506,73 @@ namespace MiniCivilization.World.Runtime
 
         private void OnDestroy()
         {
-            if (subscribedEditController != null)
+            CancelActiveWorldOperation();
+            UnbindRuntime();
+        }
+
+        private void BindRuntime(
+            WorldRuntime runtime,
+            WorldDataAsset asset,
+            bool preferPreparedScene)
+        {
+            try
             {
-                subscribedEditController.ChangeCommitted -= OnWorldEdited;
+                editController.Bind(runtime);
+                waterFlowController.Bind(runtime);
+                var adoptedPreparedScene = preferPreparedScene
+                    && asset.HasPreparedRenderCache
+                    && worldRenderer.TryAdoptPreparedWorld(
+                        runtime,
+                        asset.PreparedPatchSize,
+                        asset.PreparedPatchCount);
+                if (!adoptedPreparedScene)
+                {
+                    worldRenderer.Bind(runtime);
+                }
+
+                editController.ChangeCommitted += OnEditChanged;
+                waterFlowController.ChangeCommitted += OnWaterChanged;
+                waterFlowController.StateChanged += OnWaterStateChanged;
             }
-
-
-            if (subscribedWaterFlowController != null)
+            catch
             {
-                subscribedWaterFlowController.ChangeCommitted -=
-                    OnWaterFlowChanged;
-                subscribedWaterFlowController.StateChanged -=
-                    OnWaterFlowStateChanged;
+                UnbindRuntime();
+                throw;
             }
         }
+
+        private void UnbindRuntime()
+        {
+            if (editController != null)
+            {
+                editController.ChangeCommitted -= OnEditChanged;
+            }
+
+            if (waterFlowController != null)
+            {
+                waterFlowController.ChangeCommitted -= OnWaterChanged;
+                waterFlowController.StateChanged -= OnWaterStateChanged;
+            }
+
+            worldRenderer?.Unbind();
+            waterFlowController?.Unbind();
+            editController?.Unbind();
+        }
+
+        private void OnEditChanged(WorldChangeSet changeSet)
+        {
+            waterFlowController.ApplyChanges(changeSet);
+            worldRenderer.ApplyChanges(changeSet);
+            MarkDirty();
+        }
+
+        private void OnWaterChanged(WorldChangeSet changeSet)
+        {
+            worldRenderer.ApplyChanges(changeSet);
+            MarkDirty();
+        }
+
+        private void OnWaterStateChanged(WaterFlowState state) =>
+            worldRenderer.SetWaterFlowState(state);
     }
 }

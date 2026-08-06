@@ -38,13 +38,14 @@ namespace MiniCivilization.World.Editor
             if (manager.HasWorld)
             {
                 var world = manager.CurrentWorldData;
+                var runtime = manager.CurrentWorldRuntime;
                 var waterBodyCount =
                     manager.WaterFlowController?.State?.WaterBodies.Count ?? 0;
                 EditorGUILayout.HelpBox(
                     $"Active world: {world.Size} x {world.Size} x {world.Height}\n" +
                     $"Seed: {world.Seed}\n" +
                     $"Water bodies: {waterBodyCount}\n" +
-                    $"Change ID: {world.CurrentChangeId}\n" +
+                    $"Change ID: {runtime.CurrentChangeId}\n" +
                     $"Dirty: {(manager.IsDirty ? "Yes" : "No")}\n" +
                     $"Renderer: {manager.Renderer.BindingMode}",
                     MessageType.None);

@@ -21,34 +21,7 @@ namespace MiniCivilization.World.Persistence
         public string SavePath => HasActiveSavePath
             ? activeSavePath
             : ConfiguredSavePath;
-        public bool OverwriteExisting => overwriteExisting;
         public bool HasActiveSavePath => !string.IsNullOrWhiteSpace(activeSavePath);
-
-        public bool SaveExists()
-        {
-            return File.Exists(SavePath);
-        }
-
-        public bool SaveExists(string path)
-        {
-            return File.Exists(NormalizeExplicitPath(path));
-        }
-
-        public void Save(WorldData world)
-        {
-            Save(world, SavePath);
-        }
-
-        public void Save(WorldDataAsset worldAsset)
-        {
-            if (worldAsset == null)
-            {
-                throw new ArgumentNullException(nameof(worldAsset));
-            }
-
-            Save(worldAsset.Data, SavePath);
-            worldAsset.CaptureSerializedData();
-        }
 
         public void Save(WorldDataAsset worldAsset, string path)
         {
@@ -61,7 +34,7 @@ namespace MiniCivilization.World.Persistence
             worldAsset.CaptureSerializedData();
         }
 
-        public void Save(WorldData world, string path)
+        private void Save(WorldData world, string path)
         {
             if (world == null)
             {
@@ -114,12 +87,7 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
-        public WorldData Load()
-        {
-            return Load(SavePath);
-        }
-
-        public WorldData Load(string path)
+        private WorldData Load(string path)
         {
             var resolvedPath = NormalizeExplicitPath(path);
             if (!File.Exists(resolvedPath))
@@ -139,11 +107,6 @@ namespace MiniCivilization.World.Persistence
             return world;
         }
 
-        public WorldDataAsset LoadDataAsset()
-        {
-            return LoadDataAsset(SavePath);
-        }
-
         public WorldDataAsset LoadDataAsset(string path)
         {
             var world = Load(path);
@@ -154,26 +117,6 @@ namespace MiniCivilization.World.Persistence
             return asset;
         }
 
-        public byte[] SaveToBytes(WorldData world)
-        {
-            return WorldSaveCodec.ToBytes(world);
-        }
-
-        public WorldData LoadFromBytes(byte[] data)
-        {
-            return WorldSaveCodec.FromBytes(data);
-        }
-
-        public void Save(Stream destination, WorldData world)
-        {
-            WorldSaveCodec.Write(destination, world);
-        }
-
-        public WorldData Load(Stream source)
-        {
-            return WorldSaveCodec.Read(source);
-        }
-
         public void Configure(
             string relativeDirectory,
             string saveFileName,
@@ -182,11 +125,6 @@ namespace MiniCivilization.World.Persistence
             directoryName = relativeDirectory;
             fileName = saveFileName;
             overwriteExisting = allowOverwrite;
-            activeSavePath = null;
-        }
-
-        public void UseConfiguredSavePath()
-        {
             activeSavePath = null;
         }
 

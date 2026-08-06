@@ -16,8 +16,6 @@ namespace MiniCivilization.World.Interaction
         public static int Encode(WorldData world, int x, int y, int z)
             => WorldIndex.EncodeCell(world, x, y, z);
 
-        public static CellCoordinate Decode(WorldData world, int index)
-            => WorldIndex.DecodeCell(world, index);
     }
 
     public interface IWorldCellSelection

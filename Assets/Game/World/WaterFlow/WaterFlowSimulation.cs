@@ -949,12 +949,6 @@ namespace MiniCivilization.World.WaterFlow
                 throw new ArgumentNullException(nameof(world));
             }
 
-            if (!world.WaterSources.IsInitialized)
-            {
-                throw new InvalidOperationException(
-                    "Water sources must be classified before flow is scheduled.");
-            }
-
             var frontier = new HashSet<int>();
             for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)

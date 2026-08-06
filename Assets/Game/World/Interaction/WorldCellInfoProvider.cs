@@ -1,5 +1,6 @@
 using System.Text;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 using MiniCivilization.World.WaterFlow;
 using UnityEngine;
 
@@ -65,14 +66,13 @@ namespace MiniCivilization.World.Interaction
     public sealed class WorldCellInfoProvider : MonoBehaviour
     {
         public WorldCellInfoSnapshot Create(
-            WorldData world,
-            WaterFlowState waterFlowState,
+            WorldRuntime runtime,
             in TilePickResult pick)
         {
             return new WorldCellInfoSnapshot(
                 pick,
-                world.Context.GetCell(pick.Cell),
-                FindWaterBody(waterFlowState, pick.Cell));
+                runtime.Context.GetCell(pick.Cell),
+                FindWaterBody(runtime.WaterFlowState, pick.Cell));
         }
 
         private static WaterBody FindWaterBody(

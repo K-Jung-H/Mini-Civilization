@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 using MiniCivilization.World.Meshing;
 using MiniCivilization.World.WaterFlow;
 using UnityEngine;
@@ -38,7 +39,6 @@ namespace MiniCivilization.World.Presentation
         private WorldSurfaceQuery surfaceQuery;
         private int activeRenderPatchSize;
 
-        public WorldData BoundWorld => boundWorld;
         public WorldRenderBindingMode BindingMode { get; private set; }
         public WorldChangeId LastAppliedChangeId { get; private set; }
         public int ActiveRenderPatchSize => activeRenderPatchSize;
@@ -61,10 +61,9 @@ namespace MiniCivilization.World.Presentation
                 maxPatchRebuildsPerFrame);
         }
 
-        public void BuildRuntimeWorld(
-            WorldData world,
-            WaterFlowState waterFlowState)
+        public void Bind(WorldRuntime runtime)
         {
+            var world = runtime?.Data;
             if (world == null)
             {
                 throw new ArgumentNullException(nameof(world));
@@ -74,19 +73,20 @@ namespace MiniCivilization.World.Presentation
             Unbind();
 
             boundWorld = world;
-            boundWaterFlowState = waterFlowState;
+            boundWaterFlowState = runtime.WaterFlowState;
             exposureCache = new WorldExposureCache(world);
             surfaceQuery = new WorldSurfaceQuery(
                 world,
-                waterFlowState);
+                boundWaterFlowState);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
-            LastAppliedChangeId = world.CurrentChangeId;
+            LastAppliedChangeId = runtime.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: false);
         }
 
-        public void PrepareWorldInScene(WorldData world)
+        public void PrepareWorldInScene(WorldRuntime runtime)
         {
+            var world = runtime?.Data;
             if (world == null)
             {
                 throw new ArgumentNullException(nameof(world));
@@ -99,16 +99,16 @@ namespace MiniCivilization.World.Presentation
             surfaceQuery = new WorldSurfaceQuery(world);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             BindingMode = WorldRenderBindingMode.PreparedScene;
-            LastAppliedChangeId = world.CurrentChangeId;
+            LastAppliedChangeId = runtime.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: true);
         }
 
         public bool TryAdoptPreparedWorld(
-            WorldData world,
+            WorldRuntime runtime,
             int preparedPatchSize,
-            int preparedPatchCount,
-            WaterFlowState waterFlowState)
+            int preparedPatchCount)
         {
+            var world = runtime?.Data;
             if (world == null
                 || preparedPatchSize <= 0
                 || preparedPatchCount <= 0)
@@ -149,15 +149,15 @@ namespace MiniCivilization.World.Presentation
             }
 
             boundWorld = world;
-            boundWaterFlowState = waterFlowState;
+            boundWaterFlowState = runtime.WaterFlowState;
             exposureCache = new WorldExposureCache(world);
             surfaceQuery = new WorldSurfaceQuery(
                 world,
-                waterFlowState);
+                boundWaterFlowState);
             activeRenderPatchSize = preparedPatchSize;
             chunkViews = adoptedViews;
             BindingMode = WorldRenderBindingMode.PreparedScene;
-            LastAppliedChangeId = world.CurrentChangeId;
+            LastAppliedChangeId = runtime.CurrentChangeId;
             return true;
         }
 

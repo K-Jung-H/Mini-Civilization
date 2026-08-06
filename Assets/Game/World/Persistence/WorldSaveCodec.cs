@@ -10,9 +10,8 @@ namespace MiniCivilization.World.Persistence
     {
         private const uint Magic = 0x3257434D; // "MCW2"
         private const uint Footer = 0x444E454D; // "MEND"
-        private const uint WaterSourcesMarker = 0x32435357; // "WSC2"
         private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
-        private const ushort CurrentVersion = 5;
+        private const ushort CurrentVersion = 6;
         private const int CellByteSize = 13;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
@@ -100,7 +99,6 @@ namespace MiniCivilization.World.Persistence
                 WriteEnvironmentSection(writer, world, chunkX, chunkZ);
             }
 
-            WriteWaterSources(writer, world.WaterSources);
             WriteWaterFlowSchedule(writer, world.WaterFlowSchedule);
             writer.Write(Footer);
             writer.Flush();
@@ -215,14 +213,6 @@ namespace MiniCivilization.World.Persistence
                 ReadEnvironmentSection(reader, world, chunkX, chunkZ);
             }
 
-            if (reader.ReadUInt32() != WaterSourcesMarker)
-            {
-                throw new InvalidDataException(
-                    "The world save does not contain its water source section.");
-            }
-
-            ReadWaterSources(reader, world.WaterSources, world);
-
             if (reader.ReadUInt32() != WaterFlowScheduleMarker)
             {
                 throw new InvalidDataException(
@@ -236,70 +226,7 @@ namespace MiniCivilization.World.Persistence
                 throw new InvalidDataException("The world save footer is missing or corrupt.");
             }
 
-            world.Cache.RebuildAll();
             return world;
-        }
-
-        private static void WriteWaterSources(
-            BinaryWriter writer,
-            WaterSourceCollection waterSources)
-        {
-            writer.Write(WaterSourcesMarker);
-            writer.Write(waterSources.Groups.Count);
-            for (var groupIndex = 0;
-                 groupIndex < waterSources.Groups.Count;
-                 groupIndex++)
-            {
-                var group = waterSources.Groups[groupIndex];
-                writer.Write(group.Id);
-                writer.Write(group.CellIndices.Count);
-                for (var cellIndex = 0;
-                     cellIndex < group.CellIndices.Count;
-                     cellIndex++)
-                {
-                    writer.Write(group.CellIndices[cellIndex]);
-                }
-            }
-        }
-
-        private static void ReadWaterSources(
-            BinaryReader reader,
-            WaterSourceCollection waterSources,
-            WorldData world)
-        {
-            var groupCount = reader.ReadInt32();
-            var cellCapacity = checked(world.Size * world.Size * world.Height);
-            if (groupCount < 0 || groupCount > cellCapacity)
-            {
-                throw new InvalidDataException("The water source group count is invalid.");
-            }
-
-            var groups = new WaterSourceGroupData[groupCount];
-            for (var groupIndex = 0; groupIndex < groupCount; groupIndex++)
-            {
-                var id = reader.ReadInt32();
-                var cellCount = reader.ReadInt32();
-                if (cellCount < 0 || cellCount > cellCapacity)
-                {
-                    throw new InvalidDataException("A water source group size is invalid.");
-                }
-
-                var cellIndices = new int[cellCount];
-                for (var cellIndex = 0; cellIndex < cellCount; cellIndex++)
-                {
-                    cellIndices[cellIndex] = reader.ReadInt32();
-                    if ((uint)cellIndices[cellIndex] >= cellCapacity)
-                    {
-                        throw new InvalidDataException("A source Cell index is outside the world.");
-                    }
-                }
-
-                groups[groupIndex] = new WaterSourceGroupData(
-                    id,
-                    cellIndices);
-            }
-
-            waterSources.ReplaceGroups(groups);
         }
 
         private static void WriteWaterFlowSchedule(
@@ -391,7 +318,7 @@ namespace MiniCivilization.World.Persistence
             var localZ = 0;
             void Store(CellData cell)
             {
-                chunk.SetCellBulk(localX, localY, localZ, cell);
+                chunk.SetCellRaw(localX, localY, localZ, cell);
                 localX++;
                 if (localX < chunk.SizeX)
                 {

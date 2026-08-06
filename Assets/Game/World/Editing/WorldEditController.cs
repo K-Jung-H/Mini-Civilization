@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 
 namespace MiniCivilization.World.Editing
@@ -14,6 +15,7 @@ namespace MiniCivilization.World.Editing
         private readonly Stack<WorldEditRecord> undoRecords = new();
         private readonly Stack<WorldEditRecord> redoRecords = new();
 
+        private WorldRuntime boundRuntime;
         private WorldData boundWorld;
         private WorldEditTransaction activeTransaction;
 
@@ -33,15 +35,16 @@ namespace MiniCivilization.World.Editing
             TrimHistory(redoRecords);
         }
 
-        public void Bind(WorldData world)
+        public void Bind(WorldRuntime runtime)
         {
-            if (world == null)
+            if (runtime == null)
             {
-                throw new ArgumentNullException(nameof(world));
+                throw new ArgumentNullException(nameof(runtime));
             }
 
             Unbind();
-            boundWorld = world;
+            boundRuntime = runtime;
+            boundWorld = runtime.Data;
         }
 
         public void Unbind()
@@ -49,6 +52,7 @@ namespace MiniCivilization.World.Editing
             activeTransaction?.Cancel();
             activeTransaction = null;
             boundWorld = null;
+            boundRuntime = null;
             ClearHistory();
         }
 
@@ -259,16 +263,8 @@ namespace MiniCivilization.World.Editing
                 throw;
             }
 
-            RebuildColumns(changedColumns);
-            var changeId = boundWorld.AdvanceChangeId();
             var affectedChunks = BuildAffectedChunks(cellChanges, environmentChanges);
-            foreach (var coordinate in affectedChunks)
-            {
-                boundWorld.MarkChunkChanged(coordinate, changeId);
-            }
-
             var changeSet = BuildChangeSet(
-                changeId,
                 cellChanges,
                 environmentChanges,
                 changedColumns,
@@ -367,18 +363,12 @@ namespace MiniCivilization.World.Editing
         {
             var changedColumns = columnIndices as IReadOnlyCollection<int>
                 ?? new HashSet<int>(columnIndices);
-            foreach (var columnIndex in changedColumns)
-            {
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    columnIndex,
-                    out var x,
-                    out var z);
-                boundWorld.Cache.RebuildSurfaceHeight(x, z);
-            }
-
-            boundWorld.Cache.RebuildPathColumns(changedColumns);
-            boundWorld.Cache.RebuildWaterDistances();
+            boundRuntime.ChangeApplier.RebuildDerived(
+                WorldChangeType.CellStructure | WorldChangeType.Surface,
+                changedColumns as IReadOnlyList<int>
+                    ?? new List<int>(changedColumns),
+                rebuildNavigationColumns: true,
+                rebuildWaterDistances: true);
         }
 
         private ChunkCoordinate[] BuildAffectedChunks(
@@ -458,7 +448,6 @@ namespace MiniCivilization.World.Editing
         }
 
         private WorldChangeSet BuildChangeSet(
-            WorldChangeId changeId,
             CellEdit[] cellChanges,
             EnvironmentEdit[] environmentChanges,
             HashSet<int> changedColumns,
@@ -510,14 +499,14 @@ namespace MiniCivilization.World.Editing
             changedColumns.CopyTo(columnIndices);
             Array.Sort(columnIndices);
 
-            return new WorldChangeSet(
-                boundWorld,
-                changeId,
+            return boundRuntime.ChangeApplier.Apply(
                 changeTypes,
                 cellIndices,
                 columnIndices,
                 affectedChunks,
-                new CellBounds(minimum, maximum));
+                new CellBounds(minimum, maximum),
+                rebuildNavigationColumns: true,
+                rebuildWaterDistances: true);
         }
 
         private static WorldChangeType ClassifyChange(
@@ -850,7 +839,8 @@ namespace MiniCivilization.World.Editing
                         Amount = WaterAmount.FromRenderFill(
                             waterFill,
                             available),
-                        Role = WaterRole.Source
+                        Role = WaterRole.Source,
+                        Type = WaterType.Pond
                     }
                     : default;
                 SetCell(x, y, z, cell);

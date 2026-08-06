@@ -111,6 +111,9 @@ namespace MiniCivilization.World.Editor
             var infoPresenter = GetOrAdd<WorldTileInfoPresenter>(
                 uiObject,
                 out _);
+            var progressView = GetOrAdd<WorldOperationProgressView>(
+                uiObject,
+                out _);
 
             var renderRoot = EnsureChildTransform(
                 renderingObject.transform,
@@ -135,12 +138,16 @@ namespace MiniCivilization.World.Editor
                 renderer,
                 saveController);
 
-            var camera = ConfigureCamera(settings.WorldSize);
+            var camera = FindOrCreateCamera();
             highlighter.Configure(
                 manager,
                 selectionState,
                 highlightMaterial);
             var infoPanel = EnsureTileInfoCanvas(uiObject.transform);
+            EnsureWorldOperationProgressPanel(
+                uiObject.transform.Find("Canvas") as RectTransform,
+                progressView,
+                manager);
             var editToolbar = EnsureWorldEditToolbar(
                 uiObject.transform.Find("Canvas") as RectTransform);
             editToolState.Configure(editToolbar);
@@ -182,6 +189,7 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(highlighter);
             EditorUtility.SetDirty(infoProvider);
             EditorUtility.SetDirty(infoPresenter);
+            EditorUtility.SetDirty(progressView);
             EditorUtility.SetDirty(infoPanel);
             EditorUtility.SetDirty(editToolbar);
             EditorSceneManager.MarkSceneDirty(scene);
@@ -388,6 +396,63 @@ namespace MiniCivilization.World.Editor
                 closeButton);
             panelTransform.gameObject.SetActive(false);
             return panel;
+        }
+
+        private static void EnsureWorldOperationProgressPanel(
+            RectTransform canvasTransform,
+            WorldOperationProgressView view,
+            WorldManager manager)
+        {
+            if (canvasTransform == null)
+            {
+                throw new MissingReferenceException(
+                    "World UI Canvas was not created.");
+            }
+
+            var panelTransform = canvasTransform.Find("World Operation Progress")
+                as RectTransform;
+            if (panelTransform == null)
+            {
+                var panelObject = new GameObject(
+                    "World Operation Progress",
+                    typeof(RectTransform),
+                    typeof(CanvasRenderer),
+                    typeof(Image));
+                panelTransform = (RectTransform)panelObject.transform;
+                panelTransform.SetParent(canvasTransform, false);
+            }
+
+            panelTransform.anchorMin = new Vector2(0.5f, 1f);
+            panelTransform.anchorMax = new Vector2(0.5f, 1f);
+            panelTransform.pivot = new Vector2(0.5f, 1f);
+            panelTransform.anchoredPosition = new Vector2(0f, -24f);
+            panelTransform.sizeDelta = new Vector2(390f, 88f);
+            panelTransform.GetComponent<Image>().color = new Color(
+                0.045f,
+                0.06f,
+                0.08f,
+                0.94f);
+
+            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            var stage = EnsureText(
+                panelTransform,
+                "Stage",
+                font,
+                18,
+                FontStyle.Bold,
+                new Vector2(18f, -14f),
+                new Vector2(354f, 30f));
+            var completed = EnsureText(
+                panelTransform,
+                "Completed",
+                font,
+                14,
+                FontStyle.Normal,
+                new Vector2(18f, -48f),
+                new Vector2(354f, 24f));
+            completed.color = new Color(0.68f, 0.75f, 0.82f, 1f);
+            view.Configure(manager, panelTransform.gameObject, stage, completed);
+            panelTransform.gameObject.SetActive(false);
         }
 
         private static Text EnsureText(
@@ -1321,28 +1386,26 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(eventObject);
         }
 
-        private static Camera ConfigureCamera(int worldSize)
+        private static Camera FindOrCreateCamera()
         {
-            var cameraObject = GameObject.Find("Main Camera") ?? new GameObject("Main Camera");
-            cameraObject.tag = "MainCamera";
-            var camera = cameraObject.GetComponent<Camera>() ?? cameraObject.AddComponent<Camera>();
-            if (cameraObject.GetComponent<AudioListener>() == null)
+            var camera = Camera.main;
+            if (camera != null)
             {
-                cameraObject.AddComponent<AudioListener>();
+                return camera;
             }
 
-            var center = new Vector3(worldSize * 0.5f, 2.5f, worldSize * 0.5f);
-            camera.transform.position =
-                center + new Vector3(0f, worldSize * 0.95f, -worldSize * 0.78f);
-            camera.transform.LookAt(center);
-            camera.orthographic = true;
-            camera.orthographicSize = worldSize * 0.58f;
-            camera.nearClipPlane = 0.1f;
-            camera.farClipPlane = worldSize * 4f;
-            camera.clearFlags = CameraClearFlags.Skybox;
-            camera.backgroundColor = new Color(0.14f, 0.22f, 0.34f, 1f);
-            EditorUtility.SetDirty(camera);
-            EditorUtility.SetDirty(camera.transform);
+            var cameraObject = GameObject.Find("Main Camera");
+            if (cameraObject != null
+                && cameraObject.TryGetComponent(out camera))
+            {
+                return camera;
+            }
+
+            cameraObject = new GameObject("Main Camera");
+            cameraObject.tag = "MainCamera";
+            camera = cameraObject.AddComponent<Camera>();
+            cameraObject.AddComponent<AudioListener>();
+            camera.transform.position = new Vector3(0f, 1f, -10f);
             return camera;
         }
 

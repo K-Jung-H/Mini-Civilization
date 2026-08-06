@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 
 namespace MiniCivilization.World.WaterFlow
@@ -16,18 +17,20 @@ namespace MiniCivilization.World.WaterFlow
 
         private readonly HashSet<int> pendingBodyColumnIndices = new();
         private readonly HashSet<int> affectedWaterBodyIds = new();
+        private WorldRuntime boundRuntime;
         private WorldData boundWorld;
-        private WaterFlowResolver resolver;
         private bool waterBodyTopologyRefreshRequested;
         private bool waterBodyMetricsRefreshRequested;
         private WaterFlowParameters activeParameters;
         private float simulationAccumulator;
 
-        public WorldData BoundWorld => boundWorld;
-        public WaterFlowState State { get; private set; }
+        public WorldRuntime Runtime => boundRuntime;
+        public WaterFlowState State => boundRuntime?.WaterFlowState;
         public WorldChangeId LastAppliedChangeId { get; private set; }
-        public bool HasPendingRecalculation => resolver?.HasWork == true;
-        public int PendingChangeCount => resolver?.PendingCellCount ?? 0;
+        public bool HasPendingRecalculation =>
+            boundRuntime?.WaterFlowResolver.HasWork == true;
+        public int PendingChangeCount =>
+            boundRuntime?.WaterFlowResolver.PendingCellCount ?? 0;
         public event Action<WaterFlowState> StateChanged;
         public event Action<WorldChangeSet> ChangeCommitted;
 
@@ -35,14 +38,14 @@ namespace MiniCivilization.World.WaterFlow
         {
             if (boundWorld == null
                 || State == null
-                || resolver == null
-                || !resolver.HasWork)
+                || boundRuntime?.WaterFlowResolver == null
+                || !boundRuntime.WaterFlowResolver.HasWork)
             {
                 simulationAccumulator = 0f;
                 return;
             }
 
-            if (!resolver.IsWaveInProgress)
+            if (!boundRuntime.WaterFlowResolver.IsWaveInProgress)
             {
                 simulationAccumulator += Time.deltaTime;
                 if (simulationAccumulator < simulationStepInterval)
@@ -53,7 +56,7 @@ namespace MiniCivilization.World.WaterFlow
                 simulationAccumulator -= simulationStepInterval;
             }
 
-            if (!resolver.Step(
+            if (!boundRuntime.WaterFlowResolver.Step(
                 boundWorld,
                 State,
                 activeParameters,
@@ -87,13 +90,16 @@ namespace MiniCivilization.World.WaterFlow
             if (result.HasTopologyChanges
                 || waterBodyTopologyRefreshRequested)
             {
-                State.ReplaceWaterBodies(WaterBodyResolver.Resolve(boundWorld));
+                State.ReplaceWaterBodies(WaterBodyResolver.Resolve(
+                    boundWorld,
+                    boundRuntime.SurfaceCache));
             }
             else if (result.HasRenderChanges
                 || waterBodyMetricsRefreshRequested)
             {
                 WaterBodyResolver.RefreshMetrics(
                     boundWorld,
+                    boundRuntime.SurfaceCache,
                     State,
                     pendingBodyColumnIndices,
                     affectedWaterBodyIds);
@@ -111,41 +117,35 @@ namespace MiniCivilization.World.WaterFlow
             maxCellsPerFrame = Math.Max(1, maxCellsPerFrame);
         }
 
-        public void Bind(WorldData world)
+        public void Bind(WorldRuntime runtime)
         {
-            if (world == null)
+            if (runtime == null)
             {
-                throw new ArgumentNullException(nameof(world));
+                throw new ArgumentNullException(nameof(runtime));
             }
 
-            boundWorld = world;
+            boundRuntime = runtime;
+            boundWorld = runtime.Data;
             activeParameters = CreateParameters();
-            if (!world.WaterSources.IsInitialized)
+            if (runtime.WaterFlowState == null
+                || runtime.WaterFlowResolver == null)
             {
-                world.WaterSources.InitializeFromGeneratedWorld(world);
+                throw new InvalidOperationException(
+                    "World runtime water state has not been prepared.");
             }
 
-            State = new WaterFlowState(
-                world,
-                WaterBodyResolver.Resolve(world));
-            resolver = new WaterFlowResolver(State.CellCount);
-            resolver.RestoreFrontier(
-                world,
-                State,
-                world.WaterFlowSchedule.FrontierCellIndices);
             pendingBodyColumnIndices.Clear();
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
             simulationAccumulator = 0f;
-            LastAppliedChangeId = world.CurrentChangeId;
+            LastAppliedChangeId = runtime.CurrentChangeId;
             StateChanged?.Invoke(State);
         }
 
         public void Unbind()
         {
             boundWorld = null;
-            State = null;
-            resolver = null;
+            boundRuntime = null;
             activeParameters = default;
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
@@ -182,7 +182,7 @@ namespace MiniCivilization.World.WaterFlow
             if ((changeSet.ChangeTypes & relevantChanges) != 0)
             {
                 ReconcileEditedWater(changeSet.ChangedCellIndices);
-                resolver.EnqueueChanges(
+                boundRuntime.WaterFlowResolver.EnqueueChanges(
                     boundWorld,
                     State,
                     changeSet.ChangedCellIndices,
@@ -205,67 +205,19 @@ namespace MiniCivilization.World.WaterFlow
             LastAppliedChangeId = changeSet.ChangeId;
         }
 
-        public void ConfigureSimulation(
-            float stepInterval,
-            int cellBudgetPerFrame)
-        {
-            simulationStepInterval = Math.Max(0.01f, stepInterval);
-            maxCellsPerFrame = Math.Max(1, cellBudgetPerFrame);
-        }
-
         private void ReconcileEditedWater(
             IReadOnlyList<int> changedCellIndices)
         {
             for (var index = 0; index < changedCellIndices.Count; index++)
             {
-                var cellIndex = changedCellIndices[index];
-                var coordinate = WorldIndex.DecodeCell(boundWorld, cellIndex);
-                var cell = boundWorld.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if (!cell.HasWater)
-                {
-                    State.SynchronizeFromPersistent(cellIndex);
-                    continue;
-                }
-
-                if (cell.Water.Role == WaterRole.None)
-                {
-                    cell.Water.Role = WaterRole.Source;
-                    boundWorld.SetCellForEdit(
-                        coordinate.X,
-                        coordinate.Y,
-                        coordinate.Z,
-                        cell);
-                }
-
-                State.SynchronizeFromPersistent(cellIndex);
+                State.SynchronizeFromPersistent(changedCellIndices[index]);
             }
-
-            boundWorld.WaterSources.SynchronizeWithWorld(boundWorld);
         }
 
         private void CommitResolvedChanges(
             WaterFlowRecalculationResult result)
         {
             var changedColumns = ToSortedArray(result.ChangedColumnIndices);
-            for (var index = 0; index < changedColumns.Length; index++)
-            {
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    changedColumns[index],
-                    out var x,
-                    out var z);
-                boundWorld.Cache.RebuildSurfaceHeight(x, z);
-            }
-
-            if (result.HasTopologyChanges
-                || waterBodyTopologyRefreshRequested)
-            {
-                boundWorld.Cache.RebuildWaterDistances();
-            }
-
             var logicalCells = ToSortedArray(
                 result.LogicalChangedCellIndices);
             var renderCells = ToSortedArray(
@@ -273,12 +225,6 @@ namespace MiniCivilization.World.WaterFlow
             var affectedChunks = BuildAffectedChunks(
                 renderCells,
                 changedColumns);
-            var changeId = boundWorld.AdvanceChangeId();
-            for (var index = 0; index < affectedChunks.Length; index++)
-            {
-                boundWorld.MarkChunkChanged(affectedChunks[index], changeId);
-            }
-
             var changeTypes = WorldChangeType.None;
             if (result.HasRenderChanges)
             {
@@ -297,15 +243,16 @@ namespace MiniCivilization.World.WaterFlow
                 changeTypes |= WorldChangeType.Ecology;
             }
 
-            var changeSet = new WorldChangeSet(
-                boundWorld,
-                changeId,
+            var changeSet = boundRuntime.ChangeApplier.Apply(
                 changeTypes,
                 logicalCells,
                 changedColumns,
                 affectedChunks,
-                BuildBounds(renderCells));
-            LastAppliedChangeId = changeId;
+                BuildBounds(renderCells),
+                rebuildNavigationColumns: false,
+                rebuildWaterDistances: result.HasTopologyChanges
+                    || waterBodyTopologyRefreshRequested);
+            LastAppliedChangeId = changeSet.ChangeId;
             ChangeCommitted?.Invoke(changeSet);
         }
 

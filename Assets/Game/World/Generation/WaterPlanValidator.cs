@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Generation
@@ -40,12 +41,15 @@ namespace MiniCivilization.World.Generation
     }
 
     /// <summary>
-    /// Applies a water feature plan to an isolated WorldData clone and runs the
-    /// production wave resolver to completion. The source world and plan remain
-    /// untouched.
+    /// Applies a water feature plan to an isolated height-and-water preview and
+    /// runs the production wave resolver to completion. The source world and
+    /// plan remain untouched.
     /// </summary>
     internal static class WaterPlanValidator
     {
+        public static WaterPlanValidationContext CreateContext(
+            WorldBuildData build) => CreateContext(CreateSourceWorld(build));
+
         public static WaterPlanValidationContext CreateContext(
             WorldData sourceWorld)
         {
@@ -57,7 +61,7 @@ namespace MiniCivilization.World.Generation
             var maximumWaves = Math.Max(
                 32,
                 checked((sourceWorld.Size + sourceWorld.Height) * 4));
-            var baselinePreview = CloneWorld(sourceWorld);
+            var baselinePreview = WaterPreview.Create(sourceWorld);
             if (!RunToStability(baselinePreview, maximumWaves))
             {
                 throw new InvalidOperationException(
@@ -67,7 +71,7 @@ namespace MiniCivilization.World.Generation
             return new WaterPlanValidationContext(
                 sourceWorld,
                 maximumWaves,
-                CaptureWetCells(baselinePreview));
+                CaptureWetCells(baselinePreview.Data));
         }
 
         public static WaterPlanValidationResult Validate(
@@ -101,7 +105,7 @@ namespace MiniCivilization.World.Generation
                     nameof(plan));
             }
 
-            var preview = CloneWorld(sourceWorld);
+            var preview = WaterPreview.Create(sourceWorld);
             ApplyTerrainPlan(preview, plan);
             ApplySources(preview, plan);
             var planMaximumWaves = Math.Max(
@@ -113,11 +117,11 @@ namespace MiniCivilization.World.Generation
                 preview,
                 planMaximumWaves);
             var leaked = FindLeakedCells(
-                preview,
+                preview.Data,
                 plan.AllowedWetCellIndices,
                 context.BaselineWetCells);
             var missing = FindMissingRequiredCells(
-                preview,
+                preview.Data,
                 plan.RequiredWetCellIndices);
             return new WaterPlanValidationResult(
                 stabilized,
@@ -125,48 +129,27 @@ namespace MiniCivilization.World.Generation
                 missing);
         }
 
-        private static WorldData CloneWorld(WorldData source)
-        {
-            var clone = new WorldData(
-                source.Size,
-                source.Height,
-                source.ChunkSizeX,
-                source.ChunkSizeY,
-                source.ChunkSizeZ,
-                source.Seed);
-            clone.ConfigureWaterFlow(source.WaterFlowRules);
-            for (var y = 0; y < source.Height; y++)
-            for (var z = 0; z < source.Size; z++)
-            for (var x = 0; x < source.Size; x++)
-            {
-                clone.SetCellBulk(x, y, z, source.GetCell(x, y, z));
-            }
-
-            clone.Cache.RebuildAllSurfaceHeights();
-            return clone;
-        }
-
         private static bool RunToStability(
-            WorldData preview,
+            WaterPreview preview,
             int maximumWaves)
         {
-            preview.Cache.RebuildAllSurfaceHeights();
-            preview.WaterSources.InitializeFromGeneratedWorld(preview);
-            WaterFlowSolver.PrepareGeneratedWorld(preview);
+            var world = preview.Data;
+            preview.SurfaceCache.RebuildAll();
+            WaterFlowSolver.PrepareGeneratedWorld(world);
             var flowState = new WaterFlowState(
-                preview,
-                Array.Empty<WaterBody>());
+                world,
+                WaterBodyResolver.Resolve(world, preview.SurfaceCache));
             var resolver = new WaterFlowResolver(flowState.CellCount);
             resolver.RestoreFrontier(
-                preview,
+                world,
                 flowState,
-                preview.WaterFlowSchedule.FrontierCellIndices);
-            var parameters = new WaterFlowParameters(preview.WaterFlowRules);
+                world.WaterFlowSchedule.FrontierCellIndices);
+            var parameters = new WaterFlowParameters(world.WaterFlowRules);
             var completedWaveCount = 0;
             while (resolver.HasWork && completedWaveCount < maximumWaves)
             {
                 resolver.Step(
-                    preview,
+                    world,
                     flowState,
                     parameters,
                     flowState.CellCount,
@@ -194,16 +177,16 @@ namespace MiniCivilization.World.Generation
         }
 
         private static void ApplyTerrainPlan(
-            WorldData preview,
+            WaterPreview preview,
             WaterFeaturePlan plan)
         {
             var maximumWorldHeight =
-                preview.Height * WorldGrid.HeightStepsPerCell;
+                preview.Data.Height * WorldGrid.HeightStepsPerCell;
             foreach (var pair in plan.TerrainColumns)
             {
                 var column = pair.Value;
                 ApplyColumnHeight(
-                    preview,
+                    preview.Data,
                     column.X,
                     column.Z,
                     Math.Clamp(
@@ -214,14 +197,15 @@ namespace MiniCivilization.World.Generation
         }
 
         private static void ApplySources(
-            WorldData preview,
+            WaterPreview preview,
             WaterFeaturePlan plan)
         {
+            var world = preview.Data;
             foreach (var pair in plan.SourceCells)
             {
                 var source = pair.Value;
                 var coordinate = source.Coordinate;
-                var cell = preview.GetCell(
+                var cell = world.GetCell(
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z);
@@ -232,7 +216,7 @@ namespace MiniCivilization.World.Generation
 
                 cell.Water = source.Water;
                 cell.Normalize();
-                preview.SetCellBulk(
+                world.SetCellBulk(
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z,
@@ -307,6 +291,141 @@ namespace MiniCivilization.World.Generation
 
             result.Sort();
             return result;
+        }
+
+        private static WorldData CreateSourceWorld(WorldBuildData build)
+        {
+            if (build == null)
+            {
+                throw new ArgumentNullException(nameof(build));
+            }
+
+            var input = build.Input;
+            var world = new WorldData(
+                build.Size,
+                build.Height,
+                input.ChunkSizeXZ,
+                input.ChunkHeight,
+                input.ChunkSizeXZ,
+                build.Seed);
+            world.ConfigureWaterFlow(build.WaterFlowRules);
+            world.ConfigureWaterTypes(build.PondMaximumArea);
+
+            for (var z = 0; z < build.Size; z++)
+            for (var x = 0; x < build.Size; x++)
+            {
+                var index = build.ToColumnIndex(x, z);
+                WriteSourceColumn(
+                    world,
+                    x,
+                    z,
+                    build.SolidHeights[index],
+                    build.WaterSurfaces[index],
+                    build.WaterRoles[index],
+                    build.WaterTypes[index]);
+            }
+
+            return world;
+        }
+
+        private static void WriteSourceColumn(
+            WorldData world,
+            int x,
+            int z,
+            int solidHeightUnits,
+            int waterSurfaceUnits,
+            WaterRole waterRole,
+            WaterType waterType)
+        {
+            solidHeightUnits = Math.Clamp(
+                solidHeightUnits,
+                0,
+                world.Height * WorldGrid.HeightStepsPerCell);
+            waterSurfaceUnits = Math.Clamp(
+                waterSurfaceUnits,
+                0,
+                world.Height * WorldGrid.HeightStepsPerCell);
+            for (var y = 0; y < world.Height; y++)
+            {
+                var baseUnits = y * WorldGrid.HeightStepsPerCell;
+                var solidFill = (byte)Math.Clamp(
+                    solidHeightUnits - baseUnits,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                var waterFill = (byte)Math.Clamp(
+                    waterSurfaceUnits - baseUnits - solidFill,
+                    0,
+                    WorldGrid.HeightStepsPerCell - solidFill);
+                var cell = new CellData
+                {
+                    Terrain = new TerrainData
+                    {
+                        SolidHeight = solidFill
+                    }
+                };
+                if (waterFill > 0 && waterRole == WaterRole.Source)
+                {
+                    cell.Water = new WaterData
+                    {
+                        Amount = WaterAmount.FromRenderFill(
+                            waterFill,
+                            WorldGrid.HeightStepsPerCell - solidFill),
+                        Role = waterRole,
+                        Type = waterType
+                    };
+                }
+
+                world.SetCellBulk(x, y, z, cell);
+            }
+        }
+
+        private sealed class WaterPreview
+        {
+            private WaterPreview(WorldData data, SurfaceCache surfaceCache)
+            {
+                Data = data;
+                SurfaceCache = surfaceCache;
+            }
+
+            public WorldData Data { get; }
+            public SurfaceCache SurfaceCache { get; }
+
+            public static WaterPreview Create(WorldData source)
+            {
+                var data = new WorldData(
+                    source.Size,
+                    source.Height,
+                    source.ChunkSizeX,
+                    source.ChunkSizeY,
+                    source.ChunkSizeZ,
+                    source.Seed);
+                data.ConfigureWaterFlow(source.WaterFlowRules);
+                data.ConfigureWaterTypes(source.PondMaximumArea);
+
+                for (var y = 0; y < source.Height; y++)
+                for (var z = 0; z < source.Size; z++)
+                for (var x = 0; x < source.Size; x++)
+                {
+                    var sourceCell = source.GetCell(x, y, z);
+                    if (!sourceCell.HasTerrain && !sourceCell.HasWater)
+                    {
+                        continue;
+                    }
+
+                    data.SetCellBulk(x, y, z, new CellData
+                    {
+                        Terrain = new TerrainData
+                        {
+                            SolidHeight = sourceCell.Terrain.SolidHeight
+                        },
+                        Water = sourceCell.Water
+                    });
+                }
+
+                var surfaceCache = new SurfaceCache(data);
+                surfaceCache.RebuildAll();
+                return new WaterPreview(data, surfaceCache);
+            }
         }
 
     }

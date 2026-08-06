@@ -15,13 +15,18 @@ namespace MiniCivilization.World.Generation
 
         public WorldData Generate()
         {
+            return WorldGenerationPipeline.Build(CreateBuildInput());
+        }
+
+        public WorldBuildInput CreateBuildInput()
+        {
             if (settings == null)
             {
                 throw new InvalidOperationException(
                     "World generation settings are not assigned.");
             }
 
-            return WorldGenerator.Generate(settings, seed);
+            return WorldBuildInput.Create(settings, seed);
         }
 
         public WorldDataAsset GenerateDataAsset()

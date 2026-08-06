@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.WaterFlow;
 
@@ -16,7 +17,7 @@ namespace MiniCivilization.World.Generation
 
         public static HydrologyFeaturePlan BuildFeaturePlan(
             WorldData validationWorld,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             IReadOnlyList<BasinPlan> basinPlans,
             IReadOnlyList<int> solidHeights,
@@ -143,7 +144,7 @@ namespace MiniCivilization.World.Generation
 
         private static void AddLakeOutlets(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             IReadOnlyList<BasinPlan> basins,
             IReadOnlyList<int> solidHeights,
@@ -188,7 +189,7 @@ namespace MiniCivilization.World.Generation
 
         private static void AddHeadwaterChannels(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             IReadOnlyList<BasinPlan> basins,
             IReadOnlyList<int> solidHeights,
@@ -213,66 +214,17 @@ namespace MiniCivilization.World.Generation
                 4,
                 (world.Size + targetSectorCount - 1)
                 / targetSectorCount);
-            var candidatesBySector = new Dictionary<
-                int,
-                HeadwaterCandidate>();
-            for (var index = 0; index < hydrology.ColumnCount; index++)
-            {
-                if (basinByWetColumn[index] >= 0
-                    || seaWaterSurfaces[index] > 0
-                    || solidHeights[index] < settings.SeaLevelUnits
-                        + WorldGrid.HeightStepsPerCell)
-                {
-                    continue;
-                }
-
-                var x = index % world.Size;
-                var z = index / world.Size;
-                if (x < 2 || z < 2
-                    || x >= world.Size - 2 || z >= world.Size - 2)
-                {
-                    continue;
-                }
-
-                if (IsAdjacentToPlannedWater(
-                        world.Size,
-                        index,
-                        seaWaterSurfaces,
-                        basinByWetColumn))
-                {
-                    continue;
-                }
-
-                var localFitness = (float)Math.Log(
-                        hydrology.GetFlowAccumulation(index) + 1d,
-                        2d) * 2f
-                    + Math.Min(
-                        hydrology.GetSeaDistance(index),
-                        world.Size / 3) * 0.1f
-                    + DeterministicNoise.Value01(
-                        x,
-                        z,
-                        candidateSeed) * 5f;
-                var sectorX = x / sectorSize;
-                var sectorZ = z / sectorSize;
-                var sectorIndex = sectorX
-                    + targetSectorCount * sectorZ;
-                if (!candidatesBySector.TryGetValue(
-                        sectorIndex,
-                        out var existing)
-                    || localFitness > existing.Fitness)
-                {
-                    var order = DeterministicNoise.Value01(
-                        sectorX,
-                        sectorZ,
-                        orderSeed);
-                    candidatesBySector[sectorIndex] =
-                        new HeadwaterCandidate(
-                            index,
-                            localFitness,
-                            order);
-                }
-            }
+            var candidatesBySector = CreateHeadwaterCandidates(
+                world,
+                settings,
+                hydrology,
+                solidHeights,
+                seaWaterSurfaces,
+                basinByWetColumn,
+                candidateSeed,
+                orderSeed,
+                targetSectorCount,
+                sectorSize);
 
             var candidates = new List<HeadwaterCandidate>(
                 candidatesBySector.Values);
@@ -353,6 +305,93 @@ namespace MiniCivilization.World.Generation
             }
         }
 
+        private static Dictionary<int, HeadwaterCandidate>
+            CreateHeadwaterCandidates(
+                WorldData world,
+                WorldBuildInput settings,
+                HydrologyMap hydrology,
+                IReadOnlyList<int> solidHeights,
+                IReadOnlyList<int> seaWaterSurfaces,
+                int[] basinByWetColumn,
+                int candidateSeed,
+                int orderSeed,
+                int targetSectorCount,
+                int sectorSize)
+        {
+            var candidateByColumn = new HeadwaterCandidate[
+                hydrology.ColumnCount];
+            var hasCandidate = new bool[hydrology.ColumnCount];
+            Parallel.For(0, hydrology.ColumnCount, index =>
+            {
+                if (basinByWetColumn[index] >= 0
+                    || seaWaterSurfaces[index] > 0
+                    || solidHeights[index] < settings.SeaLevelUnits
+                        + WorldGrid.HeightStepsPerCell)
+                {
+                    return;
+                }
+
+                var x = index % world.Size;
+                var z = index / world.Size;
+                if (x < 2 || z < 2
+                    || x >= world.Size - 2 || z >= world.Size - 2
+                    || IsAdjacentToPlannedWater(
+                        world.Size,
+                        index,
+                        seaWaterSurfaces,
+                        basinByWetColumn))
+                {
+                    return;
+                }
+
+                var localFitness = (float)Math.Log(
+                        hydrology.GetFlowAccumulation(index) + 1d,
+                        2d) * 2f
+                    + Math.Min(
+                        hydrology.GetSeaDistance(index),
+                        world.Size / 3) * 0.1f
+                    + DeterministicNoise.Value01(
+                        x,
+                        z,
+                        candidateSeed) * 5f;
+                var sectorX = x / sectorSize;
+                var sectorZ = z / sectorSize;
+                candidateByColumn[index] = new HeadwaterCandidate(
+                    index,
+                    localFitness,
+                    DeterministicNoise.Value01(
+                        sectorX,
+                        sectorZ,
+                        orderSeed));
+                hasCandidate[index] = true;
+            });
+
+            var candidatesBySector = new Dictionary<
+                int,
+                HeadwaterCandidate>();
+            for (var index = 0; index < candidateByColumn.Length; index++)
+            {
+                if (!hasCandidate[index])
+                {
+                    continue;
+                }
+
+                var sectorX = (index % world.Size) / sectorSize;
+                var sectorZ = (index / world.Size) / sectorSize;
+                var sectorIndex = sectorX + targetSectorCount * sectorZ;
+                var candidate = candidateByColumn[index];
+                if (!candidatesBySector.TryGetValue(
+                        sectorIndex,
+                        out var existing)
+                    || candidate.Fitness > existing.Fitness)
+                {
+                    candidatesBySector[sectorIndex] = candidate;
+                }
+            }
+
+            return candidatesBySector;
+        }
+
         private static bool IsAdjacentToPlannedWater(
             int size,
             int columnIndex,
@@ -385,7 +424,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool TryBuildOutletChannel(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             BasinPlan sourceBasin,
             IReadOnlyList<BasinPlan> basins,
@@ -731,7 +770,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool TryBuildChannel(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             ChannelTrace trace,
             IReadOnlyList<BasinPlan> basins,
@@ -776,7 +815,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool TryBuildChannelWithWidthLimit(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             ChannelTrace trace,
             IReadOnlyList<BasinPlan> basins,
@@ -1644,7 +1683,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool TryBuildRiverCorridorTerrain(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             RiverTerrainStyle terrainStyle,
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<int> seaWaterSurfaces,
@@ -1951,7 +1990,8 @@ namespace MiniCivilization.World.Generation
             var sourceWater = new WaterData
             {
                 Amount = WaterAmount.Full,
-                Role = WaterRole.Source
+                Role = WaterRole.Source,
+                Type = WaterType.Pond
             };
             var targetCell = new CellData
             {
@@ -2049,7 +2089,7 @@ namespace MiniCivilization.World.Generation
 
         private static int[] BuildSectionDepths(
             IReadOnlyList<int> widths,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             RiverTerrainStyle terrainStyle,
             int worldSeed,
             int worldSize,
@@ -2718,7 +2758,7 @@ namespace MiniCivilization.World.Generation
 
         private static void ValidateArguments(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             IReadOnlyList<BasinPlan> basins,
             IReadOnlyList<int> solidHeights,

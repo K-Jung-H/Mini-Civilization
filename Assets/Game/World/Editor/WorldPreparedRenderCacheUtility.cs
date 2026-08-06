@@ -54,7 +54,16 @@ namespace MiniCivilization.World.Editor
 
             RemoveMeshSubAssets(asset);
             asset.CaptureSerializedData();
-            manager.Renderer.PrepareWorldInScene(asset.Data);
+            if (manager.CurrentWorldDataAsset != asset
+                || manager.CurrentWorldRuntime == null)
+            {
+                manager.SetCurrentWorldAsset(
+                    asset,
+                    preferPreparedScene: false,
+                    markDirty: manager.IsDirty);
+            }
+
+            manager.Renderer.PrepareWorldInScene(manager.CurrentWorldRuntime);
 
             var meshes = new List<Mesh>();
             foreach (var view in manager.Renderer.EnumerateChunkViews())

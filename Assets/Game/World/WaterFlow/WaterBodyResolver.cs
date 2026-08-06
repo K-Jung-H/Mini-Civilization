@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.WaterFlow
 {
@@ -10,7 +11,9 @@ namespace MiniCivilization.World.WaterFlow
             (1, 0), (-1, 0), (0, 1), (0, -1)
         };
 
-        internal static IReadOnlyList<WaterBody> Resolve(WorldData world)
+        internal static IReadOnlyList<WaterBody> Resolve(
+            WorldData world,
+            SurfaceCache surfaceCache)
         {
             var visited = new bool[world.Size * world.Size];
             var result = new List<WaterBody>();
@@ -20,7 +23,7 @@ namespace MiniCivilization.World.WaterFlow
             for (var x = 0; x < world.Size; x++)
             {
                 var index = ToIndex(world, x, z);
-                if (visited[index] || !world.Cache.GetSurfaceHeight(x, z).HasWater)
+                if (visited[index] || !surfaceCache.GetSurfaceHeight(x, z).HasWater)
                 {
                     continue;
                 }
@@ -32,7 +35,7 @@ namespace MiniCivilization.World.WaterFlow
                 while (queue.Count > 0)
                 {
                     var current = queue.Dequeue();
-                    AddExposedColumn(world, current.x, current.z, body);
+                    AddExposedColumn(world, surfaceCache, current.x, current.z, body);
                     body.SurfaceCellCount++;
                     body.TouchesWorldEdge |= current.x == 0
                         || current.z == 0
@@ -49,7 +52,7 @@ namespace MiniCivilization.World.WaterFlow
                         }
 
                         var nextIndex = ToIndex(world, nextX, nextZ);
-                        if (visited[nextIndex] || !world.Cache.GetSurfaceHeight(nextX, nextZ).HasWater)
+                        if (visited[nextIndex] || !surfaceCache.GetSurfaceHeight(nextX, nextZ).HasWater)
                         {
                             continue;
                         }
@@ -69,6 +72,7 @@ namespace MiniCivilization.World.WaterFlow
 
         internal static void RefreshMetrics(
             WorldData world,
+            SurfaceCache surfaceCache,
             WaterFlowState state,
             IReadOnlyCollection<int> changedColumnIndices,
             HashSet<int> affectedBodyIds)
@@ -104,6 +108,7 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     volumeUnits += CalculateExposedUnits(
                         world,
+                        surfaceCache,
                         body.Cells[cellIndex]);
                 }
 
@@ -111,9 +116,14 @@ namespace MiniCivilization.World.WaterFlow
             }
         }
 
-        private static void AddExposedColumn(WorldData world, int x, int z, WaterBody body)
+        private static void AddExposedColumn(
+            WorldData world,
+            SurfaceCache surfaceCache,
+            int x,
+            int z,
+            WaterBody body)
         {
-            var column = world.Cache.GetSurfaceHeight(x, z);
+            var column = surfaceCache.GetSurfaceHeight(x, z);
             var solidTopUnits = column.GroundHeight;
 
             for (var y = 0; y <= column.WaterCellY; y++)
@@ -140,6 +150,7 @@ namespace MiniCivilization.World.WaterFlow
 
         private static int CalculateExposedUnits(
             WorldData world,
+            SurfaceCache surfaceCache,
             CellCoordinate coordinate)
         {
             var cell = world.GetCell(
@@ -149,7 +160,7 @@ namespace MiniCivilization.World.WaterFlow
             return CalculateExposedUnits(
                 cell,
                 coordinate.Y,
-                world.Cache.GetSurfaceHeight(
+                surfaceCache.GetSurfaceHeight(
                     coordinate.X,
                     coordinate.Z).GroundHeight);
         }

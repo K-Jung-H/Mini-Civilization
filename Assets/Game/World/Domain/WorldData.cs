@@ -11,7 +11,6 @@ namespace MiniCivilization.World.Domain
         public int SizeX { get; }
         public int SizeY { get; }
         public int SizeZ { get; }
-        public WorldChangeId LastChangeId { get; private set; }
 
         public ChunkData(
             ChunkCoordinate coordinate,
@@ -42,14 +41,14 @@ namespace MiniCivilization.World.Domain
         }
 
         public ReadOnlySpan<CellData> AsSpan() => cells;
-        internal void MarkChanged(WorldChangeId changeId) =>
-            LastChangeId = changeId;
-
         internal void SetCellBulk(int x, int y, int z, CellData cell)
         {
             cell.Normalize();
             cells[ToIndex(x, y, z)] = cell;
         }
+
+        internal void SetCellRaw(int x, int y, int z, CellData cell) =>
+            cells[ToIndex(x, y, z)] = cell;
 
         private int ToIndex(int x, int y, int z)
         {
@@ -78,11 +77,7 @@ namespace MiniCivilization.World.Domain
         public int Seed { get; }
         public WaterFlowRules WaterFlowRules { get; private set; }
         public int PondMaximumArea { get; private set; }
-        public WorldChangeId CurrentChangeId { get; private set; }
-        public WaterSourceCollection WaterSources { get; }
         public WaterFlowScheduleData WaterFlowSchedule { get; }
-        public WorldCache Cache { get; }
-        public WorldContext Context { get; }
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -115,7 +110,6 @@ namespace MiniCivilization.World.Domain
             ChunkCountZ = size / chunkSizeZ;
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
             environmentMap = new EnvironmentData[size * size];
-            WaterSources = new WaterSourceCollection();
             WaterFlowSchedule = new WaterFlowScheduleData();
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
@@ -129,8 +123,6 @@ namespace MiniCivilization.World.Domain
                     chunkSizeZ);
             }
 
-            Cache = new WorldCache(this);
-            Context = new WorldContext(this);
         }
 
         public void ConfigureWaterFlow(WaterFlowRules rules)
@@ -253,18 +245,15 @@ namespace MiniCivilization.World.Domain
             chunk.SetCellBulk(localX, localY, localZ, cell);
         }
 
-        internal WorldChangeId AdvanceChangeId()
+        internal void SetCellRaw(int x, int y, int z, CellData cell)
         {
-            CurrentChangeId = new WorldChangeId(checked(CurrentChangeId.Value + 1));
-            return CurrentChangeId;
-        }
+            if (!Contains(x, y, z))
+            {
+                throw new ArgumentOutOfRangeException($"World cell ({x}, {y}, {z}) is outside the world.");
+            }
 
-        internal void MarkChunkChanged(
-            ChunkCoordinate coordinate,
-            WorldChangeId changeId)
-        {
-            chunks[coordinate.X, coordinate.Y, coordinate.Z]
-                .MarkChanged(changeId);
+            GetChunkAndLocal(x, y, z, out var chunk, out var localX, out var localY, out var localZ);
+            chunk.SetCellRaw(localX, localY, localZ, cell);
         }
 
     }

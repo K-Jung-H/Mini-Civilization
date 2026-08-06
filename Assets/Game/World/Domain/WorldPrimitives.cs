@@ -7,7 +7,6 @@ namespace MiniCivilization.World.Domain
         public const int HeightStepsPerCell = 5;
         public const float HeightStep = 0.2f;
 
-        public static float ToWorldHeight(int heightUnits) => heightUnits * HeightStep;
     }
 
     public enum MaterialType : ushort
@@ -212,23 +211,6 @@ namespace MiniCivilization.World.Domain
                 Type = WaterType.None;
                 Flow = FlowDirection.None;
                 return;
-            }
-            else if (Role == WaterRole.None)
-            {
-                Role = WaterRole.Source;
-            }
-
-            if (Role is not WaterRole.Source and not WaterRole.Dynamic)
-            {
-                Role = WaterRole.Source;
-            }
-
-            if (Type is not WaterType.Pond
-                and not WaterType.Lake
-                and not WaterType.Sea
-                and not WaterType.River)
-            {
-                Type = WaterType.Pond;
             }
         }
 

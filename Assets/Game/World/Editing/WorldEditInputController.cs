@@ -341,7 +341,7 @@ namespace MiniCivilization.World.Editing
                     ? from.SurfaceType
                     : to.SurfaceType;
                 var y = ResolveBrushCellY(
-                    world,
+                    worldManager.CurrentWorldRuntime,
                     x,
                     z,
                     fallbackY,
@@ -353,18 +353,19 @@ namespace MiniCivilization.World.Editing
         }
 
         private static int ResolveBrushCellY(
-            WorldData world,
+            WorldRuntime runtime,
             int x,
             int z,
             int fallbackY,
             SurfaceInteractionType surfaceType)
         {
-            if (!world.ContainsColumn(x, z))
+            var world = runtime?.Data;
+            if (world == null || !world.ContainsColumn(x, z))
             {
-                return Mathf.Clamp(fallbackY, 0, world.Height - 1);
+                return world == null ? fallbackY : Mathf.Clamp(fallbackY, 0, world.Height - 1);
             }
 
-            var column = world.Cache.GetSurfaceHeight(x, z);
+            var column = runtime.SurfaceCache.GetSurfaceHeight(x, z);
             if (surfaceType == SurfaceInteractionType.Water)
             {
                 return column.HasWater

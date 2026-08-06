@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Generation
@@ -8,7 +9,7 @@ namespace MiniCivilization.World.Generation
     {
         public static IReadOnlyList<BasinPlan> BuildPlans(
             WorldData validationWorld,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             int worldSeed,
             WaterPlanValidationContext validationContext)
@@ -43,23 +44,11 @@ namespace MiniCivilization.World.Generation
             var seed = DeterministicNoise.DeriveSeed(
                 worldSeed,
                 "inland-basin-lakes");
-            var candidates = new List<LakeCandidate>();
-            for (var basinIndex = 0;
-                 basinIndex < hydrology.Basins.Count;
-                 basinIndex++)
-            {
-                var basin = hydrology.Basins[basinIndex];
-                if (TryCreateCandidate(
-                        validationWorld,
-                        settings,
-                        hydrology,
-                        basin,
-                        seed,
-                        out var candidate))
-                {
-                    candidates.Add(candidate);
-                }
-            }
+            var candidates = CreateCandidates(
+                validationWorld,
+                settings,
+                hydrology,
+                seed);
 
             candidates.Sort(CompareCandidates);
             var accepted = new List<BasinPlan>(settings.LakeCount);
@@ -91,6 +80,43 @@ namespace MiniCivilization.World.Generation
             }
 
             return accepted;
+        }
+
+        private static List<LakeCandidate> CreateCandidates(
+            WorldData world,
+            WorldBuildInput settings,
+            HydrologyMap hydrology,
+            int seed)
+        {
+            var candidateByBasin = new LakeCandidate[hydrology.Basins.Count];
+            var hasCandidate = new bool[hydrology.Basins.Count];
+            Parallel.For(0, hydrology.Basins.Count, basinIndex =>
+            {
+                if (TryCreateCandidate(
+                        world,
+                        settings,
+                        hydrology,
+                        hydrology.Basins[basinIndex],
+                        seed,
+                        out var candidate))
+                {
+                    candidateByBasin[basinIndex] = candidate;
+                    hasCandidate[basinIndex] = true;
+                }
+            });
+
+            var candidates = new List<LakeCandidate>();
+            for (var basinIndex = 0;
+                 basinIndex < candidateByBasin.Length;
+                 basinIndex++)
+            {
+                if (hasCandidate[basinIndex])
+                {
+                    candidates.Add(candidateByBasin[basinIndex]);
+                }
+            }
+
+            return candidates;
         }
 
         public static void ApplyPlans(
@@ -132,7 +158,7 @@ namespace MiniCivilization.World.Generation
 
         private static bool TryCreateCandidate(
             WorldData world,
-            WorldGenerationSettings settings,
+            WorldBuildInput settings,
             HydrologyMap hydrology,
             HydrologyBasin basin,
             int seed,

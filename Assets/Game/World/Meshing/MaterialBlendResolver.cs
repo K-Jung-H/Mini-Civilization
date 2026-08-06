@@ -8,29 +8,6 @@ namespace MiniCivilization.World.Meshing
         private const float BlendBand = 0.2f;
         private const float TotalBlendWidth = BlendBand * 2f;
 
-        public static SurfaceAppearance ResolveTerrain(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            float localX,
-            float localZ)
-        {
-            return ResolveTerrain(world, catalog, x, z, localX, localZ, null);
-        }
-
-        public static SurfaceAppearance ResolveTerrain(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            float localX,
-            float localZ,
-            SurfaceType surfaceOverride)
-        {
-            return ResolveTerrain(world, catalog, x, z, localX, localZ, (SurfaceType?)surfaceOverride);
-        }
-
         public static SurfaceAppearance ResolveWaterCell(
             WorldData world,
             WorldSurfaceCatalog catalog,
@@ -119,37 +96,6 @@ namespace MiniCivilization.World.Meshing
                 : DefaultSurfacePalette.ResolveWater();
         }
 
-        private static SurfaceAppearance ResolveTerrain(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            float localX,
-            float localZ,
-            SurfaceType? surfaceOverride)
-        {
-            ResolveAxis(localX, out var offsetX, out var blendX);
-            ResolveAxis(localZ, out var offsetZ, out var blendZ);
-
-            var currentColumn = world.Cache.GetSurfaceHeight(x, z);
-            var currentSurface = surfaceOverride
-                ?? ResolveColumnSurface(world, x, z, currentColumn);
-            var current = ResolveTerrainAppearance(
-                catalog,
-                world.GetEnvironment(x, z).Biome,
-                currentSurface);
-            var xAppearance = ResolveTerrainNeighbor(
-                world, catalog, x + offsetX, z, surfaceOverride, current);
-            var zAppearance = ResolveTerrainNeighbor(
-                world, catalog, x, z + offsetZ, surfaceOverride, current);
-            var diagonalAppearance = ResolveTerrainNeighbor(
-                world, catalog, x + offsetX, z + offsetZ, surfaceOverride, current);
-
-            var row0 = SurfaceAppearance.Lerp(current, xAppearance, blendX);
-            var row1 = SurfaceAppearance.Lerp(zAppearance, diagonalAppearance, blendX);
-            return SurfaceAppearance.Lerp(row0, row1, blendZ);
-        }
-
         private static void ResolveAxis(float localCoordinate, out int neighborOffset, out float blend)
         {
             if (localCoordinate < BlendBand)
@@ -167,32 +113,6 @@ namespace MiniCivilization.World.Meshing
                 neighborOffset = 0;
                 blend = 0f;
             }
-        }
-
-        private static SurfaceAppearance ResolveTerrainNeighbor(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            int x,
-            int z,
-            SurfaceType? surfaceOverride,
-            in SurfaceAppearance fallback)
-        {
-            if (!world.ContainsColumn(x, z))
-            {
-                return fallback;
-            }
-
-            var column = world.Cache.GetSurfaceHeight(x, z);
-            if (!column.HasGround)
-            {
-                return fallback;
-            }
-
-            return ResolveTerrainAppearance(
-                catalog,
-                world.GetEnvironment(x, z).Biome,
-                surfaceOverride
-                    ?? ResolveColumnSurface(world, x, z, column));
         }
 
         private static SurfaceAppearance ResolveTerrainCellAppearance(
@@ -225,22 +145,5 @@ namespace MiniCivilization.World.Meshing
                 surfaceOverride ?? surface);
         }
 
-        private static SurfaceType ResolveColumnSurface(
-            WorldData world,
-            int x,
-            int z,
-            SurfaceHeightData column)
-        {
-            if (!column.HasGround)
-            {
-                return SurfaceType.None;
-            }
-
-            var surface = world.GetCell(x, column.GroundCellY, z)
-                .Terrain.Surface;
-            return surface != SurfaceType.None
-                ? surface
-                : SurfaceType.Ground;
-        }
     }
 }
