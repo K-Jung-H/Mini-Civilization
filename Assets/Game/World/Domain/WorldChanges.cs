@@ -105,6 +105,40 @@ namespace MiniCivilization.World.Domain
             (ChangeTypes & changeType) != 0;
     }
 
+    public sealed class EntityChangeSet
+    {
+        public WorldData World { get; }
+        public WorldChangeId ChangeId { get; }
+        public IReadOnlyList<EntityId> AddedEntityIds { get; }
+        public IReadOnlyList<EntityId> RemovedEntityIds { get; }
+        public IReadOnlyList<EntityId> MovedEntityIds { get; }
+        public IReadOnlyList<int> AffectedCellIndices { get; }
+        public IReadOnlyList<ChunkCoordinate> AffectedChunks { get; }
+
+        internal EntityChangeSet(
+            WorldData world,
+            WorldChangeId changeId,
+            IReadOnlyList<EntityId> addedEntityIds,
+            IReadOnlyList<EntityId> removedEntityIds,
+            IReadOnlyList<EntityId> movedEntityIds,
+            IReadOnlyList<int> affectedCellIndices,
+            IReadOnlyList<ChunkCoordinate> affectedChunks)
+        {
+            World = world ?? throw new ArgumentNullException(nameof(world));
+            ChangeId = changeId;
+            AddedEntityIds = addedEntityIds
+                ?? throw new ArgumentNullException(nameof(addedEntityIds));
+            RemovedEntityIds = removedEntityIds
+                ?? throw new ArgumentNullException(nameof(removedEntityIds));
+            MovedEntityIds = movedEntityIds
+                ?? throw new ArgumentNullException(nameof(movedEntityIds));
+            AffectedCellIndices = affectedCellIndices
+                ?? throw new ArgumentNullException(nameof(affectedCellIndices));
+            AffectedChunks = affectedChunks
+                ?? throw new ArgumentNullException(nameof(affectedChunks));
+        }
+    }
+
     public static class WorldIndex
     {
         public static int EncodeCell(WorldData world, int x, int y, int z)

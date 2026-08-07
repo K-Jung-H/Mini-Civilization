@@ -65,6 +65,7 @@ namespace MiniCivilization.World.Domain
     {
         private readonly ChunkData[,,] chunks;
         private readonly EnvironmentData[] environmentMap;
+        private readonly List<EntityData> entities = new();
 
         public int Size { get; }
         public int Height { get; }
@@ -78,6 +79,7 @@ namespace MiniCivilization.World.Domain
         public WaterFlowRules WaterFlowRules { get; private set; }
         public int PondMaximumArea { get; private set; }
         public WaterFlowScheduleData WaterFlowSchedule { get; }
+        public IReadOnlyList<EntityData> Entities => entities;
 
         public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
         {
@@ -221,6 +223,53 @@ namespace MiniCivilization.World.Domain
             }
 
             environmentMap[x + Size * z] = environment;
+        }
+
+        internal void AddEntity(EntityData entity)
+        {
+            if (entity == null)
+            {
+                throw new ArgumentNullException(nameof(entity));
+            }
+
+            if (!Contains(
+                    entity.AnchorCell.X,
+                    entity.AnchorCell.Y,
+                    entity.AnchorCell.Z))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(entity),
+                    $"Entity {entity.Id} anchor is outside the world.");
+            }
+
+            for (var index = 0; index < entities.Count; index++)
+            {
+                if (entities[index].Id == entity.Id)
+                {
+                    throw new InvalidOperationException(
+                        $"Entity ID {entity.Id} already exists in the world.");
+                }
+            }
+
+            entities.Add(entity);
+        }
+
+        internal EntityData RemoveEntity(EntityId id)
+        {
+            for (var index = 0; index < entities.Count; index++)
+            {
+                if (entities[index].Id != id)
+                {
+                    continue;
+                }
+
+                var entity = entities[index];
+                entities.RemoveAt(index);
+                return entity;
+            }
+
+            throw new InvalidOperationException(
+                $"Entity ID {id} does not exist in the world.");
         }
 
         private void GetChunkAndLocal(int x, int y, int z, out ChunkData chunk, out int localX, out int localY, out int localZ)

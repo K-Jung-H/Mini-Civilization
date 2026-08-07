@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace MiniCivilization.World.Domain
 {
@@ -27,7 +28,47 @@ namespace MiniCivilization.World.Domain
                     >= (uint)cellCount)
                 {
                     throw new InvalidOperationException(
-                        "Water flow frontier contains a Cell outside the world.");
+                    "Water flow frontier contains a Cell outside the world.");
+                }
+            }
+
+            var entityIds = new HashSet<EntityId>();
+            for (var index = 0; index < world.Entities.Count; index++)
+            {
+                var entity = world.Entities[index];
+                if (entity == null)
+                {
+                    throw new InvalidOperationException(
+                        "World entities cannot contain a null entry.");
+                }
+
+                if (!entity.Id.IsValid || !entity.TypeId.IsValid)
+                {
+                    throw new InvalidOperationException(
+                        "World entity has an invalid ID or type ID.");
+                }
+
+                if (!entityIds.Add(entity.Id))
+                {
+                    throw new InvalidOperationException(
+                        $"World contains the duplicated entity ID {entity.Id}.");
+                }
+
+                if (!world.Contains(
+                        entity.AnchorCell.X,
+                        entity.AnchorCell.Y,
+                        entity.AnchorCell.Z))
+                {
+                    throw new InvalidOperationException(
+                        $"Entity {entity.Id} anchor is outside the world.");
+                }
+
+                if (!Enum.IsDefined(
+                        typeof(EntityDirection),
+                        entity.Direction))
+                {
+                    throw new InvalidOperationException(
+                        $"Entity {entity.Id} has an invalid direction.");
                 }
             }
         }

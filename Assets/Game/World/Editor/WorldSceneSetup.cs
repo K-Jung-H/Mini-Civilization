@@ -24,6 +24,7 @@ namespace MiniCivilization.World.Editor
         private const string SettingsDirectory = "Assets/Game/World/Settings";
         private const string SettingsPath = SettingsDirectory + "/WorldGenerationSettings.asset";
         private const string CatalogPath = SettingsDirectory + "/WorldSurfaceCatalog.asset";
+        private const string EntityCatalogPath = SettingsDirectory + "/EntityCatalog.asset";
         private const string TerrainMaterialPath = SettingsDirectory + "/WorldTerrain.mat";
         private const string WaterMaterialPath = SettingsDirectory + "/WorldWater.mat";
         private const string HighlightMaterialPath = SettingsDirectory + "/WorldTileHighlight.mat";
@@ -35,6 +36,7 @@ namespace MiniCivilization.World.Editor
 
             var settings = LoadOrCreateSettings();
             var catalog = LoadOrCreateAsset<WorldSurfaceCatalog>(CatalogPath);
+            var entityCatalog = LoadOrCreateAsset<EntityCatalog>(EntityCatalogPath);
             var terrainMaterial = LoadOrCreateMaterial(
                 TerrainMaterialPath,
                 "Mini Civilization/World Terrain Lit",
@@ -69,6 +71,7 @@ namespace MiniCivilization.World.Editor
                 worldObject,
                 "World Water Flow");
             var renderingObject = EnsureRoleObject(worldObject, "World Rendering");
+            var entitiesObject = EnsureRoleObject(worldObject, "World Entities");
             var saveObject = EnsureRoleObject(worldObject, "World Save");
             var interactionObject = EnsureRoleObject(worldObject, "World Interaction");
             var uiObject = EnsureRoleObject(worldObject, "World UI");
@@ -93,6 +96,9 @@ namespace MiniCivilization.World.Editor
                 waterFlowObject,
                 out _);
             var renderer = GetOrAdd<WorldRenderer>(renderingObject, out _);
+            var entityRenderer = GetOrAdd<WorldEntityRenderer>(
+                entitiesObject,
+                out _);
             var saveController = GetOrAdd<WorldSaveController>(
                 saveObject,
                 out _);
@@ -118,6 +124,9 @@ namespace MiniCivilization.World.Editor
             var renderRoot = EnsureChildTransform(
                 renderingObject.transform,
                 "Render Root");
+            var entityRoot = EnsureChildTransform(
+                entitiesObject.transform,
+                "Entity Root");
             generator.SetSettings(settings);
             if (generatorCreated)
             {
@@ -130,13 +139,16 @@ namespace MiniCivilization.World.Editor
                 waterMaterial,
                 renderRoot,
                 settings.RenderPatchSizeXZ);
+            entityRenderer.Configure(entityRoot);
             saveController.Configure("Worlds", "default.mcw", true);
             manager.Configure(
                 generator,
                 editController,
                 waterFlowController,
                 renderer,
-                saveController);
+                saveController,
+                entityRenderer,
+                entityCatalog);
 
             var camera = FindOrCreateCamera();
             highlighter.Configure(
@@ -149,7 +161,8 @@ namespace MiniCivilization.World.Editor
                 progressView,
                 manager);
             var editToolbar = EnsureWorldEditToolbar(
-                uiObject.transform.Find("Canvas") as RectTransform);
+                uiObject.transform.Find("Canvas") as RectTransform,
+                entityCatalog);
             editToolState.Configure(editToolbar);
             editInputController.Configure(
                 manager,
@@ -183,6 +196,7 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(editApplyController);
             EditorUtility.SetDirty(waterFlowController);
             EditorUtility.SetDirty(renderer);
+            EditorUtility.SetDirty(entityRenderer);
             EditorUtility.SetDirty(saveController);
             EditorUtility.SetDirty(selectionState);
             EditorUtility.SetDirty(interactionController);
@@ -537,7 +551,8 @@ namespace MiniCivilization.World.Editor
         }
 
         private static WorldEditToolbarView EnsureWorldEditToolbar(
-            RectTransform canvasTransform)
+            RectTransform canvasTransform,
+            EntityCatalog entityCatalog)
         {
             if (canvasTransform == null)
             {
@@ -548,7 +563,11 @@ namespace MiniCivilization.World.Editor
             const float size = 64f;
             const float gap = 8f;
             const float toolbarHeight = 84f;
-            const float expandedWidth = 450f;
+            const float expandedWidth = 746f;
+            const float entityGroupRight = -304f;
+            var entityDetailPanelRight =
+                -toolbarHeight + entityGroupRight;
+            var entityGroupWidth = size * 4f + gap * 3f;
             var backgroundColor = new Color(0.055f, 0.065f, 0.08f, 0.96f);
             var root = EnsureUiRect(
                 canvasTransform,
@@ -560,7 +579,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(-24f, 24f),
-                new Vector2(544f, 430f));
+                new Vector2(840f, 430f));
             var view = root.GetComponent<WorldEditToolbarView>();
             var toolbarFont = ResolveToolbarFont(view, root);
 
@@ -571,12 +590,16 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 Vector2.zero,
-                new Vector2(534f, toolbarHeight));
+                new Vector2(830f, toolbarHeight));
             MakePanelTransparent(toolbar);
             RemoveUiChild(toolbar, "Property Group");
             RemoveUiChild(toolbar, "Divider");
             RemoveUiChild(toolbar, "Mode Group");
+            RemoveUiChild(toolbar, "Entity Group");
             RemoveUiChild(toolbar, "Main Property Divider");
+            RemoveUiChild(toolbar, "Mode Property Divider");
+            RemoveUiChild(toolbar, "Entity Property Divider");
+            RemoveUiChild(toolbar, "Mode Entity Divider");
 
             var mainBackground = EnsureUiRect(
                 toolbar,
@@ -667,12 +690,49 @@ namespace MiniCivilization.World.Editor
                 toolbarFont,
                 new Color(0.38f, 0.41f, 0.46f, 1f), propertyGroup, 3, size, gap);
 
-            var modePropertyDivider = EnsureUiRect(
+            var entityPropertyDivider = EnsureUiRect(
                 expandedContent,
-                "Mode Property Divider",
+                "Entity Property Divider",
                 typeof(CanvasRenderer),
                 typeof(Image));
-            SetRightAnchoredDivider(modePropertyDivider, -296f, toolbarHeight * 0.5f);
+            SetRightAnchoredDivider(entityPropertyDivider, -296f, toolbarHeight * 0.5f);
+
+            var entityTransform = EnsureUiRect(
+                expandedContent,
+                "Entity Group",
+                typeof(ToggleGroup));
+            SetRect(
+                entityTransform,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(entityGroupRight, 10f),
+                new Vector2(entityGroupWidth, size));
+            var entityGroup = entityTransform.GetComponent<ToggleGroup>();
+            entityGroup.allowSwitchOff = true;
+            var nature = EnsureSquareToggle(
+                entityTransform, "Nature", "\uC790\uC5F0",
+                toolbarFont,
+                new Color(0.23f, 0.49f, 0.30f, 1f), entityGroup, 0, size, gap);
+            var animal = EnsureSquareToggle(
+                entityTransform, "Animal", "\uB3D9\uBB3C",
+                toolbarFont,
+                new Color(0.58f, 0.38f, 0.20f, 1f), entityGroup, 1, size, gap);
+            var human = EnsureSquareToggle(
+                entityTransform, "Human", "\uC0AC\uB78C",
+                toolbarFont,
+                new Color(0.25f, 0.42f, 0.66f, 1f), entityGroup, 2, size, gap);
+            var building = EnsureSquareToggle(
+                entityTransform, "Building", "\uAC74\uBB3C",
+                toolbarFont,
+                new Color(0.49f, 0.35f, 0.27f, 1f), entityGroup, 3, size, gap);
+
+            var modeEntityDivider = EnsureUiRect(
+                expandedContent,
+                "Mode Entity Divider",
+                typeof(CanvasRenderer),
+                typeof(Image));
+            SetRightAnchoredDivider(modeEntityDivider, -592f, toolbarHeight * 0.5f);
 
             var modeTransform = EnsureUiRect(
                 expandedContent,
@@ -683,7 +743,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
-                new Vector2(-304f, 10f),
+                new Vector2(-600f, 10f),
                 new Vector2(size * 2f + gap, size));
             var modeGroup = modeTransform.GetComponent<ToggleGroup>();
             modeGroup.allowSwitchOff = true;
@@ -712,7 +772,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 Vector2.zero,
-                new Vector2(544f, 430f));
+                new Vector2(840f, 430f));
             MakePanelTransparent(detailHost);
             RemoveUiChild(detailHost, "Title");
             RemoveUiChild(detailHost, "Detail Group");
@@ -795,12 +855,51 @@ namespace MiniCivilization.World.Editor
                 out var undoButton,
                 out var redoButton);
 
+            var definitionScroll = EnsureEntityDefinitionSection(
+                detailHost,
+                toolbarFont,
+                entityDetailPanelRight,
+                entityGroupWidth,
+                out var definitionContent,
+                out var definitionToggleGroup);
+            var detailsScroll = EnsureEntityDetailsSection(
+                detailHost,
+                toolbarFont,
+                entityDetailPanelRight,
+                entityGroupWidth,
+                out var detailsName,
+                out var detailsThumbnail,
+                out var detailsEmptyText);
+
             area.SetIsOnWithoutNotify(true);
             brush.SetIsOnWithoutNotify(false);
             terrain.SetIsOnWithoutNotify(false);
             biome.SetIsOnWithoutNotify(true);
             water.SetIsOnWithoutNotify(false);
             surface.SetIsOnWithoutNotify(false);
+            nature.SetIsOnWithoutNotify(false);
+            animal.SetIsOnWithoutNotify(false);
+            human.SetIsOnWithoutNotify(false);
+            building.SetIsOnWithoutNotify(false);
+
+            var entityCatalogView = GetOrAdd<WorldEntityCatalogView>(
+                root.gameObject,
+                out _);
+            entityCatalogView.Configure(
+                entityCatalog,
+                view,
+                nature,
+                animal,
+                human,
+                building,
+                definitionScroll,
+                definitionContent,
+                definitionToggleGroup,
+                detailsScroll,
+                detailsName,
+                detailsThumbnail,
+                detailsEmptyText,
+                toolbarFont);
 
             view.Configure(
                 toolbar,
@@ -827,6 +926,240 @@ namespace MiniCivilization.World.Editor
                     surfaceSection
                 });
             return view;
+        }
+
+        private static ScrollRect EnsureEntityDefinitionSection(
+            RectTransform detailHost,
+            TMP_FontAsset font,
+            float alignedRight,
+            float width,
+            out RectTransform content,
+            out ToggleGroup toggleGroup)
+        {
+            var panel = EnsureUiRect(
+                detailHost,
+                "Entity Definition List",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(ScrollRect));
+            ClearUiChildren(panel);
+            SetRect(
+                panel,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(alignedRight, 94f),
+                new Vector2(width, 176f));
+            panel.GetComponent<Image>().color =
+                new Color(0.055f, 0.065f, 0.08f, 0.96f);
+
+            var title = EnsureToolbarLabel(
+                panel,
+                "Title",
+                "\uC5D4\uD2F0\uD2F0 \uBAA9\uB85D",
+                font,
+                15,
+                FontStyles.Bold);
+            SetBottomLeftRect(
+                title.transform as RectTransform,
+                10f,
+                144f,
+                width - 20f,
+                24f);
+
+            var scroll = panel.GetComponent<ScrollRect>();
+            var viewport = EnsureUiRect(
+                panel,
+                "Viewport",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(RectMask2D));
+            SetScrollViewport(viewport, 10f, 10f, 34f);
+            viewport.GetComponent<Image>().color = Color.clear;
+
+            content = EnsureUiRect(
+                viewport,
+                "Content",
+                typeof(VerticalLayoutGroup),
+                typeof(ContentSizeFitter),
+                typeof(ToggleGroup));
+            ConfigureScrollContent(content);
+            toggleGroup = content.GetComponent<ToggleGroup>();
+            toggleGroup.allowSwitchOff = true;
+
+            scroll.viewport = viewport;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 18f;
+            return scroll;
+        }
+
+        private static ScrollRect EnsureEntityDetailsSection(
+            RectTransform detailHost,
+            TMP_FontAsset font,
+            float alignedRight,
+            float width,
+            out TMP_Text detailsName,
+            out Image detailsThumbnail,
+            out TMP_Text emptyText)
+        {
+            var panel = EnsureUiRect(
+                detailHost,
+                "Entity Details",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(ScrollRect));
+            ClearUiChildren(panel);
+            SetRect(
+                panel,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(alignedRight, 278f),
+                new Vector2(width, 128f));
+            panel.GetComponent<Image>().color =
+                new Color(0.055f, 0.065f, 0.08f, 0.96f);
+
+            var title = EnsureToolbarLabel(
+                panel,
+                "Title",
+                "\uC5D4\uD2F0\uD2F0 \uC0C1\uC138",
+                font,
+                15,
+                FontStyles.Bold);
+            SetBottomLeftRect(
+                title.transform as RectTransform,
+                10f,
+                96f,
+                width - 20f,
+                24f);
+
+            var scroll = panel.GetComponent<ScrollRect>();
+            var viewport = EnsureUiRect(
+                panel,
+                "Viewport",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(RectMask2D));
+            SetScrollViewport(viewport, 10f, 10f, 34f);
+            viewport.GetComponent<Image>().color = Color.clear;
+
+            var content = EnsureUiRect(
+                viewport,
+                "Content",
+                typeof(VerticalLayoutGroup),
+                typeof(ContentSizeFitter));
+            ConfigureScrollContent(content);
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.childAlignment = TextAnchor.UpperCenter;
+
+            detailsName = CreateDetailsLabel(
+                content,
+                "Name",
+                font,
+                17f,
+                FontStyles.Bold);
+            detailsThumbnail = CreateDetailsThumbnail(content);
+            emptyText = CreateDetailsLabel(
+                content,
+                "Empty",
+                font,
+                14f,
+                FontStyles.Normal);
+            emptyText.text = "\uC5D4\uD2F0\uD2F0\uB97C \uC120\uD0DD\uD558\uC138\uC694";
+
+            scroll.viewport = viewport;
+            scroll.content = content;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 18f;
+            return scroll;
+        }
+
+        private static void SetScrollViewport(
+            RectTransform viewport,
+            float horizontalPadding,
+            float bottomPadding,
+            float topPadding)
+        {
+            viewport.anchorMin = Vector2.zero;
+            viewport.anchorMax = Vector2.one;
+            viewport.pivot = new Vector2(0.5f, 0.5f);
+            viewport.offsetMin = new Vector2(
+                horizontalPadding,
+                bottomPadding);
+            viewport.offsetMax = new Vector2(
+                -horizontalPadding,
+                -topPadding);
+        }
+
+        private static void ConfigureScrollContent(RectTransform content)
+        {
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = new Vector2(1f, 1f);
+            content.pivot = new Vector2(0.5f, 1f);
+            content.anchoredPosition = Vector2.zero;
+            content.sizeDelta = Vector2.zero;
+            var layout = content.GetComponent<VerticalLayoutGroup>();
+            layout.padding = new RectOffset(0, 0, 0, 0);
+            layout.spacing = 6f;
+            layout.childControlWidth = true;
+            layout.childControlHeight = false;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            var fitter = content.GetComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        }
+
+        private static TMP_Text CreateDetailsLabel(
+            RectTransform parent,
+            string objectName,
+            TMP_FontAsset font,
+            float fontSize,
+            FontStyles fontStyle)
+        {
+            var rect = EnsureUiRect(
+                parent,
+                objectName,
+                typeof(CanvasRenderer),
+                typeof(TextMeshProUGUI),
+                typeof(LayoutElement));
+            var text = rect.GetComponent<TextMeshProUGUI>();
+            if (font != null)
+            {
+                text.font = font;
+                text.fontSharedMaterial = font.material;
+            }
+
+            text.fontSize = fontSize;
+            text.fontStyle = fontStyle;
+            text.alignment = TextAlignmentOptions.Center;
+            text.raycastTarget = false;
+            var layout = rect.GetComponent<LayoutElement>();
+            layout.minHeight = 24f;
+            layout.preferredHeight = 24f;
+            return text;
+        }
+
+        private static Image CreateDetailsThumbnail(RectTransform parent)
+        {
+            var rect = EnsureUiRect(
+                parent,
+                "Thumbnail",
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(LayoutElement));
+            var image = rect.GetComponent<Image>();
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            var layout = rect.GetComponent<LayoutElement>();
+            layout.minHeight = 56f;
+            layout.preferredHeight = 56f;
+            return image;
         }
 
         private static RectTransform EnsureHistorySection(

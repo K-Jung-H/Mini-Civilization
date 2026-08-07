@@ -11,7 +11,8 @@ namespace MiniCivilization.World.Persistence
         private const uint Magic = 0x3257434D; // "MCW2"
         private const uint Footer = 0x444E454D; // "MEND"
         private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
-        private const ushort CurrentVersion = 6;
+        private const uint EntitiesMarker = 0x31544E45; // "ENT1"
+        private const ushort CurrentVersion = 7;
         private const int CellByteSize = 13;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
@@ -100,6 +101,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             WriteWaterFlowSchedule(writer, world.WaterFlowSchedule);
+            WriteEntities(writer, world.Entities);
             writer.Write(Footer);
             writer.Flush();
         }
@@ -221,6 +223,14 @@ namespace MiniCivilization.World.Persistence
 
             ReadWaterFlowSchedule(reader, world.WaterFlowSchedule, world);
 
+            if (reader.ReadUInt32() != EntitiesMarker)
+            {
+                throw new InvalidDataException(
+                    "The world save does not contain its entity data.");
+            }
+
+            ReadEntities(reader, world);
+
             if (reader.ReadUInt32() != Footer)
             {
                 throw new InvalidDataException("The world save footer is missing or corrupt.");
@@ -279,6 +289,60 @@ namespace MiniCivilization.World.Persistence
             }
 
             schedule.ReplaceFrontier(frontier);
+        }
+
+        private static void WriteEntities(
+            BinaryWriter writer,
+            System.Collections.Generic.IReadOnlyList<EntityData> entities)
+        {
+            writer.Write(EntitiesMarker);
+            writer.Write(entities.Count);
+            for (var index = 0; index < entities.Count; index++)
+            {
+                var entity = entities[index];
+                writer.Write(entity.Id.Value);
+                writer.Write(entity.TypeId.Value);
+                writer.Write(entity.AnchorCell.X);
+                writer.Write(entity.AnchorCell.Y);
+                writer.Write(entity.AnchorCell.Z);
+                writer.Write((byte)entity.Direction);
+            }
+        }
+
+        private static void ReadEntities(BinaryReader reader, WorldData world)
+        {
+            var count = reader.ReadInt32();
+            if (count < 0)
+            {
+                throw new InvalidDataException("The world entity count is invalid.");
+            }
+
+            for (var index = 0; index < count; index++)
+            {
+                var id = new EntityId(reader.ReadUInt64());
+                var typeId = new EntityTypeId(reader.ReadUInt16());
+                var anchor = new CellCoordinate(
+                    reader.ReadInt32(),
+                    reader.ReadInt32(),
+                    reader.ReadInt32());
+                var direction = (EntityDirection)reader.ReadByte();
+                try
+                {
+                    world.AddEntity(new EntityData(
+                        id,
+                        typeId,
+                        anchor,
+                        direction));
+                }
+                catch (Exception exception) when (
+                    exception is ArgumentOutOfRangeException
+                    || exception is InvalidOperationException)
+                {
+                    throw new InvalidDataException(
+                        "The world save contains an invalid entity.",
+                        exception);
+                }
+            }
         }
 
         private static void WriteCellSection(BinaryWriter writer, ReadOnlySpan<CellData> cells)

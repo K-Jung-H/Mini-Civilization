@@ -1,5 +1,6 @@
 using System;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Entities;
 using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Runtime
@@ -22,6 +23,7 @@ namespace MiniCivilization.World.Runtime
         internal WaterFlowResolver WaterFlowResolver { get; private set; }
         public WorldChangeId CurrentChangeId { get; private set; }
         public RuntimeChangeApplier ChangeApplier { get; internal set; }
+        public EntityRuntime Entities { get; private set; }
 
         public static WorldRuntime CreatePrepared(WorldData data)
         {
@@ -44,6 +46,9 @@ namespace MiniCivilization.World.Runtime
                 runtime.WaterFlowState,
                 data.WaterFlowSchedule.FrontierCellIndices);
             runtime.ChangeApplier = new RuntimeChangeApplier(runtime);
+            runtime.Entities = new EntityRuntime(
+                runtime,
+                EntityTypeRegistry.Shared);
             return runtime;
         }
 

@@ -37,7 +37,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 6;
+        public const int CurrentLayoutVersion = 7;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 

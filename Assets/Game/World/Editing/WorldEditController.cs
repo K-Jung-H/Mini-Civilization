@@ -77,7 +77,7 @@ namespace MiniCivilization.World.Editing
                     "Another world edit transaction is already active.");
             }
 
-            activeTransaction = new WorldEditTransaction(this, boundWorld);
+            activeTransaction = new WorldEditTransaction(this, boundRuntime);
             return activeTransaction;
         }
 
@@ -607,6 +607,7 @@ namespace MiniCivilization.World.Editing
     public sealed class WorldEditTransaction
     {
         private readonly WorldEditController owner;
+        private readonly WorldRuntime runtime;
         private readonly WorldData world;
         private readonly Dictionary<int, CellEdit> cellChanges = new();
         private readonly Dictionary<int, EnvironmentEdit> environmentChanges =
@@ -622,10 +623,11 @@ namespace MiniCivilization.World.Editing
 
         internal WorldEditTransaction(
             WorldEditController owner,
-            WorldData world)
+            WorldRuntime runtime)
         {
             this.owner = owner;
-            this.world = world;
+            this.runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+            world = runtime.Data;
         }
 
         public void SetCell(int x, int y, int z, CellData cell)
@@ -636,6 +638,11 @@ namespace MiniCivilization.World.Editing
                 throw new ArgumentOutOfRangeException(
                     nameof(x),
                     $"Cell ({x}, {y}, {z}) is outside the world.");
+            }
+
+            if (IsTerrainAnchored(x, y, z))
+            {
+                return;
             }
 
             cell.Normalize();
@@ -676,6 +683,11 @@ namespace MiniCivilization.World.Editing
         public bool RaiseColumn(int x, int z)
         {
             EnsureColumn(x, z);
+            if (HasTerrainAnchorInColumn(x, z))
+            {
+                return false;
+            }
+
             if (!TryGetLowestPendingSolidY(x, z, out var lowestSolidY)
                 || !TryGetHighestPendingSolidY(x, z, out var highestSolidY)
                 || highestSolidY >= world.Height - 1)
@@ -703,6 +715,11 @@ namespace MiniCivilization.World.Editing
         public bool LowerColumn(int x, int z)
         {
             EnsureColumn(x, z);
+            if (HasTerrainAnchorInColumn(x, z))
+            {
+                return false;
+            }
+
             if (!TryGetLowestPendingSolidY(x, z, out var lowestSolidY))
             {
                 return false;
@@ -744,6 +761,11 @@ namespace MiniCivilization.World.Editing
                     $"Cell ({x}, {y}, {z}) is outside the world.");
             }
 
+            if (IsTerrainAnchored(x, y, z))
+            {
+                return false;
+            }
+
             var current = GetPendingCell(x, y, z);
             if (current.Equals(default(CellData)))
             {
@@ -768,6 +790,11 @@ namespace MiniCivilization.World.Editing
             SurfaceType surface = SurfaceType.Ground)
         {
             EnsureColumn(x, z);
+            if (HasTerrainAnchorInColumn(x, z))
+            {
+                return;
+            }
+
             heightUnits = Math.Clamp(
                 heightUnits,
                 0,
@@ -814,6 +841,11 @@ namespace MiniCivilization.World.Editing
             int waterSurfaceUnits)
         {
             EnsureColumn(x, z);
+            if (HasTerrainAnchorInColumn(x, z))
+            {
+                return;
+            }
+
             waterSurfaceUnits = Math.Clamp(
                 waterSurfaceUnits,
                 0,
@@ -962,6 +994,12 @@ namespace MiniCivilization.World.Editing
                 ? change.Current
                 : world.GetCell(x, y, z);
         }
+
+        private bool IsTerrainAnchored(int x, int y, int z) =>
+            runtime.Entities.IsTerrainAnchored(new CellCoordinate(x, y, z));
+
+        private bool HasTerrainAnchorInColumn(int x, int z) =>
+            runtime.Entities.HasTerrainAnchorInColumn(x, z);
 
         public bool TryGetLowestPendingSolidY(
             int x,
