@@ -6,9 +6,10 @@ namespace MiniCivilization.World.Editing
 {
     public enum WorldEditMode : byte
     {
-        None,
-        Area,
-        Brush
+        None = 0,
+        Single = 1,
+        Area = 2,
+        Brush = 3
     }
 
     public enum WorldEditPropertyGroup : byte
@@ -198,8 +199,9 @@ namespace MiniCivilization.World.Editing
 
             var mode = toolbarView.GetSelectedModeIndex() switch
             {
-                1 => WorldEditMode.Area,
-                2 => WorldEditMode.Brush,
+                1 => WorldEditMode.Single,
+                2 => WorldEditMode.Area,
+                3 => WorldEditMode.Brush,
                 _ => WorldEditMode.None
             };
             var brushSize = toolbarView.GetSelectedBrushSize();

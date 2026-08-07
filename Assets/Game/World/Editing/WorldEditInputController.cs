@@ -215,7 +215,7 @@ namespace MiniCivilization.World.Editing
                 AppendBrushSegment(pick, pick);
                 RefreshBrushStrokePreview();
             }
-            else
+            else if (dragTool.Mode == WorldEditMode.Area)
             {
                 RefreshAreaPreview();
             }
@@ -238,7 +238,7 @@ namespace MiniCivilization.World.Editing
                 AppendBrushSegment(previous, pick);
                 RefreshBrushStrokePreview();
             }
-            else
+            else if (dragTool.Mode == WorldEditMode.Area)
             {
                 RefreshAreaPreview();
             }
@@ -250,7 +250,15 @@ namespace MiniCivilization.World.Editing
         private void CompleteDrag()
         {
             var snapshot = CreateSnapshot();
-            selectionState.CommitEditHovered();
+            if (dragTool.Mode == WorldEditMode.Single)
+            {
+                CommitSingleSelection();
+            }
+            else
+            {
+                selectionState.CommitEditHovered();
+            }
+
             isDragging = false;
             brushCellIndices.Clear();
             brushCells.Clear();
@@ -337,45 +345,28 @@ namespace MiniCivilization.World.Editing
                     from.Cell.Y,
                     to.Cell.Y,
                     t));
-                var surfaceType = t < 0.5f
-                    ? from.SurfaceType
-                    : to.SurfaceType;
-                var y = ResolveBrushCellY(
-                    worldManager.CurrentWorldRuntime,
-                    x,
-                    z,
-                    fallbackY,
-                    surfaceType);
                 AddBrushFootprint(
-                    new CellCoordinate(x, y, z),
+                    new CellCoordinate(x, fallbackY, z),
                     Mathf.Clamp(dragTool.BrushSize, 1, 3));
             }
         }
 
-        private static int ResolveBrushCellY(
-            WorldRuntime runtime,
-            int x,
-            int z,
-            int fallbackY,
-            SurfaceInteractionType surfaceType)
+        private void CommitSingleSelection()
         {
-            var world = runtime?.Data;
-            if (world == null || !world.ContainsColumn(x, z))
+            if (worldManager == null
+                || !worldManager.HasWorld
+                || selectionState == null
+                || !selectionState.Hovered.HasValue)
             {
-                return world == null ? fallbackY : Mathf.Clamp(fallbackY, 0, world.Height - 1);
+                return;
             }
 
-            var column = runtime.SurfaceCache.GetSurfaceHeight(x, z);
-            if (surfaceType == SurfaceInteractionType.Water)
-            {
-                return column.HasWater
-                    ? column.WaterCellY
-                    : Mathf.Clamp(fallbackY, 0, world.Height - 1);
-            }
-
-            return column.HasGround
-                ? column.GroundCellY
-                : Mathf.Clamp(fallbackY, 0, world.Height - 1);
+            var pick = selectionState.Hovered.Value;
+            dragCurrent = pick;
+            selectionState.ReplaceEditSelected(
+                WorldCellSetSelection.Create(
+                    worldManager.CurrentWorldData,
+                    new[] { pick.Cell }));
         }
 
         private void AddBrushFootprint(
@@ -383,10 +374,16 @@ namespace MiniCivilization.World.Editing
             int size)
         {
             var world = worldManager.CurrentWorldData;
-            for (var z = anchor.Z; z < anchor.Z + size; z++)
-            for (var x = anchor.X; x < anchor.X + size; x++)
+            var minimumOffset = -(size / 2);
+            for (var z = anchor.Z + minimumOffset;
+                 z < anchor.Z + minimumOffset + size;
+                 z++)
+            for (var x = anchor.X + minimumOffset;
+                 x < anchor.X + minimumOffset + size;
+                 x++)
             {
-                if (!world.Contains(x, anchor.Y, z))
+                if (!world.TryGetCell(x, anchor.Y, z, out var cell)
+                    || (!cell.HasTerrain && !cell.HasWater))
                 {
                     continue;
                 }

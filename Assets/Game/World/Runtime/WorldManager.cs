@@ -1,9 +1,7 @@
 using System;
 using System.IO;
-using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
-using MiniCivilization.World.Entities;
 using MiniCivilization.World.Generation;
 using MiniCivilization.World.WaterFlow;
 using MiniCivilization.World.Persistence;
@@ -23,8 +21,7 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldEditController editController;
         [SerializeField] private WorldWaterFlowController waterFlowController;
         [SerializeField] private WorldRenderer worldRenderer;
-        [SerializeField] private EntityCatalog entityCatalog;
-        [SerializeField] private WorldEntityRenderer entityRenderer;
+        [SerializeField] private EntityManager entityManager;
         [SerializeField] private WorldSaveController saveController;
 
         public WorldGenerationController Generator => generator;
@@ -32,8 +29,7 @@ namespace MiniCivilization.World.Runtime
         public WorldWaterFlowController WaterFlowController =>
             waterFlowController;
         public WorldRenderer Renderer => worldRenderer;
-        public EntityCatalog EntityCatalog => entityCatalog;
-        public WorldEntityRenderer EntityRenderer => entityRenderer;
+        public EntityManager EntityManager => entityManager;
         public WorldSaveController SaveController => saveController;
         public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
         public WorldRuntime CurrentWorldRuntime { get; private set; }
@@ -49,8 +45,6 @@ namespace MiniCivilization.World.Runtime
         public event Action<EntityChangeSet> EntityChanged;
 
         private WorldOperation activeWorldOperation;
-        private EntityRuntime boundEntities;
-
         private void Start()
         {
             if (CurrentWorldData != null)
@@ -241,16 +235,14 @@ namespace MiniCivilization.World.Runtime
             WorldWaterFlowController waterFlow,
             WorldRenderer renderer,
             WorldSaveController saveLoad,
-            WorldEntityRenderer entitiesRenderer = null,
-            EntityCatalog catalog = null)
+            EntityManager entitiesManager = null)
         {
             generator = generationController;
             editController = worldEditor;
             waterFlowController = waterFlow;
             worldRenderer = renderer;
             saveController = saveLoad;
-            entityRenderer = entitiesRenderer;
-            entityCatalog = catalog;
+            entityManager = entitiesManager;
         }
 
         private void ActivateWorldAsset(
@@ -275,7 +267,7 @@ namespace MiniCivilization.World.Runtime
                     "WorldManager requires an assigned Renderer.");
             }
 
-            ConfigureEntityTypes(nextAsset.Data);
+            ConfigureEntityTypes();
 
             ActivatePreparedWorldAsset(
                 nextAsset,
@@ -486,6 +478,7 @@ namespace MiniCivilization.World.Runtime
                 && editController != null
                 && waterFlowController != null
                 && worldRenderer != null
+                && entityManager != null
                 && saveController != null)
             {
                 return true;
@@ -493,7 +486,7 @@ namespace MiniCivilization.World.Runtime
 
             Debug.LogError(
                 "WorldManager requires assigned Generation, Editing, Water Flow, " +
-                "Renderer, and Save components.",
+                "Renderer, Entity Manager, and Save components.",
                 this);
             return false;
         }
@@ -546,13 +539,12 @@ namespace MiniCivilization.World.Runtime
                     worldRenderer.Bind(runtime);
                 }
 
-                entityRenderer?.Bind(runtime, entityCatalog);
+                entityManager.Bind(runtime);
 
                 editController.ChangeCommitted += OnEditChanged;
                 waterFlowController.ChangeCommitted += OnWaterChanged;
                 waterFlowController.StateChanged += OnWaterStateChanged;
-                boundEntities = runtime.Entities;
-                boundEntities.Changed += OnEntityChanged;
+                entityManager.Changed += OnEntityChanged;
             }
             catch
             {
@@ -574,13 +566,12 @@ namespace MiniCivilization.World.Runtime
                 waterFlowController.StateChanged -= OnWaterStateChanged;
             }
 
-            if (boundEntities != null)
+            if (entityManager != null)
             {
-                boundEntities.Changed -= OnEntityChanged;
-                boundEntities = null;
+                entityManager.Changed -= OnEntityChanged;
+                entityManager.Unbind();
             }
 
-            entityRenderer?.Unbind();
             worldRenderer?.Unbind();
             waterFlowController?.Unbind();
             editController?.Unbind();
@@ -604,23 +595,13 @@ namespace MiniCivilization.World.Runtime
 
         private void ConfigureEntityTypes()
         {
-            EntityTypeRegistry.Shared.Clear();
-            if (entityCatalog == null)
-            {
-                return;
-            }
-
-            entityCatalog.RegisterEntityTypes(EntityTypeRegistry.Shared);
-        }
-
-        private void ConfigureEntityTypes(WorldData world)
-        {
-            ConfigureEntityTypes();
-            if (entityCatalog == null && world.Entities.Count != 0)
+            if (entityManager == null)
             {
                 throw new MissingReferenceException(
-                    "WorldManager requires an Entity Catalog when the world contains entities.");
+                    "WorldManager requires an Entity Manager.");
             }
+
+            entityManager.ConfigureEntityTypes();
         }
 
         private void OnEntityChanged(EntityChangeSet changeSet)

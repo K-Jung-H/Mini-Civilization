@@ -92,11 +92,18 @@ namespace MiniCivilization.World.Editor
             var editApplyController = GetOrAdd<WorldEditApplyController>(
                 editingObject,
                 out _);
+            var entityEditController = GetOrAdd<
+                EntityEditController>(
+                editingObject,
+                out _);
             var waterFlowController = GetOrAdd<WorldWaterFlowController>(
                 waterFlowObject,
                 out _);
             var renderer = GetOrAdd<WorldRenderer>(renderingObject, out _);
             var entityRenderer = GetOrAdd<WorldEntityRenderer>(
+                entitiesObject,
+                out _);
+            var entityManager = GetOrAdd<EntityManager>(
                 entitiesObject,
                 out _);
             var saveController = GetOrAdd<WorldSaveController>(
@@ -140,6 +147,7 @@ namespace MiniCivilization.World.Editor
                 renderRoot,
                 settings.RenderPatchSizeXZ);
             entityRenderer.Configure(entityRoot);
+            entityManager.Configure(entityCatalog, entityRenderer);
             saveController.Configure("Worlds", "default.mcw", true);
             manager.Configure(
                 generator,
@@ -147,8 +155,7 @@ namespace MiniCivilization.World.Editor
                 waterFlowController,
                 renderer,
                 saveController,
-                entityRenderer,
-                entityCatalog);
+                entityManager);
 
             var camera = FindOrCreateCamera();
             highlighter.Configure(
@@ -172,6 +179,10 @@ namespace MiniCivilization.World.Editor
                 editController,
                 selectionState,
                 editToolbar);
+            entityEditController.Configure(
+                entityManager,
+                selectionState,
+                editToolbar.GetComponent<WorldEntityCatalogView>());
             interactionController.Configure(
                 camera,
                 manager,
@@ -194,9 +205,11 @@ namespace MiniCivilization.World.Editor
             EditorUtility.SetDirty(editToolState);
             EditorUtility.SetDirty(editInputController);
             EditorUtility.SetDirty(editApplyController);
+            EditorUtility.SetDirty(entityEditController);
             EditorUtility.SetDirty(waterFlowController);
             EditorUtility.SetDirty(renderer);
             EditorUtility.SetDirty(entityRenderer);
+            EditorUtility.SetDirty(entityManager);
             EditorUtility.SetDirty(saveController);
             EditorUtility.SetDirty(selectionState);
             EditorUtility.SetDirty(interactionController);
@@ -563,8 +576,10 @@ namespace MiniCivilization.World.Editor
             const float size = 64f;
             const float gap = 8f;
             const float toolbarHeight = 84f;
-            const float expandedWidth = 746f;
+            const float expandedWidth = 818f;
             const float entityGroupRight = -304f;
+            var rootWidth = expandedWidth + 94f;
+            const float rootHeight = 454f;
             var entityDetailPanelRight =
                 -toolbarHeight + entityGroupRight;
             var entityGroupWidth = size * 4f + gap * 3f;
@@ -579,7 +594,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(-24f, 24f),
-                new Vector2(840f, 430f));
+                new Vector2(rootWidth, rootHeight));
             var view = root.GetComponent<WorldEditToolbarView>();
             var toolbarFont = ResolveToolbarFont(view, root);
 
@@ -590,7 +605,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 Vector2.zero,
-                new Vector2(830f, toolbarHeight));
+                new Vector2(expandedWidth + toolbarHeight, toolbarHeight));
             MakePanelTransparent(toolbar);
             RemoveUiChild(toolbar, "Property Group");
             RemoveUiChild(toolbar, "Divider");
@@ -744,17 +759,27 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(-600f, 10f),
-                new Vector2(size * 2f + gap, size));
+                new Vector2(size * 3f + gap * 2f, size));
             var modeGroup = modeTransform.GetComponent<ToggleGroup>();
             modeGroup.allowSwitchOff = true;
+            var single = EnsureSquareToggle(
+                modeTransform,
+                "Single Selection",
+                "\uB2E8\uC77C\n\uC120\uD0DD",
+                toolbarFont,
+                new Color(0.30f, 0.54f, 0.62f, 1f),
+                modeGroup,
+                0,
+                size,
+                gap);
             var area = EnsureSquareToggle(
                 modeTransform, "Area Selection", "영역\n선택",
                 toolbarFont,
-                new Color(0.36f, 0.28f, 0.64f, 1f), modeGroup, 0, size, gap);
+                new Color(0.36f, 0.28f, 0.64f, 1f), modeGroup, 1, size, gap);
             var brush = EnsureSquareToggle(
                 modeTransform, "Brush", "브러시",
                 toolbarFont,
-                new Color(0.77f, 0.39f, 0.16f, 1f), modeGroup, 1, size, gap);
+                new Color(0.77f, 0.39f, 0.16f, 1f), modeGroup, 2, size, gap);
 
             var mainPropertyDivider = EnsureUiRect(
                 expandedContent,
@@ -772,7 +797,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 Vector2.zero,
-                new Vector2(840f, 430f));
+                new Vector2(rootWidth, rootHeight));
             MakePanelTransparent(detailHost);
             RemoveUiChild(detailHost, "Title");
             RemoveUiChild(detailHost, "Detail Group");
@@ -869,8 +894,10 @@ namespace MiniCivilization.World.Editor
                 entityGroupWidth,
                 out var detailsName,
                 out var detailsThumbnail,
-                out var detailsEmptyText);
+                out var detailsEmptyText,
+                out var entityCreateButton);
 
+            single.SetIsOnWithoutNotify(false);
             area.SetIsOnWithoutNotify(true);
             brush.SetIsOnWithoutNotify(false);
             terrain.SetIsOnWithoutNotify(false);
@@ -899,6 +926,7 @@ namespace MiniCivilization.World.Editor
                 detailsName,
                 detailsThumbnail,
                 detailsEmptyText,
+                entityCreateButton,
                 toolbarFont);
 
             view.Configure(
@@ -912,6 +940,7 @@ namespace MiniCivilization.World.Editor
                 redoButton,
                 toolbarFont,
                 modeGroup,
+                single,
                 area,
                 brush,
                 brushSizePanel,
@@ -1003,7 +1032,8 @@ namespace MiniCivilization.World.Editor
             float width,
             out TMP_Text detailsName,
             out Image detailsThumbnail,
-            out TMP_Text emptyText)
+            out TMP_Text emptyText,
+            out Button createButton)
         {
             var panel = EnsureUiRect(
                 detailHost,
@@ -1018,7 +1048,7 @@ namespace MiniCivilization.World.Editor
                 new Vector2(1f, 0f),
                 new Vector2(1f, 0f),
                 new Vector2(alignedRight, 278f),
-                new Vector2(width, 128f));
+                new Vector2(width, 176f));
             panel.GetComponent<Image>().color =
                 new Color(0.055f, 0.065f, 0.08f, 0.96f);
 
@@ -1032,7 +1062,7 @@ namespace MiniCivilization.World.Editor
             SetBottomLeftRect(
                 title.transform as RectTransform,
                 10f,
-                96f,
+                144f,
                 width - 20f,
                 24f);
 
@@ -1069,6 +1099,17 @@ namespace MiniCivilization.World.Editor
                 14f,
                 FontStyles.Normal);
             emptyText.text = "\uC5D4\uD2F0\uD2F0\uB97C \uC120\uD0DD\uD558\uC138\uC694";
+            createButton = EnsureToolbarButton(
+                content,
+                "Create",
+                "\uC0DD\uC131",
+                font,
+                new Color(0.22f, 0.56f, 0.34f, 1f));
+            var createLayout = createButton.gameObject
+                .GetComponent<LayoutElement>()
+                ?? createButton.gameObject.AddComponent<LayoutElement>();
+            createLayout.minHeight = 36f;
+            createLayout.preferredHeight = 36f;
 
             scroll.viewport = viewport;
             scroll.content = content;

@@ -17,6 +17,7 @@ namespace MiniCivilization.World.Runtime
         private readonly Dictionary<int, BuildingCellState> buildingCells = new();
         private readonly HashSet<int> terrainAnchorCells = new();
         private readonly HashSet<int> terrainAnchorColumns = new();
+        private ulong nextEntityId = 1;
 
         internal EntityRuntime(
             WorldRuntime runtime,
@@ -28,7 +29,9 @@ namespace MiniCivilization.World.Runtime
 
             for (var index = 0; index < world.Entities.Count; index++)
             {
-                AddRuntimeEntity(registry.Create(world.Entities[index]));
+                var data = world.Entities[index];
+                ReserveEntityId(data.Id);
+                AddRuntimeEntity(registry.Create(data));
             }
         }
 
@@ -123,6 +126,31 @@ namespace MiniCivilization.World.Runtime
                 NoEntityIds,
                 NoEntityIds,
                 GetIndexedCells(entity));
+        }
+
+        public EntityData Create(
+            EntityTypeId typeId,
+            CellCoordinate anchorCell,
+            EntityDirection direction = EntityDirection.North)
+        {
+            if (!typeId.IsValid)
+            {
+                throw new ArgumentOutOfRangeException(nameof(typeId));
+            }
+
+            if (!world.Contains(
+                    anchorCell.X,
+                    anchorCell.Y,
+                    anchorCell.Z))
+            {
+                throw new ArgumentOutOfRangeException(nameof(anchorCell));
+            }
+
+            return new EntityData(
+                AllocateEntityId(),
+                typeId,
+                anchorCell,
+                direction);
         }
 
         public EntityChangeSet Remove(EntityId id)
@@ -231,6 +259,33 @@ namespace MiniCivilization.World.Runtime
                     coordinate.Y,
                     coordinate.Z),
                 out cell);
+        }
+
+        private EntityId AllocateEntityId()
+        {
+            if (nextEntityId == 0)
+            {
+                throw new InvalidOperationException(
+                    "The world has exhausted Entity IDs.");
+            }
+
+            var id = new EntityId(nextEntityId);
+            nextEntityId = nextEntityId == ulong.MaxValue
+                ? 0
+                : nextEntityId + 1;
+            return id;
+        }
+
+        private void ReserveEntityId(EntityId id)
+        {
+            if (nextEntityId == 0 || id.Value < nextEntityId)
+            {
+                return;
+            }
+
+            nextEntityId = id.Value == ulong.MaxValue
+                ? 0
+                : id.Value + 1;
         }
 
         private void AddRuntimeEntity(Entity entity)

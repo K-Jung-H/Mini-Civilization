@@ -32,6 +32,7 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private TMP_Text detailsName;
         [SerializeField] private Image detailsThumbnail;
         [SerializeField] private TMP_Text detailsEmptyText;
+        [SerializeField] private Button createButton;
 
         [Header("Style")]
         [SerializeField] private TMP_FontAsset labelFont;
@@ -40,12 +41,14 @@ namespace MiniCivilization.World.Editing
         private EntityCategory? selectedCategory;
         private EntityDefinition selectedDefinition;
         private bool isSubscribed;
+        private bool isCreating;
 
         public EntityCatalog Catalog => entityCatalog;
         public EntityCategory? SelectedCategory => selectedCategory;
         public EntityDefinition SelectedDefinition => selectedDefinition;
 
         public event Action<EntityDefinition> DefinitionSelected;
+        public event Action<EntityDefinition> CreationRequested;
 
         private void OnEnable()
         {
@@ -72,6 +75,7 @@ namespace MiniCivilization.World.Editing
             TMP_Text nameLabel,
             Image thumbnailImage,
             TMP_Text emptyLabel,
+            Button create,
             TMP_FontAsset font)
         {
             Unsubscribe();
@@ -88,6 +92,7 @@ namespace MiniCivilization.World.Editing
             detailsName = nameLabel;
             detailsThumbnail = thumbnailImage;
             detailsEmptyText = emptyLabel;
+            createButton = create;
             labelFont = font;
 
             if (isActiveAndEnabled)
@@ -113,6 +118,11 @@ namespace MiniCivilization.World.Editing
             BindCategoryToggle(animalToggle, EntityCategory.Animal);
             BindCategoryToggle(humanToggle, EntityCategory.Human);
             BindCategoryToggle(buildingToggle, EntityCategory.Building);
+            if (createButton != null)
+            {
+                createButton.onClick.AddListener(RequestCreation);
+            }
+
             isSubscribed = true;
         }
 
@@ -137,6 +147,11 @@ namespace MiniCivilization.World.Editing
             }
 
             categoryListeners.Clear();
+            if (createButton != null)
+            {
+                createButton.onClick.RemoveListener(RequestCreation);
+            }
+
             isSubscribed = false;
         }
 
@@ -367,23 +382,50 @@ namespace MiniCivilization.World.Editing
             DefinitionSelected?.Invoke(selectedDefinition);
         }
 
+        private void RequestCreation()
+        {
+            if (isCreating || selectedDefinition == null)
+            {
+                return;
+            }
+
+            isCreating = true;
+            RefreshDetails();
+            try
+            {
+                CreationRequested?.Invoke(selectedDefinition);
+            }
+            finally
+            {
+                isCreating = false;
+                RefreshDetails();
+            }
+        }
+
         private void RefreshDetails()
         {
             var definition = selectedDefinition;
             if (detailsName != null)
             {
                 detailsName.text = definition?.DisplayName ?? string.Empty;
+                detailsName.gameObject.SetActive(definition != null);
             }
 
             if (detailsThumbnail != null)
             {
                 detailsThumbnail.sprite = definition?.Thumbnail;
-                detailsThumbnail.enabled = definition?.Thumbnail != null;
+                detailsThumbnail.gameObject.SetActive(
+                    definition?.Thumbnail != null);
             }
 
             if (detailsEmptyText != null)
             {
                 detailsEmptyText.gameObject.SetActive(definition == null);
+            }
+
+            if (createButton != null)
+            {
+                createButton.interactable = definition != null && !isCreating;
             }
 
             if (detailsScroll != null)

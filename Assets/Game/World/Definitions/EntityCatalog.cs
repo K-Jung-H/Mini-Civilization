@@ -2,107 +2,35 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
-using MiniCivilization.World.Presentation;
 using UnityEngine;
 
 namespace MiniCivilization.World.Definitions
 {
-    [Serializable]
-    public sealed class EntityDefinition
-    {
-        [SerializeField] private EntityController prefab;
-        [SerializeField] private Sprite thumbnail;
-        [SerializeField] private string displayName;
-        [SerializeField, HideInInspector] private ushort entityTypeId;
-        [SerializeField, HideInInspector] private string entityClassName;
-
-        public EntityController Prefab => prefab;
-        public Sprite Thumbnail => thumbnail;
-        public string DisplayName => displayName;
-        public EntityTypeId TypeId => new(entityTypeId);
-        public string EntityClassName => entityClassName;
-
-        internal EntityDefinition(EntityTypeId typeId, Type entityClass)
-        {
-            entityTypeId = typeId.Value;
-            entityClassName = entityClass?.AssemblyQualifiedName;
-            displayName = ToDisplayName(entityClass);
-        }
-
-        public Type ResolveEntityClass()
-        {
-            return string.IsNullOrWhiteSpace(entityClassName)
-                ? null
-                : Type.GetType(entityClassName, throwOnError: false);
-        }
-
-        private static string ToDisplayName(Type entityClass)
-        {
-            if (entityClass == null)
-            {
-                return string.Empty;
-            }
-
-            const string entitySuffix = "Entity";
-            return entityClass.Name.EndsWith(
-                entitySuffix,
-                StringComparison.Ordinal)
-                ? entityClass.Name.Substring(
-                    0,
-                    entityClass.Name.Length - entitySuffix.Length)
-                : entityClass.Name;
-        }
-    }
-
-    [Serializable]
-    public sealed class EntityDefinitionGroup
-    {
-        [SerializeField] private List<EntityDefinition> definitions = new();
-
-        public IReadOnlyList<EntityDefinition> Definitions => definitions;
-
-        internal void Add(EntityDefinition definition)
-        {
-            if (definition == null)
-            {
-                throw new ArgumentNullException(nameof(definition));
-            }
-
-            definitions.Add(definition);
-        }
-
-        internal bool Remove(EntityTypeId typeId)
-        {
-            for (var index = 0; index < definitions.Count; index++)
-            {
-                if (definitions[index].TypeId == typeId)
-                {
-                    definitions.RemoveAt(index);
-                    return true;
-                }
-            }
-
-            return false;
-        }
-    }
-
     [CreateAssetMenu(fileName = "EntityCatalog", menuName = "Mini Civilization/Entity Catalog")]
     public sealed class EntityCatalog : ScriptableObject
     {
-        [SerializeField] private EntityDefinitionGroup nature = new();
-        [SerializeField] private EntityDefinitionGroup animals = new();
-        [SerializeField] private EntityDefinitionGroup humans = new();
-        [SerializeField] private EntityDefinitionGroup buildings = new();
-        [SerializeField, HideInInspector, Min(1)] private ushort nextEntityTypeId = 1;
+        [SerializeField] private NatureEntityContainer nature;
+        [SerializeField] private AnimalEntityContainer animals;
+        [SerializeField] private HumanEntityContainer humans;
+        [SerializeField] private BuildingEntityContainer buildings;
 
         private readonly Dictionary<EntityTypeId, EntityDefinition>
             definitionsByTypeId = new();
+        private readonly Dictionary<EntityDefinition, EntityTypeId>
+            typeIdsByDefinition = new();
         private bool runtimeIndexValid;
 
-        public IReadOnlyList<EntityDefinition> NatureDefinitions => nature.Definitions;
-        public IReadOnlyList<EntityDefinition> AnimalDefinitions => animals.Definitions;
-        public IReadOnlyList<EntityDefinition> HumanDefinitions => humans.Definitions;
-        public IReadOnlyList<EntityDefinition> BuildingDefinitions => buildings.Definitions;
+        private static readonly IReadOnlyList<EntityDefinition> EmptyDefinitions =
+            Array.Empty<EntityDefinition>();
+
+        public IReadOnlyList<EntityDefinition> NatureDefinitions =>
+            GetDefinitions(EntityCategory.Nature);
+        public IReadOnlyList<EntityDefinition> AnimalDefinitions =>
+            GetDefinitions(EntityCategory.Animal);
+        public IReadOnlyList<EntityDefinition> HumanDefinitions =>
+            GetDefinitions(EntityCategory.Human);
+        public IReadOnlyList<EntityDefinition> BuildingDefinitions =>
+            GetDefinitions(EntityCategory.Building);
 
         private void OnEnable()
         {
@@ -117,7 +45,7 @@ namespace MiniCivilization.World.Definitions
         public IReadOnlyList<EntityDefinition> GetDefinitions(
             EntityCategory category)
         {
-            return GetGroup(category).Definitions;
+            return GetContainer(category)?.Definitions ?? EmptyDefinitions;
         }
 
         public bool TryGetDefinition(
@@ -139,6 +67,31 @@ namespace MiniCivilization.World.Definitions
             return definition;
         }
 
+        public bool TryGetTypeId(
+            EntityDefinition definition,
+            out EntityTypeId typeId)
+        {
+            EnsureRuntimeIndex();
+            if (definition == null)
+            {
+                typeId = EntityTypeId.None;
+                return false;
+            }
+
+            return typeIdsByDefinition.TryGetValue(definition, out typeId);
+        }
+
+        public EntityTypeId GetTypeId(EntityDefinition definition)
+        {
+            if (!TryGetTypeId(definition, out var typeId))
+            {
+                throw new InvalidOperationException(
+                    $"Entity definition '{definition?.name}' is not present in catalog '{name}'.");
+            }
+
+            return typeId;
+        }
+
         public void ValidateCatalog()
         {
             runtimeIndexValid = false;
@@ -155,53 +108,8 @@ namespace MiniCivilization.World.Definitions
             EnsureRuntimeIndex();
             foreach (var pair in definitionsByTypeId)
             {
-                registry.Register(
-                    pair.Key,
-                    pair.Value.ResolveEntityClass());
+                registry.Register(pair.Key, pair.Value.Prefab.EntityClass);
             }
-        }
-
-        public EntityDefinition AddDefinition(
-            EntityCategory category,
-            Type entityClass)
-        {
-            ValidateEntityClass(category, entityClass);
-            if (FindDefinitionByClass(entityClass) != null)
-            {
-                throw new InvalidOperationException(
-                    $"Entity class '{entityClass.FullName}' is already in catalog '{name}'.");
-            }
-
-            var definition = new EntityDefinition(
-                AllocateEntityTypeId(),
-                entityClass);
-            GetGroup(category).Add(definition);
-            runtimeIndexValid = false;
-            return definition;
-        }
-
-        public bool RemoveDefinition(EntityTypeId typeId)
-        {
-            if (!typeId.IsValid)
-            {
-                return false;
-            }
-
-            foreach (var category in Categories)
-            {
-                if (GetGroup(category).Remove(typeId))
-                {
-                    runtimeIndexValid = false;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        public void InvalidateRuntimeIndex()
-        {
-            runtimeIndexValid = false;
         }
 
         private void EnsureRuntimeIndex()
@@ -212,119 +120,90 @@ namespace MiniCivilization.World.Definitions
             }
 
             definitionsByTypeId.Clear();
-            var entityClasses = new HashSet<string>(StringComparer.Ordinal);
+            typeIdsByDefinition.Clear();
+            var entityClasses = new HashSet<Type>();
+            var nextTypeId = (ushort)1;
+
             foreach (var category in Categories)
             {
-                var definitions = GetGroup(category).Definitions;
-                for (var index = 0; index < definitions.Count; index++)
+                var container = GetContainer(category);
+                if (container == null)
                 {
-                    var definition = definitions[index];
-                    if (definition == null)
-                    {
-                        throw new InvalidOperationException(
-                            $"Entity catalog '{name}' contains an empty {category} definition.");
-                    }
+                    continue;
+                }
 
+                for (var index = 0; index < container.Definitions.Count; index++)
+                {
+                    var definition = container.Definitions[index];
                     ValidateDefinition(category, definition);
-                    if (!definitionsByTypeId.TryAdd(definition.TypeId, definition))
+                    if (!typeIdsByDefinition.TryAdd(
+                            definition,
+                            AllocateTypeId(ref nextTypeId)))
                     {
                         throw new InvalidOperationException(
-                            $"Entity type ID {definition.TypeId} is duplicated in catalog '{name}'.");
+                            $"Entity definition '{definition.name}' is listed more than once in catalog '{name}'.");
                     }
 
-                    if (!entityClasses.Add(definition.EntityClassName))
+                    var entityClass = definition.Prefab.EntityClass;
+                    if (!entityClasses.Add(entityClass))
                     {
                         throw new InvalidOperationException(
-                            $"Entity class '{definition.EntityClassName}' is duplicated in catalog '{name}'.");
+                            $"Entity class '{entityClass.FullName}' is listed more than once in catalog '{name}'.");
                     }
+
+                    var typeId = typeIdsByDefinition[definition];
+                    definitionsByTypeId.Add(typeId, definition);
                 }
             }
 
             runtimeIndexValid = true;
         }
 
-        private void ValidateDefinition(
-            EntityCategory category,
-            EntityDefinition definition)
+        private static EntityTypeId AllocateTypeId(ref ushort nextTypeId)
         {
-            if (!definition.TypeId.IsValid)
+            if (nextTypeId == 0)
             {
                 throw new InvalidOperationException(
-                    $"Entity catalog '{name}' contains an unassigned type ID.");
+                    "Entity catalog has exhausted Entity Type IDs.");
             }
 
-            var entityClass = definition.ResolveEntityClass();
-            ValidateEntityClass(category, entityClass);
-            if (definition.Prefab == null)
-            {
-                throw new InvalidOperationException(
-                    $"Entity type {definition.TypeId} has no Prefab.");
-            }
-
-            if (definition.Prefab.Category != category
-                || !definition.Prefab.SupportsEntityType(entityClass))
-            {
-                throw new InvalidOperationException(
-                    $"Entity type {definition.TypeId} does not match its {category} Controller Prefab.");
-            }
-        }
-
-        private static void ValidateEntityClass(
-            EntityCategory category,
-            Type entityClass)
-        {
-            if (entityClass == null
-                || !entityClass.IsSealed
-                || !EntityCategoryInfo.Supports(category, entityClass))
-            {
-                throw new ArgumentException(
-                    $"The selected type must be a sealed {category} Entity class.",
-                    nameof(entityClass));
-            }
-
-            if (entityClass.GetConstructor(new[] { typeof(EntityData) }) == null)
-            {
-                throw new ArgumentException(
-                    $"Entity type '{entityClass.FullName}' must define a public " +
-                    "constructor that accepts EntityData.",
-                    nameof(entityClass));
-            }
-        }
-
-        private EntityDefinition FindDefinitionByClass(Type entityClass)
-        {
-            var className = entityClass.AssemblyQualifiedName;
-            foreach (var category in Categories)
-            {
-                var definitions = GetGroup(category).Definitions;
-                for (var index = 0; index < definitions.Count; index++)
-                {
-                    if (definitions[index]?.EntityClassName == className)
-                    {
-                        return definitions[index];
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        private EntityTypeId AllocateEntityTypeId()
-        {
-            if (nextEntityTypeId == 0)
-            {
-                throw new InvalidOperationException(
-                    $"Entity catalog '{name}' has exhausted Entity Type IDs.");
-            }
-
-            var typeId = new EntityTypeId(nextEntityTypeId);
-            nextEntityTypeId = nextEntityTypeId == ushort.MaxValue
+            var typeId = new EntityTypeId(nextTypeId);
+            nextTypeId = nextTypeId == ushort.MaxValue
                 ? (ushort)0
-                : (ushort)(nextEntityTypeId + 1);
+                : (ushort)(nextTypeId + 1);
             return typeId;
         }
 
-        private EntityDefinitionGroup GetGroup(EntityCategory category)
+        private static void ValidateDefinition(
+            EntityCategory category,
+            EntityDefinition definition)
+        {
+            if (definition == null)
+            {
+                throw new InvalidOperationException(
+                    $"Entity catalog contains an empty {category} definition.");
+            }
+
+            var prefab = definition.Prefab;
+            if (prefab == null)
+            {
+                throw new InvalidOperationException(
+                    $"Entity definition '{definition.name}' has no Prefab.");
+            }
+
+            var entityClass = prefab.EntityClass;
+            if (prefab.Category != category
+                || entityClass == null
+                || !entityClass.IsSealed
+                || !EntityCategoryInfo.Supports(category, entityClass)
+                || entityClass.GetConstructor(new[] { typeof(EntityData) }) == null)
+            {
+                throw new InvalidOperationException(
+                    $"Entity definition '{definition.name}' does not match its {category} Controller Prefab.");
+            }
+        }
+
+        private EntityDefinitionContainer GetContainer(EntityCategory category)
         {
             return category switch
             {

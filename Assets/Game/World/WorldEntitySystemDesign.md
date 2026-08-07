@@ -131,7 +131,7 @@ CanEnter(entity, currentCell, nextCell)
 
 ### Prefab Controller
 
-Unity Prefab은 순수 C# 엔티티와 별개다. `EntityController`는 연결된 엔티티의 ID·위치·방향만 표시하고, 각 Prefab은 정확히 하나의 계열 Controller를 가진다.
+Unity Prefab은 순수 C# 엔티티와 별개다. `EntityController`는 연결된 엔티티의 ID·위치·방향만 표시하고, 각 Prefab은 정확히 하나의 계열 Controller를 가진다. 계열 Controller는 Inspector에서 정확히 하나의 sealed C# Entity 클래스를 연결한다. 따라서 실제 Entity 타입은 Definition이 아니라 Prefab의 Controller가 결정한다.
 
 ```text
 Tree Prefab       → NatureEntityController   → NatureEntity
@@ -140,16 +140,17 @@ Villager Prefab   → HumanEntityController    → HumanEntity
 Building Prefab   → BuildingEntityController → BuildingEntity
 ```
 
-Controller는 자신의 계열에 속하는 sealed 엔티티만 `Bind`한다. 실제 Type ID와 Prefab 연결은 Controller가 아니라 `EntityCatalog`이 소유한다. `WorldEntityRenderer`는 Catalog에서 Type ID별 Prefab을 조회하고, `EntityChangeSet`이 발생한 셀만 다시 확인해 Prefab 생성·제거·위치 갱신을 처리한다. Controller 자체는 이동·배치 규칙을 갖지 않는다.
+Controller는 자신에게 연결된 sealed 엔티티만 `Bind`한다. `WorldEntityRenderer`는 Catalog에서 Type ID별 Definition·Prefab을 조회하고, `EntityChangeSet`이 발생한 셀만 다시 확인해 Prefab 생성·제거·위치 갱신을 처리한다. Controller 자체는 이동·배치 규칙을 갖지 않는다.
 
 ### Entity Catalog
 
-`EntityCatalog`은 하나의 SO 안에 Nature·Animal·Human·Building 목록을 나눠 보관한다. 각 `EntityDefinition`은 Prefab·Thumbnail·Entity Name과, Catalog가 자동 발급하는 숨김 `EntityTypeId` 및 sealed C# 타입 연결값을 가진다.
+`EntityCatalog`은 상위 SO이며, Nature·Animal·Human·Building `EntityDefinitionContainer` SO를 각각 참조한다. 각 Container는 `List<EntityDefinition>`에 Definition SO를 직접 연결한다. 각 `EntityDefinition`은 Prefab·Thumbnail·Entity Name만 보관한다.
 
-- Controller는 Type ID를 소유하지 않는다.
-- Catalog는 Type ID를 재사용하지 않으며, 중복 ID·중복 sealed 타입·계열과 맞지 않는 Controller Prefab을 검증 실패로 처리한다.
+- `EntityTypeId`는 Catalog가 Container 순서와 Definition List 순서로 런타임에 자동 부여한다. Inspector에서 직접 입력하거나 Controller가 보관하지 않는다.
+- Catalog는 같은 Definition·sealed Entity 클래스의 중복, 계열과 맞지 않는 Controller Prefab을 검증 실패로 처리한다.
 - Catalog는 UI Button·Panel 같은 Scene 참조를 갖지 않는다.
-- `WorldEntityCatalogView`는 계열 버튼 → Catalog Definition 목록 → Details Panel의 선택 상태만 관리한다. Definition 선택은 배치나 월드 데이터 변경을 일으키지 않는다.
+- `EntityManager`는 활성 `EntityRuntime`·Catalog·Renderer를 Bind/Unbind하고 Entity 변경을 WorldManager에 전달한다.
+- `WorldEntityCatalogView`는 계열 버튼 → Catalog Definition 목록 → Details Panel의 선택 상태와 생성 버튼만 관리한다. `EntityEditController`는 현재 EditSelected 영역에서 지면 Top Surface Cell만 선별해 EntityRuntime의 `Create`·`Add`를 호출한다.
 - `EntityTypeRegistry`는 Catalog의 내부 타입 연결값으로 Type ID와 sealed Entity 생성 함수를 구성한다.
 
 ## 변경 통지

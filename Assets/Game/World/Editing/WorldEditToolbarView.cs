@@ -37,7 +37,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 7;
+        public const int CurrentLayoutVersion = 8;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
@@ -59,6 +59,7 @@ namespace MiniCivilization.World.Editing
 
         [Header("Edit Mode")]
         [SerializeField] private ToggleGroup modeToggleGroup;
+        [SerializeField] private Toggle singleSelectionToggle;
         [SerializeField] private Toggle areaSelectionToggle;
         [SerializeField] private Toggle brushToggle;
 
@@ -92,6 +93,7 @@ namespace MiniCivilization.World.Editing
         public Button UndoButton => undoButton;
         public Button RedoButton => redoButton;
         public ToggleGroup ModeToggleGroup => modeToggleGroup;
+        public Toggle SingleSelectionToggle => singleSelectionToggle;
         public Toggle AreaSelectionToggle => areaSelectionToggle;
         public Toggle BrushToggle => brushToggle;
         public RectTransform BrushSizePanel => brushSizePanel;
@@ -123,6 +125,7 @@ namespace MiniCivilization.World.Editing
             Button redo,
             TMP_FontAsset font,
             ToggleGroup modeGroup,
+            Toggle singleSelection,
             Toggle areaSelection,
             Toggle brush,
             RectTransform sizePanel,
@@ -142,6 +145,7 @@ namespace MiniCivilization.World.Editing
             redoButton = redo;
             labelFont = font;
             modeToggleGroup = modeGroup;
+            singleSelectionToggle = singleSelection;
             areaSelectionToggle = areaSelection;
             brushToggle = brush;
             brushSizePanel = sizePanel;
@@ -205,12 +209,17 @@ namespace MiniCivilization.World.Editing
                 return 0;
             }
 
-            if (areaSelectionToggle != null && areaSelectionToggle.isOn)
+            if (singleSelectionToggle != null && singleSelectionToggle.isOn)
             {
                 return 1;
             }
 
-            return brushToggle != null && brushToggle.isOn ? 2 : 0;
+            if (areaSelectionToggle != null && areaSelectionToggle.isOn)
+            {
+                return 2;
+            }
+
+            return brushToggle != null && brushToggle.isOn ? 3 : 0;
         }
 
         public int GetSelectedBrushSize()
@@ -346,6 +355,7 @@ namespace MiniCivilization.World.Editing
                 redoButton.onClick.AddListener(RequestRedo);
             }
 
+            BindToggle(singleSelectionToggle);
             BindToggle(areaSelectionToggle);
             BindToggle(brushToggle);
             if (brushSizeToggles != null)
@@ -407,6 +417,7 @@ namespace MiniCivilization.World.Editing
                 redoButton.onClick.RemoveListener(RequestRedo);
             }
 
+            UnbindToggle(singleSelectionToggle);
             UnbindToggle(areaSelectionToggle);
             UnbindToggle(brushToggle);
             if (brushSizeToggles != null)

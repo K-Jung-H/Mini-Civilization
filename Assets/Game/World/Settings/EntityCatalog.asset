@@ -12,12 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7b46274f3ba047a7b7d8e35f2d132b0b, type: 3}
   m_Name: EntityCatalog
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.EntityCatalog
-  nature:
-    definitions: []
-  animals:
-    definitions: []
-  humans:
-    definitions: []
-  buildings:
-    definitions: []
-  nextEntityTypeId: 1
+  nature: {fileID: 11400000, guid: 4d71bf48b5d37154d8b4a33d12ad523b, type: 2}
+  animals: {fileID: 0}
+  humans: {fileID: 0}
+  buildings: {fileID: 0}

@@ -9,9 +9,12 @@ namespace MiniCivilization.World.Presentation
     [DisallowMultipleComponent]
     public abstract class EntityController : MonoBehaviour
     {
+        [SerializeField, HideInInspector] private string entityClassName;
+
         public abstract EntityCategory Category { get; }
         public Entity BoundEntity { get; private set; }
         public WorldEntityId BoundEntityId => BoundEntity?.Id ?? WorldEntityId.None;
+        public Type EntityClass => ResolveEntityClass();
 
         public void Bind(Entity entity)
         {
@@ -66,8 +69,20 @@ namespace MiniCivilization.World.Presentation
             OnRefreshed(entity);
         }
 
-        public bool SupportsEntityType(Type entityType) =>
-            EntityCategoryInfo.Supports(Category, entityType);
+        public bool SupportsEntityType(Type entityType)
+        {
+            var configuredEntityClass = EntityClass;
+            return configuredEntityClass != null
+                && configuredEntityClass == entityType
+                && EntityCategoryInfo.Supports(Category, entityType);
+        }
+
+        private Type ResolveEntityClass()
+        {
+            return string.IsNullOrWhiteSpace(entityClassName)
+                ? null
+                : Type.GetType(entityClassName, throwOnError: false);
+        }
 
         protected virtual void OnBound(Entity entity)
         {
@@ -92,25 +107,5 @@ namespace MiniCivilization.World.Presentation
                 _ => throw new ArgumentOutOfRangeException(nameof(direction))
             };
         }
-    }
-
-    public sealed class NatureEntityController : EntityController
-    {
-        public override EntityCategory Category => EntityCategory.Nature;
-    }
-
-    public sealed class AnimalEntityController : EntityController
-    {
-        public override EntityCategory Category => EntityCategory.Animal;
-    }
-
-    public sealed class HumanEntityController : EntityController
-    {
-        public override EntityCategory Category => EntityCategory.Human;
-    }
-
-    public sealed class BuildingEntityController : EntityController
-    {
-        public override EntityCategory Category => EntityCategory.Building;
     }
 }
