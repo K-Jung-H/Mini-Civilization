@@ -11,9 +11,9 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class EntityEditController : MonoBehaviour
     {
-        [SerializeField] private EntityManager entityManager;
-        [SerializeField] private WorldTileSelectionState selectionState;
-        [SerializeField] private WorldEntityCatalogView catalogView;
+        private EntityManager entityManager;
+        private WorldTileSelectionState selectionState;
+        private WorldEntityCatalogView catalogView;
 
         private readonly List<CellCoordinate> selectedCells = new();
         private bool isSubscribed;

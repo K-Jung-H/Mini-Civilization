@@ -13,8 +13,8 @@ namespace MiniCivilization.World.Editing
     public sealed class WorldEntityCatalogView : MonoBehaviour
     {
         [Header("Data")]
-        [SerializeField] private EntityCatalog entityCatalog;
-        [SerializeField] private WorldEditToolbarView toolbarView;
+        private EntityCatalog entityCatalog;
+        private WorldEditToolbarView toolbarView;
 
         [Header("Category")]
         [SerializeField] private Toggle natureToggle;
@@ -26,18 +26,18 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private ScrollRect definitionScroll;
         [SerializeField] private RectTransform definitionContent;
         [SerializeField] private ToggleGroup definitionToggleGroup;
+        [SerializeField] private EntityDefinitionItemView definitionItemPrefab;
 
         [Header("Details")]
         [SerializeField] private ScrollRect detailsScroll;
         [SerializeField] private TMP_Text detailsName;
         [SerializeField] private Image detailsThumbnail;
+        [SerializeField] private TMP_Text detailsType;
         [SerializeField] private TMP_Text detailsEmptyText;
-        [SerializeField] private Button createButton;
-
-        [Header("Style")]
-        [SerializeField] private TMP_FontAsset labelFont;
 
         private readonly Dictionary<Toggle, UnityAction<bool>> categoryListeners = new();
+        private readonly List<EntityDefinitionItemView> definitionItems = new();
+        private int activeDefinitionItemCount;
         private EntityCategory? selectedCategory;
         private EntityDefinition selectedDefinition;
         private bool isSubscribed;
@@ -52,6 +52,11 @@ namespace MiniCivilization.World.Editing
 
         private void OnEnable()
         {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
             Subscribe();
             Refresh();
         }
@@ -61,41 +66,15 @@ namespace MiniCivilization.World.Editing
             Unsubscribe();
         }
 
-        public void Configure(
+        public void Initialize(
             EntityCatalog catalog,
-            WorldEditToolbarView toolbar,
-            Toggle nature,
-            Toggle animal,
-            Toggle human,
-            Toggle building,
-            ScrollRect definitions,
-            RectTransform definitionsContent,
-            ToggleGroup definitionsGroup,
-            ScrollRect details,
-            TMP_Text nameLabel,
-            Image thumbnailImage,
-            TMP_Text emptyLabel,
-            Button create,
-            TMP_FontAsset font)
+            WorldEditToolbarView toolbar)
         {
             Unsubscribe();
             entityCatalog = catalog;
             toolbarView = toolbar;
-            natureToggle = nature;
-            animalToggle = animal;
-            humanToggle = human;
-            buildingToggle = building;
-            definitionScroll = definitions;
-            definitionContent = definitionsContent;
-            definitionToggleGroup = definitionsGroup;
-            detailsScroll = details;
-            detailsName = nameLabel;
-            detailsThumbnail = thumbnailImage;
-            detailsEmptyText = emptyLabel;
-            createButton = create;
-            labelFont = font;
 
-            if (isActiveAndEnabled)
+            if (Application.isPlaying && isActiveAndEnabled)
             {
                 Subscribe();
                 Refresh();
@@ -112,17 +91,14 @@ namespace MiniCivilization.World.Editing
             if (toolbarView != null)
             {
                 toolbarView.ExpandedChanged += OnToolbarExpandedChanged;
+                toolbarView.EntityGroupExpandedChanged +=
+                    OnEntityGroupExpandedChanged;
             }
 
             BindCategoryToggle(natureToggle, EntityCategory.Nature);
             BindCategoryToggle(animalToggle, EntityCategory.Animal);
             BindCategoryToggle(humanToggle, EntityCategory.Human);
             BindCategoryToggle(buildingToggle, EntityCategory.Building);
-            if (createButton != null)
-            {
-                createButton.onClick.AddListener(RequestCreation);
-            }
-
             isSubscribed = true;
         }
 
@@ -136,6 +112,8 @@ namespace MiniCivilization.World.Editing
             if (toolbarView != null)
             {
                 toolbarView.ExpandedChanged -= OnToolbarExpandedChanged;
+                toolbarView.EntityGroupExpandedChanged -=
+                    OnEntityGroupExpandedChanged;
             }
 
             foreach (var pair in categoryListeners)
@@ -147,11 +125,6 @@ namespace MiniCivilization.World.Editing
             }
 
             categoryListeners.Clear();
-            if (createButton != null)
-            {
-                createButton.onClick.RemoveListener(RequestCreation);
-            }
-
             isSubscribed = false;
         }
 
@@ -170,6 +143,11 @@ namespace MiniCivilization.World.Editing
         }
 
         private void OnToolbarExpandedChanged(bool _)
+        {
+            RefreshVisibility();
+        }
+
+        private void OnEntityGroupExpandedChanged(bool _)
         {
             RefreshVisibility();
         }
@@ -226,7 +204,8 @@ namespace MiniCivilization.World.Editing
             ClearDefinitionItems();
             if (!selectedCategory.HasValue
                 || entityCatalog == null
-                || definitionContent == null)
+                || definitionContent == null
+                || definitionItemPrefab == null)
             {
                 return;
             }
@@ -238,7 +217,7 @@ namespace MiniCivilization.World.Editing
                 var definition = definitions[index];
                 if (definition != null)
                 {
-                    CreateDefinitionToggle(definition);
+                    BindDefinitionItem(definition);
                 }
             }
 
@@ -255,119 +234,65 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            for (var index = definitionContent.childCount - 1;
-                 index >= 0;
-                 index--)
+            for (var index = 0; index < definitionItems.Count; index++)
             {
-                var child = definitionContent.GetChild(index).gameObject;
-                child.transform.SetParent(null, false);
-                if (Application.isPlaying)
+                var item = definitionItems[index];
+                if (item != null)
                 {
-                    Destroy(child);
-                }
-                else
-                {
-                    DestroyImmediate(child);
+                    item.Clear();
+                    item.gameObject.SetActive(false);
                 }
             }
+
+            activeDefinitionItemCount = 0;
         }
 
-        private void CreateDefinitionToggle(EntityDefinition definition)
+        private void BindDefinitionItem(EntityDefinition definition)
         {
-            var item = new GameObject(
-                definition.DisplayName,
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image),
-                typeof(Toggle),
-                typeof(LayoutElement));
-            var rect = (RectTransform)item.transform;
-            rect.SetParent(definitionContent, false);
-
-            var background = item.GetComponent<Image>();
-            background.color = new Color(0.18f, 0.23f, 0.31f, 1f);
-            var layout = item.GetComponent<LayoutElement>();
-            layout.minHeight = 58f;
-            layout.preferredHeight = 58f;
-
-            var thumbnail = CreateThumbnail(rect);
-            thumbnail.sprite = definition.Thumbnail;
-            thumbnail.enabled = definition.Thumbnail != null;
-
-            var label = CreateLabel(rect, definition.DisplayName);
-            var toggle = item.GetComponent<Toggle>();
-            toggle.targetGraphic = background;
-            toggle.group = definitionToggleGroup;
-            toggle.transition = Selectable.Transition.ColorTint;
-            var colors = toggle.colors;
-            colors.normalColor = Color.white;
-            colors.highlightedColor = new Color(0.9f, 0.9f, 0.9f, 1f);
-            colors.pressedColor = new Color(0.7f, 0.78f, 0.9f, 1f);
-            colors.selectedColor = new Color(1f, 0.86f, 0.24f, 1f);
-            colors.colorMultiplier = 1f;
-            toggle.colors = colors;
-            toggle.onValueChanged.AddListener(isOn =>
+            var item = GetOrCreateDefinitionItem(activeDefinitionItemCount);
+            if (item == null)
             {
-                if (isOn)
-                {
-                    SetSelectedDefinition(definition);
-                }
-                else if (ReferenceEquals(selectedDefinition, definition))
-                {
-                    SetSelectedDefinition(null);
-                }
-            });
-        }
-
-        private Image CreateThumbnail(RectTransform parent)
-        {
-            var item = new GameObject(
-                "Thumbnail",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(Image));
-            var rect = (RectTransform)item.transform;
-            rect.SetParent(parent, false);
-            rect.anchorMin = new Vector2(0f, 0.5f);
-            rect.anchorMax = new Vector2(0f, 0.5f);
-            rect.pivot = new Vector2(0f, 0.5f);
-            rect.anchoredPosition = new Vector2(8f, 0f);
-            rect.sizeDelta = new Vector2(42f, 42f);
-            var image = item.GetComponent<Image>();
-            image.preserveAspect = true;
-            image.raycastTarget = false;
-            return image;
-        }
-
-        private TMP_Text CreateLabel(RectTransform parent, string text)
-        {
-            var item = new GameObject(
-                "Label",
-                typeof(RectTransform),
-                typeof(CanvasRenderer),
-                typeof(TextMeshProUGUI));
-            var rect = (RectTransform)item.transform;
-            rect.SetParent(parent, false);
-            rect.anchorMin = Vector2.zero;
-            rect.anchorMax = Vector2.one;
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.offsetMin = new Vector2(60f, 0f);
-            rect.offsetMax = new Vector2(-8f, 0f);
-            var label = item.GetComponent<TextMeshProUGUI>();
-            if (labelFont != null)
-            {
-                label.font = labelFont;
-                label.fontSharedMaterial = labelFont.material;
+                return;
             }
 
-            label.fontSize = 16f;
-            label.fontStyle = FontStyles.Bold;
-            label.alignment = TextAlignmentOptions.MidlineLeft;
-            label.text = string.IsNullOrWhiteSpace(text)
-                ? "Unnamed Entity"
-                : text;
-            label.raycastTarget = false;
-            return label;
+            activeDefinitionItemCount++;
+            item.gameObject.SetActive(true);
+            item.Bind(
+                definition,
+                definitionToggleGroup,
+                OnDefinitionSelectionChanged,
+                RequestCreation);
+        }
+
+        private EntityDefinitionItemView GetOrCreateDefinitionItem(int index)
+        {
+            if (index < definitionItems.Count)
+            {
+                return definitionItems[index];
+            }
+
+            if (definitionItemPrefab == null || definitionContent == null)
+            {
+                return null;
+            }
+
+            var item = Instantiate(definitionItemPrefab, definitionContent);
+            definitionItems.Add(item);
+            return item;
+        }
+
+        private void OnDefinitionSelectionChanged(
+            EntityDefinition definition,
+            bool isOn)
+        {
+            if (isOn)
+            {
+                SetSelectedDefinition(definition);
+            }
+            else if (ReferenceEquals(selectedDefinition, definition))
+            {
+                SetSelectedDefinition(null);
+            }
         }
 
         private void SetSelectedDefinition(EntityDefinition definition)
@@ -382,23 +307,31 @@ namespace MiniCivilization.World.Editing
             DefinitionSelected?.Invoke(selectedDefinition);
         }
 
-        private void RequestCreation()
+        private void RequestCreation(EntityDefinition definition)
         {
-            if (isCreating || selectedDefinition == null)
+            if (isCreating || definition == null)
             {
                 return;
             }
 
             isCreating = true;
-            RefreshDetails();
+            SetDefinitionItemsInteractable(false);
             try
             {
-                CreationRequested?.Invoke(selectedDefinition);
+                CreationRequested?.Invoke(definition);
             }
             finally
             {
                 isCreating = false;
-                RefreshDetails();
+                SetDefinitionItemsInteractable(true);
+            }
+        }
+
+        private void SetDefinitionItemsInteractable(bool interactable)
+        {
+            for (var index = 0; index < definitionItems.Count; index++)
+            {
+                definitionItems[index]?.SetAddInteractable(interactable);
             }
         }
 
@@ -418,14 +351,16 @@ namespace MiniCivilization.World.Editing
                     definition?.Thumbnail != null);
             }
 
+            if (detailsType != null)
+            {
+                var entityClass = definition?.Prefab?.EntityClass;
+                detailsType.text = entityClass?.Name ?? string.Empty;
+                detailsType.gameObject.SetActive(entityClass != null);
+            }
+
             if (detailsEmptyText != null)
             {
                 detailsEmptyText.gameObject.SetActive(definition == null);
-            }
-
-            if (createButton != null)
-            {
-                createButton.interactable = definition != null && !isCreating;
             }
 
             if (detailsScroll != null)
@@ -436,7 +371,9 @@ namespace MiniCivilization.World.Editing
 
         private void RefreshVisibility()
         {
-            var visible = toolbarView == null || toolbarView.IsExpanded;
+            var visible = toolbarView == null
+                || (toolbarView.IsExpanded
+                    && toolbarView.IsEntityGroupExpanded);
             if (definitionScroll != null)
             {
                 definitionScroll.gameObject.SetActive(

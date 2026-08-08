@@ -73,26 +73,6 @@ namespace MiniCivilization.World.Interaction
             }
         }
 
-        public void Configure(
-            GameObject root,
-            Text title,
-            Text coordinate,
-            Text terrain,
-            Text water,
-            Text surface,
-            Text debug,
-            Button close)
-        {
-            panelRoot = root;
-            titleText = title;
-            coordinateText = coordinate;
-            terrainText = terrain;
-            waterText = water;
-            surfaceText = surface;
-            debugText = debug;
-            closeButton = close;
-        }
-
         private void RequestClose()
         {
             CloseRequested?.Invoke();

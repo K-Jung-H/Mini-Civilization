@@ -23,6 +23,7 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldRenderer worldRenderer;
         [SerializeField] private EntityManager entityManager;
         [SerializeField] private WorldSaveController saveController;
+        [SerializeField] private WorldUIManager uiManager;
 
         public WorldGenerationController Generator => generator;
         public WorldEditController EditController => editController;
@@ -47,6 +48,8 @@ namespace MiniCivilization.World.Runtime
         private WorldOperation activeWorldOperation;
         private void Start()
         {
+            uiManager?.Initialize(this);
+
             if (CurrentWorldData != null)
             {
                 return;
@@ -235,7 +238,8 @@ namespace MiniCivilization.World.Runtime
             WorldWaterFlowController waterFlow,
             WorldRenderer renderer,
             WorldSaveController saveLoad,
-            EntityManager entitiesManager = null)
+            EntityManager entitiesManager = null,
+            WorldUIManager userInterface = null)
         {
             generator = generationController;
             editController = worldEditor;
@@ -243,6 +247,7 @@ namespace MiniCivilization.World.Runtime
             worldRenderer = renderer;
             saveController = saveLoad;
             entityManager = entitiesManager;
+            uiManager = userInterface;
         }
 
         private void ActivateWorldAsset(

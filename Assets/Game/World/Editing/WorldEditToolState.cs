@@ -118,7 +118,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolState : MonoBehaviour
     {
-        [SerializeField] private WorldEditToolbarView toolbarView;
+        private WorldEditToolbarView toolbarView;
 
         private WorldEditToolSnapshot current;
         private bool isSubscribed;

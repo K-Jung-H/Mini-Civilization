@@ -7,12 +7,12 @@ namespace MiniCivilization.World.Interaction
     public sealed class WorldTileInfoPresenter : MonoBehaviour
     {
         [Header("Data")]
-        [SerializeField] private WorldManager worldManager;
-        [SerializeField] private WorldTileSelectionState selectionState;
-        [SerializeField] private WorldCellInfoProvider infoProvider;
+        private WorldManager worldManager;
+        private WorldTileSelectionState selectionState;
+        private WorldCellInfoProvider infoProvider;
 
         [Header("View")]
-        [SerializeField] private WorldTileInfoPanel infoPanel;
+        private WorldTileInfoPanel infoPanel;
 
         private void OnEnable()
         {
@@ -48,10 +48,38 @@ namespace MiniCivilization.World.Interaction
             WorldCellInfoProvider provider,
             WorldTileInfoPanel panel)
         {
+            if (isActiveAndEnabled)
+            {
+                if (selectionState != null)
+                {
+                    selectionState.SelectionChanged -= OnSelectionChanged;
+                }
+
+                if (infoPanel != null)
+                {
+                    infoPanel.CloseRequested -= OnCloseRequested;
+                }
+            }
+
             worldManager = manager;
             selectionState = state;
             infoProvider = provider;
             infoPanel = panel;
+
+            if (isActiveAndEnabled)
+            {
+                if (selectionState != null)
+                {
+                    selectionState.SelectionChanged += OnSelectionChanged;
+                }
+
+                if (infoPanel != null)
+                {
+                    infoPanel.CloseRequested += OnCloseRequested;
+                }
+
+                Refresh();
+            }
         }
 
         private void OnSelectionChanged(TilePickResult? _)

@@ -34,23 +34,62 @@ namespace MiniCivilization.World.Editing
         }
     }
 
+    [Serializable]
+    public sealed class WorldEditToolbarGroup
+    {
+        [SerializeField] private Button expandButton;
+        [SerializeField] private RectTransform content;
+        [SerializeField] private bool startExpanded;
+
+        private bool isExpanded;
+
+        public Button ExpandButton => expandButton;
+        public RectTransform Content => content;
+        public bool IsExpanded => isExpanded;
+
+        public void Initialize()
+        {
+            isExpanded = startExpanded;
+        }
+
+        public void Toggle()
+        {
+            isExpanded = !isExpanded;
+        }
+
+        public void RefreshVisibility(bool toolbarExpanded)
+        {
+            if (content != null)
+            {
+                content.gameObject.SetActive(toolbarExpanded && isExpanded);
+            }
+        }
+    }
+
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 8;
+        public const int CurrentLayoutVersion = 9;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
         [Header("Panels")]
         [SerializeField] private RectTransform toolbarPanel;
         [SerializeField] private RectTransform expandedContent;
-        [SerializeField] private RectTransform propertyDetailPanel;
 
         [Header("Main")]
         [SerializeField] private Button mainButton;
         [SerializeField] private TMP_Text mainButtonLabel;
         [SerializeField] private TMP_FontAsset labelFont;
         [SerializeField] private bool startExpanded;
+
+        [Header("Group Expansion")]
+        [SerializeField] private WorldEditToolbarGroup selectModeGroup;
+        [SerializeField] private RectTransform modeEntityDivider;
+        [SerializeField] private WorldEditToolbarGroup entityGroup;
+        [SerializeField] private RectTransform entityPropertyDivider;
+        [SerializeField] private WorldEditToolbarGroup propertyGroup;
+        [SerializeField] private RectTransform mainPropertyDivider;
 
         [Header("History")]
         [SerializeField] private RectTransform historyPanel;
@@ -78,16 +117,18 @@ namespace MiniCivilization.World.Editing
 
         public event Action SelectionChanged;
         public event Action<bool> ExpandedChanged;
+        public event Action<bool> EntityGroupExpandedChanged;
         public event Action<WorldEditAction> EditActionRequested;
         public event Action UndoRequested;
         public event Action RedoRequested;
 
         public bool IsExpanded => isExpanded;
+        public bool IsEntityGroupExpanded =>
+            isExpanded && entityGroup != null && entityGroup.IsExpanded;
         public int LayoutVersion => layoutVersion;
         public TMP_FontAsset LabelFont => labelFont;
         public RectTransform ToolbarPanel => toolbarPanel;
         public RectTransform ExpandedContent => expandedContent;
-        public RectTransform PropertyDetailPanel => propertyDetailPanel;
         public Button MainButton => mainButton;
         public RectTransform HistoryPanel => historyPanel;
         public Button UndoButton => undoButton;
@@ -105,6 +146,9 @@ namespace MiniCivilization.World.Editing
 
         private void OnEnable()
         {
+            selectModeGroup?.Initialize();
+            entityGroup?.Initialize();
+            propertyGroup?.Initialize();
             BindEvents();
             SetExpanded(startExpanded);
         }
@@ -112,54 +156,6 @@ namespace MiniCivilization.World.Editing
         private void OnDisable()
         {
             UnbindEvents();
-        }
-
-        public void Configure(
-            RectTransform toolbar,
-            RectTransform content,
-            RectTransform detailPanel,
-            Button menu,
-            TMP_Text menuLabel,
-            RectTransform history,
-            Button undo,
-            Button redo,
-            TMP_FontAsset font,
-            ToggleGroup modeGroup,
-            Toggle singleSelection,
-            Toggle areaSelection,
-            Toggle brush,
-            RectTransform sizePanel,
-            ToggleGroup sizeGroup,
-            Toggle[] sizeToggles,
-            ToggleGroup propertyGroup,
-            WorldEditPropertySection[] sections)
-        {
-            UnbindEvents();
-            toolbarPanel = toolbar;
-            expandedContent = content;
-            propertyDetailPanel = detailPanel;
-            mainButton = menu;
-            mainButtonLabel = menuLabel;
-            historyPanel = history;
-            undoButton = undo;
-            redoButton = redo;
-            labelFont = font;
-            modeToggleGroup = modeGroup;
-            singleSelectionToggle = singleSelection;
-            areaSelectionToggle = areaSelection;
-            brushToggle = brush;
-            brushSizePanel = sizePanel;
-            brushSizeToggleGroup = sizeGroup;
-            brushSizeToggles = sizeToggles;
-            propertyToggleGroup = propertyGroup;
-            propertySections = sections;
-            layoutVersion = CurrentLayoutVersion;
-
-            if (isActiveAndEnabled)
-            {
-                BindEvents();
-                SetExpanded(startExpanded);
-            }
         }
 
         public void SetHistoryAvailability(bool canUndo, bool canRedo)
@@ -184,16 +180,14 @@ namespace MiniCivilization.World.Editing
                 expandedContent.gameObject.SetActive(expanded);
             }
 
-            if (propertyDetailPanel != null)
-            {
-                propertyDetailPanel.gameObject.SetActive(expanded);
-            }
-
             if (mainButtonLabel != null)
             {
-                mainButtonLabel.text = expanded ? "편집\n◀" : "편집\n▶";
+                mainButtonLabel.text = expanded
+                    ? "\uD3B8\uC9D1\n\u25C0"
+                    : "\uD3B8\uC9D1\n\u25B6";
             }
 
+            RefreshGroupLayout();
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
             if (changed)
@@ -204,7 +198,9 @@ namespace MiniCivilization.World.Editing
 
         public int GetSelectedModeIndex()
         {
-            if (!isExpanded)
+            if (!isExpanded
+                || selectModeGroup == null
+                || !selectModeGroup.IsExpanded)
             {
                 return 0;
             }
@@ -247,7 +243,10 @@ namespace MiniCivilization.World.Editing
         {
             sectionIndex = -1;
             detailIndex = -1;
-            if (!isExpanded || propertySections == null)
+            if (!isExpanded
+                || propertyGroup == null
+                || !propertyGroup.IsExpanded
+                || propertySections == null)
             {
                 return false;
             }
@@ -335,6 +334,40 @@ namespace MiniCivilization.World.Editing
             SetExpanded(!isExpanded);
         }
 
+        private void ToggleSelectModeGroup()
+        {
+            ToggleGroup(selectModeGroup, false);
+        }
+
+        private void ToggleEntityGroup()
+        {
+            ToggleGroup(entityGroup, true);
+        }
+
+        private void TogglePropertyGroup()
+        {
+            ToggleGroup(propertyGroup, false);
+        }
+
+        private void ToggleGroup(
+            WorldEditToolbarGroup group,
+            bool isEntityGroup)
+        {
+            if (!isExpanded || group == null)
+            {
+                return;
+            }
+
+            group.Toggle();
+            RefreshGroupLayout();
+            RefreshPropertyDetailPanels();
+            SelectionChanged?.Invoke();
+            if (isEntityGroup)
+            {
+                EntityGroupExpandedChanged?.Invoke(IsEntityGroupExpanded);
+            }
+        }
+
         private void BindEvents()
         {
             if (mainButton != null)
@@ -354,6 +387,10 @@ namespace MiniCivilization.World.Editing
                 redoButton.onClick.RemoveListener(RequestRedo);
                 redoButton.onClick.AddListener(RequestRedo);
             }
+
+            BindGroupButton(selectModeGroup, ToggleSelectModeGroup);
+            BindGroupButton(entityGroup, ToggleEntityGroup);
+            BindGroupButton(propertyGroup, TogglePropertyGroup);
 
             BindToggle(singleSelectionToggle);
             BindToggle(areaSelectionToggle);
@@ -417,6 +454,10 @@ namespace MiniCivilization.World.Editing
                 redoButton.onClick.RemoveListener(RequestRedo);
             }
 
+            UnbindGroupButton(selectModeGroup, ToggleSelectModeGroup);
+            UnbindGroupButton(entityGroup, ToggleEntityGroup);
+            UnbindGroupButton(propertyGroup, TogglePropertyGroup);
+
             UnbindToggle(singleSelectionToggle);
             UnbindToggle(areaSelectionToggle);
             UnbindToggle(brushToggle);
@@ -473,6 +514,27 @@ namespace MiniCivilization.World.Editing
         {
             RefreshBrushSizePanel();
             SelectionChanged?.Invoke();
+        }
+
+        private static void BindGroupButton(
+            WorldEditToolbarGroup group,
+            UnityAction action)
+        {
+            var button = group?.ExpandButton;
+            if (button == null)
+            {
+                return;
+            }
+
+            button.onClick.RemoveListener(action);
+            button.onClick.AddListener(action);
+        }
+
+        private static void UnbindGroupButton(
+            WorldEditToolbarGroup group,
+            UnityAction action)
+        {
+            group?.ExpandButton?.onClick.RemoveListener(action);
         }
 
         private void BindToggle(Toggle toggle)
@@ -647,6 +709,8 @@ namespace MiniCivilization.World.Editing
                 }
 
                 var selected = isExpanded
+                    && propertyGroup != null
+                    && propertyGroup.IsExpanded
                     && section.CategoryToggle != null
                     && section.CategoryToggle.isOn;
                 section.DetailPanel.gameObject.SetActive(selected);
@@ -659,9 +723,106 @@ namespace MiniCivilization.World.Editing
             {
                 brushSizePanel.gameObject.SetActive(
                     isExpanded
+                    && selectModeGroup != null
+                    && selectModeGroup.IsExpanded
                     && brushToggle != null
                     && brushToggle.isOn);
             }
+        }
+
+        private void RefreshGroupLayout()
+        {
+            if (expandedContent == null || toolbarPanel == null)
+            {
+                return;
+            }
+
+            selectModeGroup?.RefreshVisibility(isExpanded);
+            entityGroup?.RefreshVisibility(isExpanded);
+            propertyGroup?.RefreshVisibility(isExpanded);
+
+            if (!isExpanded)
+            {
+                toolbarPanel.sizeDelta = new Vector2(84f, 84f);
+                return;
+            }
+
+            var cursor = 8f;
+            LayoutGroup(propertyGroup, ref cursor);
+            LayoutDivider(entityPropertyDivider, ref cursor);
+            LayoutGroup(entityGroup, ref cursor);
+            LayoutDivider(modeEntityDivider, ref cursor);
+            LayoutGroup(selectModeGroup, ref cursor);
+
+            var expandedWidth = cursor + 8f;
+            expandedContent.sizeDelta = new Vector2(expandedWidth, 84f);
+            toolbarPanel.sizeDelta = new Vector2(expandedWidth + 84f, 84f);
+            LayoutMainDivider();
+        }
+
+        private static void LayoutGroup(
+            WorldEditToolbarGroup group,
+            ref float cursor)
+        {
+            if (group == null)
+            {
+                return;
+            }
+
+            var buttonRect = group.ExpandButton?.transform as RectTransform;
+            if (buttonRect == null)
+            {
+                return;
+            }
+
+            PlaceRight(buttonRect, cursor, 10f);
+            cursor += buttonRect.sizeDelta.x;
+            if (!group.IsExpanded || group.Content == null)
+            {
+                return;
+            }
+
+            cursor += 8f;
+            PlaceRight(group.Content, cursor, 10f);
+            cursor += group.Content.sizeDelta.x;
+        }
+
+        private static void LayoutDivider(
+            RectTransform divider,
+            ref float cursor)
+        {
+            if (divider == null)
+            {
+                return;
+            }
+
+            cursor += 8f;
+            PlaceRight(divider, cursor, 20f);
+            cursor += divider.sizeDelta.x + 8f;
+        }
+
+        private void LayoutMainDivider()
+        {
+            if (mainPropertyDivider == null)
+            {
+                return;
+            }
+
+            mainPropertyDivider.anchorMin = new Vector2(1f, 0f);
+            mainPropertyDivider.anchorMax = new Vector2(1f, 0f);
+            mainPropertyDivider.pivot = new Vector2(1f, 0f);
+            mainPropertyDivider.anchoredPosition = new Vector2(0f, 20f);
+        }
+
+        private static void PlaceRight(
+            RectTransform rect,
+            float rightOffset,
+            float y)
+        {
+            rect.anchorMin = new Vector2(1f, 0f);
+            rect.anchorMax = new Vector2(1f, 0f);
+            rect.pivot = new Vector2(1f, 0f);
+            rect.anchoredPosition = new Vector2(-rightOffset, y);
         }
     }
 }

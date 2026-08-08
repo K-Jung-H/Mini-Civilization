@@ -10,9 +10,9 @@ namespace MiniCivilization.World.Editing
     public sealed class WorldEditApplyController : MonoBehaviour
     {
         [Header("References")]
-        [SerializeField] private WorldEditController editController;
-        [SerializeField] private WorldTileSelectionState selectionState;
-        [SerializeField] private WorldEditToolbarView toolbarView;
+        private WorldEditController editController;
+        private WorldTileSelectionState selectionState;
+        private WorldEditToolbarView toolbarView;
 
         private readonly List<CellCoordinate> selectedCells = new();
         private readonly List<CellCoordinate> remappedCells = new();

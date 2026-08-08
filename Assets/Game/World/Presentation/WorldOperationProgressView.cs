@@ -7,10 +7,12 @@ namespace MiniCivilization.World.Presentation
     [DisallowMultipleComponent]
     public sealed class WorldOperationProgressView : MonoBehaviour
     {
-        [SerializeField] private WorldManager worldManager;
+        private WorldManager worldManager;
         [SerializeField] private GameObject panelRoot;
         [SerializeField] private Text stageText;
         [SerializeField] private Text completedText;
+
+        public WorldManager WorldManager => worldManager;
 
         private void OnEnable()
         {
@@ -23,19 +25,15 @@ namespace MiniCivilization.World.Presentation
             Unsubscribe();
         }
 
-        public void Configure(
-            WorldManager manager,
-            GameObject root,
-            Text stage,
-            Text completed)
+        public void SetWorldManager(WorldManager manager)
         {
             Unsubscribe();
             worldManager = manager;
-            panelRoot = root;
-            stageText = stage;
-            completedText = completed;
-            Subscribe();
-            Refresh(worldManager?.CurrentOperationProgress ?? default);
+            if (isActiveAndEnabled)
+            {
+                Subscribe();
+                Refresh(worldManager?.CurrentOperationProgress ?? default);
+            }
         }
 
         private void Subscribe()
