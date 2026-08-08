@@ -41,6 +41,7 @@ namespace MiniCivilization.World.Runtime
         public event Action<EntityId> PresentationChanged;
 
         public int Count => entitiesById.Count;
+        internal WorldRuntime WorldRuntime => runtime;
 
         public bool TryGet(EntityId id, out Entity entity) =>
             entitiesById.TryGetValue(id, out entity);

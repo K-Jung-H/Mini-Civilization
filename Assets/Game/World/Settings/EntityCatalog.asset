@@ -13,6 +13,6 @@ MonoBehaviour:
   m_Name: EntityCatalog
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.EntityCatalog
   nature: {fileID: 11400000, guid: 4d71bf48b5d37154d8b4a33d12ad523b, type: 2}
-  animals: {fileID: 0}
+  animals: {fileID: 11400000, guid: 1c8b961c21a12504a9c6560438fa6582, type: 2}
   humans: {fileID: 0}
   buildings: {fileID: 0}

@@ -9,8 +9,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1252491562607919201}
-  - component: {fileID: 348798339013475520}
   - component: {fileID: 6605171424404009782}
+  - component: {fileID: 348798339013475520}
   m_Layer: 0
   m_Name: VisualRoot
   m_TagString: Untagged
@@ -28,11 +28,19 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.25, y: 0.8, z: 0.25}
+  m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3119653877363518151}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!33 &6605171424404009782
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1875170353091762709}
+  m_Mesh: {fileID: 8849266880248285371, guid: 79ae57c397a75734b9768e433999dbc7, type: 3}
 --- !u!23 &348798339013475520
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -58,7 +66,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  - {fileID: -8827033654181131969, guid: cabaaf748ff28ee46b78f37a139abac3, type: 3}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -82,14 +90,6 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!33 &6605171424404009782
-MeshFilter:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1875170353091762709}
-  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
 --- !u!1 &4062498823053190565
 GameObject:
   m_ObjectHideFlags: 0
@@ -100,6 +100,7 @@ GameObject:
   m_Component:
   - component: {fileID: 3119653877363518151}
   - component: {fileID: 115609182653714027}
+  - component: {fileID: 903195743694952027}
   m_Layer: 0
   m_Name: Entity Tree
   m_TagString: Untagged
@@ -137,3 +138,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityController
   visualRoot: {fileID: 1252491562607919201}
   entityType: 1
+--- !u!114 &903195743694952027
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4062498823053190565}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fc45f6b1ab2f40bd8c663f476bd30db2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.EntityAuthoringCellBox
+  terrainHeight: 0
+  wireColor: {r: 0.72, g: 1, b: 0, a: 1}
+  terrainColor: {r: 0.05, g: 0.8, b: 0.25, a: 0.24}
+  localOffset: {x: 0, y: 0, z: 0}
+  authoringSystem: {fileID: 0}
