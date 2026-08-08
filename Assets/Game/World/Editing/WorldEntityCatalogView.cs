@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
-using MiniCivilization.World.Entities;
+using MiniCivilization.World.Domain;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
@@ -353,9 +353,9 @@ namespace MiniCivilization.World.Editing
 
             if (detailsType != null)
             {
-                var entityClass = definition?.Prefab?.EntityClass;
-                detailsType.text = entityClass?.Name ?? string.Empty;
-                detailsType.gameObject.SetActive(entityClass != null);
+                var controller = definition?.Prefab;
+                detailsType.text = controller?.EntityTypeName ?? string.Empty;
+                detailsType.gameObject.SetActive(controller != null);
             }
 
             if (detailsEmptyText != null)

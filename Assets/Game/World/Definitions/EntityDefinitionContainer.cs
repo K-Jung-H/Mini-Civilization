@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using MiniCivilization.World.Entities;
+using MiniCivilization.World.Domain;
 using UnityEngine;
 
 namespace MiniCivilization.World.Definitions

@@ -22,6 +22,11 @@ namespace MiniCivilization.World.Runtime
 
         public event Action<EntityChangeSet> Changed;
 
+        private void Update()
+        {
+            entities?.Tick(Time.deltaTime);
+        }
+
         public void Configure(
             EntityCatalog catalog,
             WorldEntityRenderer renderer)
@@ -30,12 +35,12 @@ namespace MiniCivilization.World.Runtime
             entityRenderer = renderer;
         }
 
-        public void ConfigureEntityTypes()
+        public void ConfigureEntityFactories()
         {
             EntityTypeRegistry.Shared.Clear();
             if (entityCatalog != null)
             {
-                entityCatalog.RegisterEntityTypes(EntityTypeRegistry.Shared);
+                entityCatalog.RegisterEntityFactories(EntityTypeRegistry.Shared);
             }
         }
 

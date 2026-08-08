@@ -28,7 +28,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 0.25, y: 0.8, z: 0.25}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 3119653877363518151}
@@ -135,5 +135,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6f10c21f576b457d875998708870a0c2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityController
-  entityClassName: MiniCivilization.World.Entities.Nature.TreeEntity, MiniCivilization.World,
-    Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  visualRoot: {fileID: 1252491562607919201}
+  entityType: 1

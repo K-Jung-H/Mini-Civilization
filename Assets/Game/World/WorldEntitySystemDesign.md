@@ -33,7 +33,7 @@ abstract Entity
 WorldData
 └─ EntityData 목록
    ├─ EntityId
-   ├─ EntityTypeId
+   ├─ EntityTypeKey(Category + 계열 enum 값)
    ├─ AnchorCell
    ├─ Direction
    └─ 실제 타입에 필요한 상태값
@@ -46,11 +46,11 @@ WorldRuntime
    └─ TerrainAnchorIndex
 ```
 
-`EntityTypeRegistry`는 `EntityTypeId`와 sealed 엔티티 타입을 연결한다. 타입별 공간 규칙, 행동, 배치 검증은 실제 sealed 타입이 가진다.
+`EntityTypeRegistry`는 `EntityTypeKey`와 Controller가 제공한 sealed 상태머신 생성 함수를 연결한다. 타입별 공간 규칙, 행동, 배치 검증은 실제 sealed 타입이 가진다.
 
-엔티티마다 MonoBehaviour를 만들지 않는다. 점유 형태·앵커 좌표 목록·렌더링 중복 목록은 `WorldData`에 저장하지 않고, 타입 규칙과 `AnchorCell`로부터 런타임에 구성한다.
+모든 엔티티는 고유 `EntityController`를 가진다. 점유 형태·앵커 좌표 목록·렌더링 중복 목록은 `WorldData`에 저장하지 않고, 타입 규칙과 `AnchorCell`로부터 런타임에 구성한다.
 
-모든 엔티티는 같은 셀에 함께 존재할 수 있다. 기본 공간 인덱스는 `World Cell → EntityId 목록`이며, 같은 실제 `EntityTypeId`의 같은 셀 렌더링은 하나만 표시한다.
+모든 엔티티는 같은 셀에 함께 존재할 수 있다. 기본 공간 인덱스는 `World Cell → EntityId 목록`이다. 같은 Cell·`EntityTypeKey`·렌더 상태·방향이면 Controller는 모두 유지하고 대표 `VisualRoot` 하나만 출력한다.
 
 ## 건물 구조
 
@@ -127,31 +127,31 @@ CanEnter(entity, currentCell, nextCell)
 - Idle 단일 애니메이션
 - 공통 `Idle`, `Move`와 타입별 상태를 사용하는 상태 기반 애니메이션
 
-다중 셀 건물은 `AnchorCell` 기준으로 한 번만 렌더링한다. 동물·사람·나무는 현재 셀 기준으로 렌더링한다. 같은 셀에 같은 실제 `EntityTypeId`가 여러 개면 가장 작은 `EntityId` 하나만 표시하고, 다른 타입은 모두 표시한다.
+다중 셀 건물은 `AnchorCell` 기준으로 한 번만 렌더링한다. 동물·사람·나무는 현재 셀 기준으로 렌더링한다. 같은 Cell·`EntityTypeKey`·렌더 상태·방향의 정지 엔티티는 가장 작은 `EntityId`의 `VisualRoot`만 출력한다. 상태가 다르거나 이동 중이면 각각 출력한다.
 
 ### Prefab Controller
 
-Unity Prefab은 순수 C# 엔티티와 별개다. `EntityController`는 연결된 엔티티의 ID·위치·방향만 표시하고, 각 Prefab은 정확히 하나의 계열 Controller를 가진다. 계열 Controller는 Inspector에서 정확히 하나의 sealed C# Entity 클래스를 연결한다. 따라서 실제 Entity 타입은 Definition이 아니라 Prefab의 Controller가 결정한다.
+Unity Prefab은 순수 C# 엔티티와 별개다. `EntityController`는 연결된 엔티티의 ID·위치·방향·상태를 표시하고, 각 Prefab은 정확히 하나의 계열 Controller를 가진다. 계열 Controller는 Inspector의 계열별 enum으로 정확히 하나의 sealed C# 상태머신 타입을 선택한다. 따라서 실제 Entity 타입은 Definition이 아니라 Prefab의 Controller가 결정한다.
 
 ```text
-Tree Prefab       → NatureEntityController   → NatureEntity
-Goat Prefab       → AnimalEntityController   → AnimalEntity
-Villager Prefab   → HumanEntityController    → HumanEntity
-Building Prefab   → BuildingEntityController → BuildingEntity
+Tree Prefab       → NatureEntityController(Tree)   → TreeEntity
+Dog Prefab        → AnimalEntityController(Dog)    → DogEntity
+Human Prefab      → HumanEntityController(Human)   → HumanEntity
+House Prefab      → BuildingEntityController(House) → HouseEntity
 ```
 
-Controller는 자신에게 연결된 sealed 엔티티만 `Bind`한다. `WorldEntityRenderer`는 Catalog에서 Type ID별 Definition·Prefab을 조회하고, `EntityChangeSet`이 발생한 셀만 다시 확인해 Prefab 생성·제거·위치 갱신을 처리한다. Controller 자체는 이동·배치 규칙을 갖지 않는다.
+Controller는 enum에 대응하는 `CreateStateMachine` 생성 함수를 Registry에 제공하고, 같은 `EntityTypeKey`의 sealed 엔티티만 `Bind`한다. `WorldEntityRenderer`는 Catalog에서 Type Key별 Definition·Prefab을 조회하고, `EntityChangeSet`이 발생한 셀만 다시 확인해 Prefab 생성·제거·위치 갱신을 처리한다. Controller 자체는 이동·배치 규칙을 갖지 않는다.
 
 ### Entity Catalog
 
 `EntityCatalog`은 상위 SO이며, Nature·Animal·Human·Building `EntityDefinitionContainer` SO를 각각 참조한다. 각 Container는 `List<EntityDefinition>`에 Definition SO를 직접 연결한다. 각 `EntityDefinition`은 Prefab·Thumbnail·Entity Name만 보관한다.
 
-- `EntityTypeId`는 Catalog가 Container 순서와 Definition List 순서로 런타임에 자동 부여한다. Inspector에서 직접 입력하거나 Controller가 보관하지 않는다.
-- Catalog는 같은 Definition·sealed Entity 클래스의 중복, 계열과 맞지 않는 Controller Prefab을 검증 실패로 처리한다.
+- `EntityTypeKey`는 Controller의 계열과 계열별 enum 값으로 결정된다. Catalog 목록 순서와 무관하다.
+- Catalog는 같은 Definition·`EntityTypeKey`의 중복, 계열과 맞지 않는 Controller Prefab을 검증 실패로 처리한다.
 - Catalog는 UI Button·Panel 같은 Scene 참조를 갖지 않는다.
 - `EntityManager`는 활성 `EntityRuntime`·Catalog·Renderer를 Bind/Unbind하고 Entity 변경을 WorldManager에 전달한다.
 - `WorldEntityCatalogView`는 계열 버튼 → Catalog Definition 목록 → Details Panel의 선택 상태와 생성 버튼만 관리한다. `EntityEditController`는 현재 EditSelected 영역에서 지면 Top Surface Cell만 선별해 EntityRuntime의 `Create`·`Add`를 호출한다.
-- `EntityTypeRegistry`는 Catalog의 내부 타입 연결값으로 Type ID와 sealed Entity 생성 함수를 구성한다.
+- `EntityTypeRegistry`는 Catalog가 전달한 Type Key와 Controller의 sealed 상태머신 생성 함수를 보관한다.
 
 ## 변경 통지
 
@@ -169,7 +169,7 @@ EntityChangeSet
 
 ### 1. 엔티티 도메인 계약 추가
 
-- `EntityId`, `EntityTypeId`, `EntityData` 추가
+- `EntityId`, `EntityTypeKey`, `EntityData` 추가
 - `WorldData`에 엔티티 목록 추가
 - `EntityTypeRegistry`와 sealed 엔티티 생성 계약 추가
 - `WorldDataValidator`에 ID·타입·AnchorCell 검증 추가
@@ -208,7 +208,7 @@ EntityChangeSet
 - 지형 편집 전에 TerrainAnchorIndex를 확인해 보호 대상 변경 거부
 - 엔티티 변경은 EntityChangeSet으로 영향 청크만 렌더 갱신
 - 다중 셀 건물은 AnchorCell 기준 한 번만 렌더링
-- 같은 셀·같은 실제 타입은 가장 작은 EntityId 하나만 렌더링
+- 같은 Cell·Type Key·렌더 상태·방향은 가장 작은 EntityId의 VisualRoot만 출력
 
 ### 6. 실제 sealed 타입 적용
 

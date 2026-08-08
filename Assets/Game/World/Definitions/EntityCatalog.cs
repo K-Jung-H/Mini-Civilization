@@ -14,10 +14,10 @@ namespace MiniCivilization.World.Definitions
         [SerializeField] private HumanEntityContainer humans;
         [SerializeField] private BuildingEntityContainer buildings;
 
-        private readonly Dictionary<EntityTypeId, EntityDefinition>
-            definitionsByTypeId = new();
-        private readonly Dictionary<EntityDefinition, EntityTypeId>
-            typeIdsByDefinition = new();
+        private readonly Dictionary<EntityTypeKey, EntityDefinition>
+            definitionsByTypeKey = new();
+        private readonly Dictionary<EntityDefinition, EntityTypeKey>
+            typeKeysByDefinition = new();
         private bool runtimeIndexValid;
 
         private static readonly IReadOnlyList<EntityDefinition> EmptyDefinitions =
@@ -49,47 +49,47 @@ namespace MiniCivilization.World.Definitions
         }
 
         public bool TryGetDefinition(
-            EntityTypeId typeId,
+            EntityTypeKey typeKey,
             out EntityDefinition definition)
         {
             EnsureRuntimeIndex();
-            return definitionsByTypeId.TryGetValue(typeId, out definition);
+            return definitionsByTypeKey.TryGetValue(typeKey, out definition);
         }
 
-        public EntityDefinition GetDefinition(EntityTypeId typeId)
+        public EntityDefinition GetDefinition(EntityTypeKey typeKey)
         {
-            if (!TryGetDefinition(typeId, out var definition))
+            if (!TryGetDefinition(typeKey, out var definition))
             {
                 throw new InvalidOperationException(
-                    $"Entity type ID {typeId} is not present in catalog '{name}'.");
+                    $"Entity type key {typeKey} is not present in catalog '{name}'.");
             }
 
             return definition;
         }
 
-        public bool TryGetTypeId(
+        public bool TryGetTypeKey(
             EntityDefinition definition,
-            out EntityTypeId typeId)
+            out EntityTypeKey typeKey)
         {
             EnsureRuntimeIndex();
             if (definition == null)
             {
-                typeId = EntityTypeId.None;
+                typeKey = EntityTypeKey.None;
                 return false;
             }
 
-            return typeIdsByDefinition.TryGetValue(definition, out typeId);
+            return typeKeysByDefinition.TryGetValue(definition, out typeKey);
         }
 
-        public EntityTypeId GetTypeId(EntityDefinition definition)
+        public EntityTypeKey GetTypeKey(EntityDefinition definition)
         {
-            if (!TryGetTypeId(definition, out var typeId))
+            if (!TryGetTypeKey(definition, out var typeKey))
             {
                 throw new InvalidOperationException(
                     $"Entity definition '{definition?.name}' is not present in catalog '{name}'.");
             }
 
-            return typeId;
+            return typeKey;
         }
 
         public void ValidateCatalog()
@@ -98,7 +98,7 @@ namespace MiniCivilization.World.Definitions
             EnsureRuntimeIndex();
         }
 
-        public void RegisterEntityTypes(EntityTypeRegistry registry)
+        public void RegisterEntityFactories(EntityTypeRegistry registry)
         {
             if (registry == null)
             {
@@ -106,9 +106,11 @@ namespace MiniCivilization.World.Definitions
             }
 
             EnsureRuntimeIndex();
-            foreach (var pair in definitionsByTypeId)
+            foreach (var pair in definitionsByTypeKey)
             {
-                registry.Register(pair.Key, pair.Value.Prefab.EntityClass);
+                registry.Register(
+                    pair.Key,
+                    pair.Value.Prefab.CreateStateMachine);
             }
         }
 
@@ -119,10 +121,8 @@ namespace MiniCivilization.World.Definitions
                 return;
             }
 
-            definitionsByTypeId.Clear();
-            typeIdsByDefinition.Clear();
-            var entityClasses = new HashSet<Type>();
-            var nextTypeId = (ushort)1;
+            definitionsByTypeKey.Clear();
+            typeKeysByDefinition.Clear();
 
             foreach (var category in Categories)
             {
@@ -136,42 +136,22 @@ namespace MiniCivilization.World.Definitions
                 {
                     var definition = container.Definitions[index];
                     ValidateDefinition(category, definition);
-                    if (!typeIdsByDefinition.TryAdd(
-                            definition,
-                            AllocateTypeId(ref nextTypeId)))
+                    var typeKey = definition.Prefab.TypeKey;
+                    if (!typeKeysByDefinition.TryAdd(definition, typeKey))
                     {
                         throw new InvalidOperationException(
                             $"Entity definition '{definition.name}' is listed more than once in catalog '{name}'.");
                     }
 
-                    var entityClass = definition.Prefab.EntityClass;
-                    if (!entityClasses.Add(entityClass))
+                    if (!definitionsByTypeKey.TryAdd(typeKey, definition))
                     {
                         throw new InvalidOperationException(
-                            $"Entity class '{entityClass.FullName}' is listed more than once in catalog '{name}'.");
+                            $"Entity type key '{typeKey}' is listed more than once in catalog '{name}'.");
                     }
-
-                    var typeId = typeIdsByDefinition[definition];
-                    definitionsByTypeId.Add(typeId, definition);
                 }
             }
 
             runtimeIndexValid = true;
-        }
-
-        private static EntityTypeId AllocateTypeId(ref ushort nextTypeId)
-        {
-            if (nextTypeId == 0)
-            {
-                throw new InvalidOperationException(
-                    "Entity catalog has exhausted Entity Type IDs.");
-            }
-
-            var typeId = new EntityTypeId(nextTypeId);
-            nextTypeId = nextTypeId == ushort.MaxValue
-                ? (ushort)0
-                : (ushort)(nextTypeId + 1);
-            return typeId;
         }
 
         private static void ValidateDefinition(
@@ -191,15 +171,15 @@ namespace MiniCivilization.World.Definitions
                     $"Entity definition '{definition.name}' has no Prefab.");
             }
 
-            var entityClass = prefab.EntityClass;
             if (prefab.Category != category
-                || entityClass == null
-                || !entityClass.IsSealed
-                || !EntityCategoryInfo.Supports(category, entityClass)
-                || entityClass.GetConstructor(new[] { typeof(EntityData) }) == null)
+                || !prefab.TypeKey.IsValid
+                || !prefab.HasValidEntityType
+                || !prefab.HasValidVisualRoot
+                || prefab.TypeKey.Category != category)
             {
                 throw new InvalidOperationException(
-                    $"Entity definition '{definition.name}' does not match its {category} Controller Prefab.");
+                    $"Entity definition '{definition.name}' does not match its "
+                    + $"{category} Controller Prefab or Visual Root.");
             }
         }
 

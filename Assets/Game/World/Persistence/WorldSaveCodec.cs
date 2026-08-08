@@ -12,7 +12,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D; // "MEND"
         private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
         private const uint EntitiesMarker = 0x31544E45; // "ENT1"
-        private const ushort CurrentVersion = 7;
+        private const ushort CurrentVersion = 8;
         private const int CellByteSize = 13;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
@@ -301,7 +301,8 @@ namespace MiniCivilization.World.Persistence
             {
                 var entity = entities[index];
                 writer.Write(entity.Id.Value);
-                writer.Write(entity.TypeId.Value);
+                writer.Write((byte)entity.TypeKey.Category);
+                writer.Write(entity.TypeKey.Value);
                 writer.Write(entity.AnchorCell.X);
                 writer.Write(entity.AnchorCell.Y);
                 writer.Write(entity.AnchorCell.Z);
@@ -320,7 +321,9 @@ namespace MiniCivilization.World.Persistence
             for (var index = 0; index < count; index++)
             {
                 var id = new EntityId(reader.ReadUInt64());
-                var typeId = new EntityTypeId(reader.ReadUInt16());
+                var typeKey = new EntityTypeKey(
+                    (EntityCategory)reader.ReadByte(),
+                    reader.ReadUInt16());
                 var anchor = new CellCoordinate(
                     reader.ReadInt32(),
                     reader.ReadInt32(),
@@ -330,7 +333,7 @@ namespace MiniCivilization.World.Persistence
                 {
                     world.AddEntity(new EntityData(
                         id,
-                        typeId,
+                        typeKey,
                         anchor,
                         direction));
                 }

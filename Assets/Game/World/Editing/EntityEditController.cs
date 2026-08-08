@@ -74,9 +74,9 @@ namespace MiniCivilization.World.Editing
                 || runtime == null
                 || entities == null
                 || entityManager.Catalog == null
-                || !entityManager.Catalog.TryGetTypeId(
+                || !entityManager.Catalog.TryGetTypeKey(
                     definition,
-                    out var entityTypeId)
+                    out var entityTypeKey)
                 || selectionState?.EditSelected == null)
             {
                 return;
@@ -94,7 +94,7 @@ namespace MiniCivilization.World.Editing
                     continue;
                 }
 
-                var data = entities.Create(entityTypeId, coordinate);
+                var data = entities.Create(entityTypeKey, coordinate);
                 entities.Add(data);
             }
         }

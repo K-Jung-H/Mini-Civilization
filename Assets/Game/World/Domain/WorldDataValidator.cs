@@ -42,7 +42,7 @@ namespace MiniCivilization.World.Domain
                         "World entities cannot contain a null entry.");
                 }
 
-                if (!entity.Id.IsValid || !entity.TypeId.IsValid)
+                if (!entity.Id.IsValid || !entity.TypeKey.IsValid)
                 {
                     throw new InvalidOperationException(
                         "World entity has an invalid ID or type ID.");

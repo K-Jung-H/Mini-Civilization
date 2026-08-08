@@ -102,7 +102,7 @@ namespace MiniCivilization.World.Runtime
 
             try
             {
-                ConfigureEntityTypes();
+                ConfigureEntityFactories();
                 return StartWorldOperation(
                     new WorldGenerationOperation(generator.CreateBuildInput()));
             }
@@ -190,7 +190,7 @@ namespace MiniCivilization.World.Runtime
 
             try
             {
-                ConfigureEntityTypes();
+                ConfigureEntityFactories();
                 return StartWorldOperation(new WorldLoadOperation(path));
             }
             catch (Exception exception)
@@ -272,7 +272,7 @@ namespace MiniCivilization.World.Runtime
                     "WorldManager requires an assigned Renderer.");
             }
 
-            ConfigureEntityTypes();
+            ConfigureEntityFactories();
 
             ActivatePreparedWorldAsset(
                 nextAsset,
@@ -598,7 +598,7 @@ namespace MiniCivilization.World.Runtime
         private void OnWaterStateChanged(WaterFlowState state) =>
             worldRenderer.SetWaterFlowState(state);
 
-        private void ConfigureEntityTypes()
+        private void ConfigureEntityFactories()
         {
             if (entityManager == null)
             {
@@ -606,7 +606,7 @@ namespace MiniCivilization.World.Runtime
                     "WorldManager requires an Entity Manager.");
             }
 
-            entityManager.ConfigureEntityTypes();
+            entityManager.ConfigureEntityFactories();
         }
 
         private void OnEntityChanged(EntityChangeSet changeSet)

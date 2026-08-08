@@ -17,6 +17,8 @@ namespace MiniCivilization.World.Runtime
         private readonly Dictionary<int, BuildingCellState> buildingCells = new();
         private readonly HashSet<int> terrainAnchorCells = new();
         private readonly HashSet<int> terrainAnchorColumns = new();
+        private readonly List<Entity> tickEntities = new();
+        private readonly HashSet<EntityId> movingEntityIds = new();
         private ulong nextEntityId = 1;
 
         internal EntityRuntime(
@@ -36,6 +38,7 @@ namespace MiniCivilization.World.Runtime
         }
 
         public event Action<EntityChangeSet> Changed;
+        public event Action<EntityId> PresentationChanged;
 
         public int Count => entitiesById.Count;
 
@@ -56,6 +59,50 @@ namespace MiniCivilization.World.Runtime
             }
 
             target.Sort(CompareEntities);
+        }
+
+        public void CopyMovingEntitiesTo(List<DynamicEntity> target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            foreach (var id in movingEntityIds)
+            {
+                if (entitiesById.TryGetValue(id, out var entity)
+                    && entity is DynamicEntity dynamicEntity
+                    && dynamicEntity.IsMoving)
+                {
+                    target.Add(dynamicEntity);
+                }
+            }
+
+            target.Sort(CompareEntities);
+        }
+
+        internal void Tick(float deltaTime)
+        {
+            if (deltaTime < 0f
+                || float.IsNaN(deltaTime)
+                || float.IsInfinity(deltaTime))
+            {
+                throw new ArgumentOutOfRangeException(nameof(deltaTime));
+            }
+
+            for (var index = 0; index < tickEntities.Count; index++)
+            {
+                var entity = tickEntities[index];
+                var previousRenderState = entity.RenderStateKey;
+                entity.Tick(this, deltaTime);
+                if (previousRenderState != entity.RenderStateKey
+                    && entitiesById.TryGetValue(entity.Id, out var current)
+                    && ReferenceEquals(current, entity))
+                {
+                    PresentationChanged?.Invoke(entity.Id);
+                }
+            }
         }
 
         public IReadOnlyList<EntityId> GetEntitiesAt(CellCoordinate coordinate)
@@ -129,13 +176,13 @@ namespace MiniCivilization.World.Runtime
         }
 
         public EntityData Create(
-            EntityTypeId typeId,
+            EntityTypeKey typeKey,
             CellCoordinate anchorCell,
             EntityDirection direction = EntityDirection.North)
         {
-            if (!typeId.IsValid)
+            if (!typeKey.IsValid)
             {
-                throw new ArgumentOutOfRangeException(nameof(typeId));
+                throw new ArgumentOutOfRangeException(nameof(typeKey));
             }
 
             if (!world.Contains(
@@ -148,7 +195,7 @@ namespace MiniCivilization.World.Runtime
 
             return new EntityData(
                 AllocateEntityId(),
-                typeId,
+                typeKey,
                 anchorCell,
                 direction);
         }
@@ -171,38 +218,77 @@ namespace MiniCivilization.World.Runtime
                 affectedCells);
         }
 
-        public EntityChangeSet Move(EntityId id, CellCoordinate destination)
+        internal bool TryBeginMove(
+            DynamicEntity entity,
+            CellCoordinate destination,
+            EntityMoveType moveType)
         {
-            if (!entitiesById.TryGetValue(id, out var entity))
+            if (entity == null)
             {
-                throw new InvalidOperationException(
-                    $"Entity ID {id} does not exist in the runtime.");
+                throw new ArgumentNullException(nameof(entity));
             }
 
-            if (entity is not DynamicEntity dynamicEntity)
+            if (!Enum.IsDefined(typeof(EntityMoveType), moveType))
+            {
+                throw new ArgumentOutOfRangeException(nameof(moveType));
+            }
+
+            if (!entitiesById.TryGetValue(entity.Id, out var registered)
+                || !ReferenceEquals(registered, entity))
             {
                 throw new InvalidOperationException(
-                    $"Entity {id} is not dynamic and cannot move.");
+                    $"Entity ID {entity.Id} does not belong to this runtime.");
+            }
+
+            if (entity.IsMoving)
+            {
+                return false;
             }
 
             var current = entity.AnchorCell;
             if (current.Equals(destination))
             {
-                return null;
+                return false;
             }
 
-            if (!CanEnter(dynamicEntity, current, destination))
+            if (!CanEnter(entity, current, destination))
             {
-                return null;
+                return false;
             }
 
-            RemoveEntityFromCell(id, current);
+            entity.BeginMove(destination, moveType);
+            movingEntityIds.Add(entity.Id);
+            PresentationChanged?.Invoke(entity.Id);
+            return true;
+        }
+
+        internal EntityChangeSet CompleteMove(DynamicEntity entity)
+        {
+            if (entity == null)
+            {
+                throw new ArgumentNullException(nameof(entity));
+            }
+
+            if (!entitiesById.TryGetValue(entity.Id, out var registered)
+                || !ReferenceEquals(registered, entity)
+                || !entity.IsMoving
+                || !movingEntityIds.Contains(entity.Id))
+            {
+                throw new InvalidOperationException(
+                    $"Entity ID {entity.Id} has no active movement in this runtime.");
+            }
+
+            var current = entity.AnchorCell;
+            var destination = entity.MoveTo;
+            RemoveEntityFromCell(entity.Id, current);
             entity.Data.MoveTo(destination);
-            AddEntityToCell(id, destination);
+            AddEntityToCell(entity.Id, destination);
+            entity.FinishMove();
+            movingEntityIds.Remove(entity.Id);
             return PublishChange(
                 NoEntityIds,
                 NoEntityIds,
-                new[] { id },
+                new[] { entity.Id },
                 new[] { current, destination });
         }
 
@@ -311,9 +397,16 @@ namespace MiniCivilization.World.Runtime
                 {
                     AddEntityToCell(entity.Id, entity.AnchorCell);
                 }
+
+                if (entity.RequiresTick)
+                {
+                    tickEntities.Add(entity);
+                    tickEntities.Sort(CompareEntities);
+                }
             }
             catch
             {
+                tickEntities.Remove(entity);
                 entitiesById.Remove(entity.Id);
                 throw;
             }
@@ -321,6 +414,8 @@ namespace MiniCivilization.World.Runtime
 
         private void RemoveRuntimeEntity(Entity entity)
         {
+            tickEntities.Remove(entity);
+            movingEntityIds.Remove(entity.Id);
             if (entity is BuildingEntity building)
             {
                 RemoveBuilding(building);

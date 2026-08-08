@@ -27,27 +27,42 @@ namespace MiniCivilization.World.Domain
             !left.Equals(right);
     }
 
-    public readonly struct EntityTypeId : IEquatable<EntityTypeId>
+    public enum EntityCategory : byte
     {
-        public static readonly EntityTypeId None = new(0);
+        Nature,
+        Animal,
+        Human,
+        Building
+    }
 
+    public readonly struct EntityTypeKey : IEquatable<EntityTypeKey>
+    {
+        public static readonly EntityTypeKey None = default;
+
+        public EntityCategory Category { get; }
         public ushort Value { get; }
 
-        public EntityTypeId(ushort value)
+        public EntityTypeKey(EntityCategory category, ushort value)
         {
+            Category = category;
             Value = value;
         }
 
-        public bool IsValid => Value != 0;
-        public bool Equals(EntityTypeId other) => Value == other.Value;
+        public bool IsValid => Value != 0
+            && Category is EntityCategory.Nature
+                or EntityCategory.Animal
+                or EntityCategory.Human
+                or EntityCategory.Building;
+        public bool Equals(EntityTypeKey other) =>
+            Category == other.Category && Value == other.Value;
         public override bool Equals(object obj) =>
-            obj is EntityTypeId other && Equals(other);
-        public override int GetHashCode() => Value.GetHashCode();
-        public override string ToString() => Value.ToString();
+            obj is EntityTypeKey other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(Category, Value);
+        public override string ToString() => $"{Category}:{Value}";
 
-        public static bool operator ==(EntityTypeId left, EntityTypeId right) =>
+        public static bool operator ==(EntityTypeKey left, EntityTypeKey right) =>
             left.Equals(right);
-        public static bool operator !=(EntityTypeId left, EntityTypeId right) =>
+        public static bool operator !=(EntityTypeKey left, EntityTypeKey right) =>
             !left.Equals(right);
     }
 
@@ -88,13 +103,13 @@ namespace MiniCivilization.World.Domain
     public sealed class EntityData
     {
         public EntityId Id { get; }
-        public EntityTypeId TypeId { get; }
+        public EntityTypeKey TypeKey { get; }
         public CellCoordinate AnchorCell { get; private set; }
         public EntityDirection Direction { get; private set; }
 
         public EntityData(
             EntityId id,
-            EntityTypeId typeId,
+            EntityTypeKey typeKey,
             CellCoordinate anchorCell,
             EntityDirection direction = EntityDirection.North)
         {
@@ -103,9 +118,9 @@ namespace MiniCivilization.World.Domain
                 throw new ArgumentOutOfRangeException(nameof(id));
             }
 
-            if (!typeId.IsValid)
+            if (!typeKey.IsValid)
             {
-                throw new ArgumentOutOfRangeException(nameof(typeId));
+                throw new ArgumentOutOfRangeException(nameof(typeKey));
             }
 
             if (!Enum.IsDefined(typeof(EntityDirection), direction))
@@ -114,7 +129,7 @@ namespace MiniCivilization.World.Domain
             }
 
             Id = id;
-            TypeId = typeId;
+            TypeKey = typeKey;
             AnchorCell = anchorCell;
             Direction = direction;
         }

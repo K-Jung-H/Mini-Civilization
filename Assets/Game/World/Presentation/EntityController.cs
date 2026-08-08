@@ -9,12 +9,18 @@ namespace MiniCivilization.World.Presentation
     [DisallowMultipleComponent]
     public abstract class EntityController : MonoBehaviour
     {
-        [SerializeField, HideInInspector] private string entityClassName;
+        [SerializeField] private Transform visualRoot;
 
-        public abstract EntityCategory Category { get; }
+        public abstract EntityTypeKey TypeKey { get; }
+        public abstract string EntityTypeName { get; }
+        public abstract bool HasValidEntityType { get; }
+        public EntityCategory Category => TypeKey.Category;
         public Entity BoundEntity { get; private set; }
         public WorldEntityId BoundEntityId => BoundEntity?.Id ?? WorldEntityId.None;
-        public Type EntityClass => ResolveEntityClass();
+        public Transform VisualRoot => visualRoot;
+        public bool HasValidVisualRoot => visualRoot != null
+            && visualRoot != transform
+            && visualRoot.IsChildOf(transform);
 
         public void Bind(Entity entity)
         {
@@ -23,11 +29,11 @@ namespace MiniCivilization.World.Presentation
                 throw new ArgumentNullException(nameof(entity));
             }
 
-            if (!SupportsEntityType(entity.GetType()))
+            if (!HasValidEntityType || entity.TypeKey != TypeKey)
             {
                 throw new InvalidOperationException(
-                    $"Entity Controller '{name}' cannot bind entity type " +
-                    $"{entity.GetType().Name}.");
+                    $"Entity Controller '{name}' cannot bind entity type key "
+                    + $"{entity.TypeKey}.");
             }
 
             if (BoundEntity != null)
@@ -36,8 +42,8 @@ namespace MiniCivilization.World.Presentation
             }
 
             BoundEntity = entity;
-            Refresh();
             OnBound(entity);
+            RefreshState();
         }
 
         public void Unbind()
@@ -50,9 +56,18 @@ namespace MiniCivilization.World.Presentation
 
             BoundEntity = null;
             OnUnbound(entity);
+            SetVisualVisible(true);
         }
 
-        public void Refresh()
+        public void ApplyRenderPose(
+            Vector3 localPosition,
+            EntityDirection direction)
+        {
+            transform.localPosition = localPosition;
+            transform.localRotation = ToRotation(direction);
+        }
+
+        public void RefreshState()
         {
             var entity = BoundEntity;
             if (entity == null)
@@ -60,29 +75,19 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            var anchor = entity.AnchorCell;
-            transform.localPosition = new Vector3(
-                anchor.X,
-                anchor.Y,
-                anchor.Z);
-            transform.localRotation = ToRotation(entity.Direction);
             OnRefreshed(entity);
         }
 
-        public bool SupportsEntityType(Type entityType)
+        public void SetVisualVisible(bool visible)
         {
-            var configuredEntityClass = EntityClass;
-            return configuredEntityClass != null
-                && configuredEntityClass == entityType
-                && EntityCategoryInfo.Supports(Category, entityType);
+            if (visualRoot != null
+                && visualRoot.gameObject.activeSelf != visible)
+            {
+                visualRoot.gameObject.SetActive(visible);
+            }
         }
 
-        private Type ResolveEntityClass()
-        {
-            return string.IsNullOrWhiteSpace(entityClassName)
-                ? null
-                : Type.GetType(entityClassName, throwOnError: false);
-        }
+        public abstract Entity CreateStateMachine(EntityData data);
 
         protected virtual void OnBound(Entity entity)
         {

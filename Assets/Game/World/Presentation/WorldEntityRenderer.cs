@@ -15,7 +15,9 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Transform entityRoot;
 
         private readonly Dictionary<WorldEntityId, EntityController> viewsByEntityId = new();
+        private readonly Dictionary<RenderGroupKey, EntityController> visibleViewsByGroup = new();
         private readonly List<Entity> entities = new();
+        private readonly List<DynamicEntity> movingEntities = new();
         private readonly HashSet<WorldEntityId> pendingEntityIds = new();
         private WorldRuntime runtime;
         private EntityCatalog catalog;
@@ -27,6 +29,24 @@ namespace MiniCivilization.World.Presentation
         public void Configure(Transform root)
         {
             entityRoot = root;
+        }
+
+        private void LateUpdate()
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.Entities.CopyMovingEntitiesTo(movingEntities);
+            for (var index = 0; index < movingEntities.Count; index++)
+            {
+                var entity = movingEntities[index];
+                if (viewsByEntityId.TryGetValue(entity.Id, out var view))
+                {
+                    ApplyRenderPose(entity, view);
+                }
+            }
         }
 
         private void OnDestroy()
@@ -53,12 +73,14 @@ namespace MiniCivilization.World.Presentation
             runtime = worldRuntime;
             catalog = entityCatalog;
             runtime.Entities.Changed += OnEntitiesChanged;
+            runtime.Entities.PresentationChanged += OnPresentationChanged;
 
             runtime.Entities.CopyEntitiesTo(entities);
             for (var index = 0; index < entities.Count; index++)
             {
                 SynchronizeEntity(entities[index]);
             }
+            RefreshVisualGroups();
         }
 
         public void Unbind()
@@ -66,6 +88,7 @@ namespace MiniCivilization.World.Presentation
             if (runtime != null)
             {
                 runtime.Entities.Changed -= OnEntitiesChanged;
+                runtime.Entities.PresentationChanged -= OnPresentationChanged;
                 runtime = null;
             }
 
@@ -90,8 +113,22 @@ namespace MiniCivilization.World.Presentation
             }
 
             viewsByEntityId.Clear();
+            visibleViewsByGroup.Clear();
             entities.Clear();
+            movingEntities.Clear();
             pendingEntityIds.Clear();
+        }
+
+        private void OnPresentationChanged(WorldEntityId id)
+        {
+            if (runtime == null
+                || !runtime.Entities.TryGet(id, out var entity))
+            {
+                return;
+            }
+
+            SynchronizeEntity(entity);
+            RefreshVisualGroups();
         }
 
         private void OnEntitiesChanged(EntityChangeSet changeSet)
@@ -119,6 +156,7 @@ namespace MiniCivilization.World.Presentation
                     SynchronizeEntity(entity);
                 }
             }
+            RefreshVisualGroups();
         }
 
         private void AddChangedEntities(IReadOnlyList<WorldEntityId> ids)
@@ -144,19 +182,14 @@ namespace MiniCivilization.World.Presentation
 
         private void SynchronizeEntity(Entity entity)
         {
-            if (!ShouldRender(entity))
-            {
-                RemoveView(entity.Id);
-                return;
-            }
-
             if (viewsByEntityId.TryGetValue(entity.Id, out var existing))
             {
-                existing.Refresh();
+                ApplyRenderPose(entity, existing);
+                existing.RefreshState();
                 return;
             }
 
-            var definition = catalog.GetDefinition(entity.TypeId);
+            var definition = catalog.GetDefinition(entity.TypeKey);
             var prefab = definition.Prefab;
 
             var parent = entityRoot != null ? entityRoot : transform;
@@ -165,6 +198,7 @@ namespace MiniCivilization.World.Presentation
             {
                 view.name = $"{definition.DisplayName} [{entity.Id}]";
                 view.Bind(entity);
+                ApplyRenderPose(entity, view);
                 viewsByEntityId.Add(entity.Id, view);
             }
             catch
@@ -182,27 +216,79 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private bool ShouldRender(Entity entity)
+        private void ApplyRenderPose(
+            Entity entity,
+            EntityController view)
         {
-            if (entity is BuildingEntity)
+            var position = ResolveCellPosition(entity.AnchorCell);
+            if (entity is DynamicEntity { IsMoving: true } moving)
             {
-                return true;
+                position = Vector3.Lerp(
+                    ResolveCellPosition(moving.MoveFrom),
+                    ResolveCellPosition(moving.MoveTo),
+                    moving.MoveProgress);
             }
 
-            var ids = runtime.Entities.GetEntitiesAt(entity.AnchorCell);
-            for (var index = 0; index < ids.Count; index++)
+            view.ApplyRenderPose(position, entity.Direction);
+        }
+
+        private Vector3 ResolveCellPosition(CellCoordinate coordinate)
+        {
+            if (!runtime.Data.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z,
+                    out var cell))
             {
-                if (ids[index].CompareTo(entity.Id) >= 0
-                    || !runtime.Entities.TryGet(ids[index], out var other)
-                    || other.TypeId != entity.TypeId)
+                throw new InvalidOperationException(
+                    $"Entity render Cell {coordinate} is outside the world.");
+            }
+
+            var heightUnits = coordinate.Y * WorldGrid.HeightStepsPerCell
+                + cell.Terrain.SolidHeight;
+            return new Vector3(
+                coordinate.X + 0.5f,
+                heightUnits * WorldGrid.HeightStep,
+                coordinate.Z + 0.5f);
+        }
+
+        private void RefreshVisualGroups()
+        {
+            visibleViewsByGroup.Clear();
+            foreach (var pair in viewsByEntityId)
+            {
+                var view = pair.Value;
+                var entity = view != null ? view.BoundEntity : null;
+                if (entity == null)
                 {
                     continue;
                 }
 
-                return false;
-            }
+                if (entity is DynamicEntity { IsMoving: true })
+                {
+                    view.SetVisualVisible(true);
+                    continue;
+                }
 
-            return true;
+                var key = new RenderGroupKey(entity);
+                if (!visibleViewsByGroup.TryGetValue(key, out var visible))
+                {
+                    visibleViewsByGroup.Add(key, view);
+                    view.SetVisualVisible(true);
+                    continue;
+                }
+
+                if (entity.Id.CompareTo(visible.BoundEntityId) < 0)
+                {
+                    visible.SetVisualVisible(false);
+                    visibleViewsByGroup[key] = view;
+                    view.SetVisualVisible(true);
+                }
+                else
+                {
+                    view.SetVisualVisible(false);
+                }
+            }
         }
 
         private void RemoveView(WorldEntityId id)
@@ -221,6 +307,37 @@ namespace MiniCivilization.World.Presentation
             {
                 DestroyImmediate(view.gameObject);
             }
+        }
+
+        private readonly struct RenderGroupKey : IEquatable<RenderGroupKey>
+        {
+            private readonly CellCoordinate cell;
+            private readonly EntityTypeKey typeKey;
+            private readonly EntityDirection direction;
+            private readonly int renderStateKey;
+
+            public RenderGroupKey(Entity entity)
+            {
+                cell = entity.AnchorCell;
+                typeKey = entity.TypeKey;
+                direction = entity.Direction;
+                renderStateKey = entity.RenderStateKey;
+            }
+
+            public bool Equals(RenderGroupKey other) =>
+                cell.Equals(other.cell)
+                && typeKey.Equals(other.typeKey)
+                && direction == other.direction
+                && renderStateKey == other.renderStateKey;
+
+            public override bool Equals(object obj) =>
+                obj is RenderGroupKey other && Equals(other);
+
+            public override int GetHashCode() => HashCode.Combine(
+                cell,
+                typeKey,
+                direction,
+                renderStateKey);
         }
     }
 }

@@ -1,10 +1,16 @@
 using System;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Entities.Building
 {
     public sealed class HouseEntity : global::MiniCivilization.World.Entities.BuildingEntity
     {
+        private enum State : byte
+        {
+            Idle
+        }
+
         private static readonly CellOffset SupportOffset = new(0, 0, 0);
         private static readonly BuildingLayout HouseLayout = new(
             new[]
@@ -14,12 +20,21 @@ namespace MiniCivilization.World.Entities.Building
                     Array.Empty<CellOffset>())
             },
             new[] { SupportOffset });
+        private State currentState = State.Idle;
 
         public HouseEntity(EntityData data) : base(data)
         {
         }
 
         public override BuildingLayout Layout => HouseLayout;
+        public override int RenderStateKey => (int)currentState;
+        internal override bool RequiresTick => false;
+
+        internal override void Tick(
+            EntityRuntime runtime,
+            float deltaTime)
+        {
+        }
 
         public override bool ValidatePlacement(
             in BuildingPlacementContext context)
