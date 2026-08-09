@@ -12,7 +12,7 @@ namespace MiniCivilization.World.Presentation
         Tree = 1
     }
 
-    public sealed class NatureEntityController : EntityController
+    public sealed class NatureEntityController : AnimatedEntityController
     {
         [SerializeField] private NatureEntityType entityType;
 

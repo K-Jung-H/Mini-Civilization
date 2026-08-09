@@ -100,7 +100,6 @@ GameObject:
   m_Component:
   - component: {fileID: 3119653877363518151}
   - component: {fileID: 115609182653714027}
-  - component: {fileID: 903195743694952027}
   m_Layer: 0
   m_Name: Entity Tree
   m_TagString: Untagged
@@ -137,21 +136,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityController
   visualRoot: {fileID: 1252491562607919201}
+  animator: {fileID: 0}
+  localMotionRoot: {fileID: 0}
+  renderProfile: {fileID: 0}
   entityType: 1
---- !u!114 &903195743694952027
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4062498823053190565}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc45f6b1ab2f40bd8c663f476bd30db2, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.EntityAuthoringCellBox
-  terrainHeight: 0
-  wireColor: {r: 0.72, g: 1, b: 0, a: 1}
-  terrainColor: {r: 0.05, g: 0.8, b: 0.25, a: 0.24}
-  localOffset: {x: 0, y: 0, z: 0}
-  authoringSystem: {fileID: 0}

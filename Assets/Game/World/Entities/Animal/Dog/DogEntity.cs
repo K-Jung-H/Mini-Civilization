@@ -8,40 +8,61 @@ namespace MiniCivilization.World.Entities.Animal
         private const float DecisionIntervalSeconds = 1f;
         private const float MoveDurationSeconds = 1f;
 
-        private enum State : byte
+        private enum BehaviorState : byte
         {
             Idle,
             Move
         }
 
-        private static readonly WeightedState<State>[] StateWeights =
+        private enum RenderState : byte
         {
-            new(State.Idle, 2),
-            new(State.Move, 8)
+            IdleStill,
+            IdleCircle,
+            IdleWander,
+            Move
+        }
+
+        private static readonly WeightedState<BehaviorState>[] StateWeights =
+        {
+            new(BehaviorState.Idle, 9),
+            new(BehaviorState.Move, 1)
+        };
+        private static readonly WeightedState<RenderState>[] IdleStateWeights =
+        {
+            new(RenderState.IdleStill, 1),
+            new(RenderState.IdleCircle, 1),
+            new(RenderState.IdleWander, 1)
         };
         private static readonly AnimalMovementRules MovementRules =
             AnimalMovementRules.Cardinal4(1);
 
-        private State currentState = State.Idle;
+        private BehaviorState currentState = BehaviorState.Idle;
+        private RenderState currentRenderState = RenderState.IdleStill;
         private float decisionElapsed;
 
         public DogEntity(EntityData data) : base(data)
         {
         }
 
-        public override int RenderStateKey => (int)currentState;
+        public override int RenderStateKey => (int)currentRenderState;
 
         protected override void UpdateState(
             EntityRuntime runtime,
             float deltaTime)
         {
-            if (IsMoving)
+            if (currentState == BehaviorState.Move)
             {
+                if (!IsMoving)
+                {
+                    EnterIdle();
+                    return;
+                }
+
                 if (AdvanceMove(
                         runtime,
                         deltaTime / MoveDurationSeconds))
                 {
-                    currentState = State.Idle;
+                    EnterIdle();
                     decisionElapsed = 0f;
                 }
 
@@ -56,21 +77,33 @@ namespace MiniCivilization.World.Entities.Animal
 
             decisionElapsed %= DecisionIntervalSeconds;
             var selectedState = SelectWeightedState(StateWeights);
-            if (selectedState != State.Move
-                || !TrySelectMoveDestination(runtime, out var destination))
+            if (selectedState != BehaviorState.Move)
             {
-                currentState = State.Idle;
+                EnterIdle();
                 return;
             }
 
-            currentState = State.Move;
+            if (!TrySelectMoveDestination(runtime, out var destination))
+            {
+                EnterIdle();
+                return;
+            }
+
+            currentState = BehaviorState.Move;
+            currentRenderState = RenderState.Move;
             if (!TryBeginMove(runtime, destination))
             {
-                currentState = State.Idle;
+                EnterIdle();
             }
         }
 
         protected override AnimalMovementRules ResolveMovementRules() =>
             MovementRules;
+
+        private void EnterIdle()
+        {
+            currentState = BehaviorState.Idle;
+            currentRenderState = SelectWeightedState(IdleStateWeights);
+        }
     }
 }

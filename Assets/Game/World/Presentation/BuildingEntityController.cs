@@ -12,7 +12,7 @@ namespace MiniCivilization.World.Presentation
         House = 1
     }
 
-    public sealed class BuildingEntityController : EntityController
+    public sealed class BuildingEntityController : AnimatedEntityController
     {
         [SerializeField] private BuildingEntityType entityType;
 

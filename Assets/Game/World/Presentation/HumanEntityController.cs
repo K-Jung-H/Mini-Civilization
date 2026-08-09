@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Presentation
         Human = 1
     }
 
-    public sealed class HumanEntityController : EntityController
+    public sealed class HumanEntityController : AnimatedEntityController
     {
         [SerializeField] private HumanEntityType entityType;
 

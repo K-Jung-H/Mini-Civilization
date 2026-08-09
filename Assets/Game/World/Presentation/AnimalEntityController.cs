@@ -12,7 +12,7 @@ namespace MiniCivilization.World.Presentation
         Dog = 1
     }
 
-    public sealed class AnimalEntityController : EntityController
+    public sealed class AnimalEntityController : AnimatedEntityController
     {
         [SerializeField] private AnimalEntityType entityType;
 
