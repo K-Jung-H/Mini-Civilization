@@ -153,12 +153,12 @@ namespace MiniCivilization.World.Interaction
             else if (selectionState?.Selected != null)
             {
                 activeColor = selectedColor;
-                AppendCell(selectionState.Selected.Value.Cell);
+                AppendCell(selectionState.Selected.Value.Cell, world.CellSize);
             }
             else if (selectionState?.Hovered != null)
             {
                 activeColor = hoverColor;
-                AppendCell(selectionState.Hovered.Value.Cell);
+                AppendCell(selectionState.Hovered.Value.Cell, world.CellSize);
             }
 
             RecalculateInstanceBounds();
@@ -170,7 +170,7 @@ namespace MiniCivilization.World.Interaction
         {
             if (selection is WorldCellBoxSelection box)
             {
-                AppendBox(box.Bounds);
+                AppendBox(box.Bounds, world.CellSize);
                 return;
             }
 
@@ -178,30 +178,31 @@ namespace MiniCivilization.World.Interaction
             selection.CopyCellsTo(selectedCells, world);
             for (var index = 0; index < selectedCells.Count; index++)
             {
-                AppendCell(selectedCells[index]);
+                AppendCell(selectedCells[index], world.CellSize);
             }
         }
 
-        private void AppendCell(CellCoordinate coordinate)
+        private void AppendCell(CellCoordinate coordinate, float cellSize)
         {
             AppendLocalBox(
                 new Vector3(
-                    coordinate.X + 0.5f,
-                    coordinate.Y + 0.5f,
-                    coordinate.Z + 0.5f),
-                Vector3.one);
+                    (coordinate.X + 0.5f) * cellSize,
+                    (coordinate.Y + 0.5f) * cellSize,
+                    (coordinate.Z + 0.5f) * cellSize),
+                Vector3.one * cellSize);
         }
 
-        private void AppendBox(in CellBounds bounds)
+        private void AppendBox(in CellBounds bounds, float cellSize)
         {
             var size = new Vector3(
                 bounds.Maximum.X - bounds.Minimum.X + 1,
                 bounds.Maximum.Y - bounds.Minimum.Y + 1,
-                bounds.Maximum.Z - bounds.Minimum.Z + 1);
+                bounds.Maximum.Z - bounds.Minimum.Z + 1) * cellSize;
             var center = new Vector3(
                 (bounds.Minimum.X + bounds.Maximum.X + 1) * 0.5f,
                 (bounds.Minimum.Y + bounds.Maximum.Y + 1) * 0.5f,
-                (bounds.Minimum.Z + bounds.Maximum.Z + 1) * 0.5f);
+                (bounds.Minimum.Z + bounds.Maximum.Z + 1) * 0.5f)
+                * cellSize;
             AppendLocalBox(center, size);
         }
 

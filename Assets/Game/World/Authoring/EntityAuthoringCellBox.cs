@@ -26,8 +26,11 @@ namespace MiniCivilization.World.Authoring
         private EntityAuthoringSystem authoringSystem;
 
         public int TerrainHeight => terrainHeight;
+        public float CellSize => authoringSystem != null
+            ? authoringSystem.CellSize
+            : 1f;
         public float TerrainSurfaceHeight =>
-            terrainHeight * WorldGrid.HeightStep;
+            terrainHeight * (CellSize / WorldGrid.HeightStepsPerCell);
         public Color WireColor => wireColor;
         public Color TerrainColor => terrainColor;
         public Vector3Int LocalOffset => localOffset;

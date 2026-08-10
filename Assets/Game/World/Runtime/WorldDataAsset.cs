@@ -11,16 +11,10 @@ namespace MiniCivilization.World.Runtime
         menuName = "Mini Civilization/World Data")]
     public sealed class WorldDataAsset : ScriptableObject
     {
-        private const int CurrentPreparedMeshSchema = 2;
+        private const int CurrentPreparedMeshSchema = 3;
 
         [SerializeField, HideInInspector] private byte[] serializedWorld =
             Array.Empty<byte>();
-        [SerializeField, HideInInspector] private int seed;
-        [SerializeField, HideInInspector] private int worldSize;
-        [SerializeField, HideInInspector] private int worldHeight;
-        [SerializeField, HideInInspector] private int chunkSizeX;
-        [SerializeField, HideInInspector] private int chunkSizeY;
-        [SerializeField, HideInInspector] private int chunkSizeZ;
         [SerializeField, HideInInspector] private bool hasPreparedRenderCache;
         [SerializeField, HideInInspector] private int preparedPatchSize;
         [SerializeField, HideInInspector] private int preparedPatchCount;
@@ -31,12 +25,13 @@ namespace MiniCivilization.World.Runtime
 
         public bool HasData => runtimeData != null
             || (serializedWorld != null && serializedWorld.Length > 0);
-        public int Seed => runtimeData?.Seed ?? seed;
-        public int WorldSize => runtimeData?.Size ?? worldSize;
-        public int WorldHeight => runtimeData?.Height ?? worldHeight;
-        public int ChunkSizeX => runtimeData?.ChunkSizeX ?? chunkSizeX;
-        public int ChunkSizeY => runtimeData?.ChunkSizeY ?? chunkSizeY;
-        public int ChunkSizeZ => runtimeData?.ChunkSizeZ ?? chunkSizeZ;
+        public int Seed => HasData ? Data.Seed : 0;
+        public int WorldSize => HasData ? Data.Size : 0;
+        public int WorldHeight => HasData ? Data.Height : 0;
+        public float CellSize => HasData ? Data.CellSize : 0f;
+        public int ChunkSizeX => HasData ? Data.ChunkSizeX : 0;
+        public int ChunkSizeY => HasData ? Data.ChunkSizeY : 0;
+        public int ChunkSizeZ => HasData ? Data.ChunkSizeZ : 0;
         public int SerializedByteCount => serializedWorld?.Length ?? 0;
         public bool HasPreparedRenderCache => hasPreparedRenderCache
             && preparedMeshSchema == CurrentPreparedMeshSchema;
@@ -57,7 +52,6 @@ namespace MiniCivilization.World.Runtime
                     }
 
                     runtimeData = WorldSaveCodec.FromBytes(serializedWorld);
-                    UpdateMetadata(runtimeData);
                 }
 
                 return runtimeData;
@@ -67,7 +61,6 @@ namespace MiniCivilization.World.Runtime
         public void Initialize(WorldData world, bool captureSerializedData = true)
         {
             runtimeData = world ?? throw new ArgumentNullException(nameof(world));
-            UpdateMetadata(world);
             if (captureSerializedData)
             {
                 CaptureSerializedData();
@@ -85,7 +78,6 @@ namespace MiniCivilization.World.Runtime
 
             serializedWorld = (byte[])bytes.Clone();
             runtimeData = WorldSaveCodec.FromBytes(serializedWorld);
-            UpdateMetadata(runtimeData);
             ClearPreparedRenderCache();
         }
 
@@ -97,7 +89,6 @@ namespace MiniCivilization.World.Runtime
         public void CaptureSerializedData()
         {
             serializedWorld = WorldSaveCodec.ToBytes(Data);
-            UpdateMetadata(runtimeData);
         }
 
         public WorldDataAsset CreateRuntimeWorkingCopy()
@@ -148,14 +139,5 @@ namespace MiniCivilization.World.Runtime
             preparedMeshes.Clear();
         }
 
-        private void UpdateMetadata(WorldData world)
-        {
-            seed = world.Seed;
-            worldSize = world.Size;
-            worldHeight = world.Height;
-            chunkSizeX = world.ChunkSizeX;
-            chunkSizeY = world.ChunkSizeY;
-            chunkSizeZ = world.ChunkSizeZ;
-        }
     }
 }

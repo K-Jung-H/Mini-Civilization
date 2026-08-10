@@ -95,9 +95,13 @@ namespace MiniCivilization.World.Runtime
             for (var index = 0; index < tickEntities.Count; index++)
             {
                 var entity = tickEntities[index];
-                var previousRenderState = entity.RenderStateKey;
+                var previousActivity = entity.Activity;
+                var previousPhase = entity.ActivityPhase;
+                var previousTarget = entity.InteractionTargetId;
                 entity.Tick(this, deltaTime);
-                if (previousRenderState != entity.RenderStateKey
+                if ((previousActivity != entity.Activity
+                        || previousPhase != entity.ActivityPhase
+                        || previousTarget != entity.InteractionTargetId)
                     && entitiesById.TryGetValue(entity.Id, out var current)
                     && ReferenceEquals(current, entity))
                 {

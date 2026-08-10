@@ -5,18 +5,13 @@ namespace MiniCivilization.World.Entities.Nature
 {
     public sealed class TreeEntity : global::MiniCivilization.World.Entities.NatureEntity
     {
-        private enum State : byte
-        {
-            Idle
-        }
-
-        private State currentState = State.Idle;
+        private static readonly EntityActivityId IdleActivity = new("Idle");
 
         public TreeEntity(EntityData data) : base(data)
         {
         }
 
-        public override int RenderStateKey => (int)currentState;
+        public override EntityActivityId Activity => IdleActivity;
         internal override bool RequiresTick => false;
 
         internal override void Tick(

@@ -5,7 +5,6 @@ namespace MiniCivilization.World.Domain
     public static class WorldGrid
     {
         public const int HeightStepsPerCell = 5;
-        public const float HeightStep = 0.2f;
 
     }
 

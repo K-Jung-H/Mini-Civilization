@@ -7,24 +7,25 @@ namespace MiniCivilization.World.Generation
     [CreateAssetMenu(fileName = "WorldGenerationSettings", menuName = "Mini Civilization/World Generation Settings")]
     public sealed class WorldGenerationSettings : ScriptableObject
     {
-        [Header("월드 크기")]
-        [Tooltip("월드의 X/Z 방향 길이입니다. 전체 수평 타일 수는 World Size × World Size입니다.")]
-        [InspectorName("월드 크기")]
-        [SerializeField, Min(8)] private int worldSize = 64;
-        [Tooltip("월드의 Y 방향 Cell 층 수입니다. 각 Cell 높이는 양자화된 세부 단계로 나뉩니다.")]
-        [InspectorName("월드 높이")]
-        [SerializeField, Min(4)] private int worldHeight = 16;
-
-        [Header("청크 및 렌더링")]
-        [Tooltip("청크 하나가 담당하는 X/Z 방향 Cell 수입니다. World Size를 나누어떨어지게 설정해야 합니다.")]
-        [InspectorName("청크 크기")]
-        [SerializeField, Min(4)] private int chunkSizeXZ = 16;
-        [Tooltip("청크 하나가 담당하는 Y 방향 Cell 층 수입니다. World Height를 나누어떨어지게 설정해야 합니다.")]
-        [InspectorName("청크 높이")]
-        [SerializeField, Min(1)] private int chunkHeight = 8;
-        [Tooltip("하나의 지형 메시로 묶는 X/Z Cell 크기입니다. 논리 청크의 배수이면서 World Size를 나누어야 합니다.")]
-        [InspectorName("메시 영역 크기")]
-        [SerializeField, Min(4)] private int renderPatchSizeXZ = 32;
+        [Header("월드 구조")]
+        [Tooltip("Cell 한 변의 월드 단위 크기입니다. Cell은 항상 정육면체입니다.")]
+        [InspectorName("Cell 크기")]
+        [SerializeField, Min(0.01f)] private float cellSize = 10f;
+        [Tooltip("논리 Chunk 하나의 X/Z 방향 Cell 수입니다.")]
+        [InspectorName("Chunk XZ Cell 수")]
+        [SerializeField, Min(1)] private int chunkCellCountXZ = 16;
+        [Tooltip("논리 Chunk 하나의 Y 방향 Cell 수입니다.")]
+        [InspectorName("Chunk Y Cell 수")]
+        [SerializeField, Min(1)] private int chunkCellCountY = 8;
+        [Tooltip("월드 X/Z 방향의 논리 Chunk 수입니다.")]
+        [InspectorName("월드 XZ Chunk 수")]
+        [SerializeField, Min(1)] private int worldChunkCountXZ = 4;
+        [Tooltip("월드 Y 방향의 논리 Chunk 수입니다.")]
+        [InspectorName("월드 Y Chunk 수")]
+        [SerializeField, Min(1)] private int worldChunkCountY = 2;
+        [Tooltip("렌더 Patch 한 변에 포함되는 논리 Chunk 수입니다.")]
+        [InspectorName("Patch당 Chunk 수")]
+        [SerializeField, Min(1)] private int renderChunksPerPatch = 2;
         [Header("기본 지형")]
         [Tooltip("지형 노이즈의 좌표 배율입니다. 값이 클수록 지형 변화가 더 짧은 간격으로 나타납니다.")]
         [InspectorName("지형 크기")]
@@ -131,11 +132,18 @@ namespace MiniCivilization.World.Generation
         [InspectorName("물 영향 거리")]
         [SerializeField, Range(1, 12)] private int waterMoistureRadius = 6;
 
-        public int WorldSize => worldSize;
-        public int WorldHeight => worldHeight;
-        public int ChunkSizeXZ => chunkSizeXZ;
-        public int ChunkHeight => chunkHeight;
-        public int RenderPatchSizeXZ => renderPatchSizeXZ;
+        public float CellSize => cellSize;
+        public float HeightStep => cellSize / WorldGrid.HeightStepsPerCell;
+        public int ChunkCellCountXZ => chunkCellCountXZ;
+        public int ChunkCellCountY => chunkCellCountY;
+        public int WorldChunkCountXZ => worldChunkCountXZ;
+        public int WorldChunkCountY => worldChunkCountY;
+        public int RenderChunksPerPatch => renderChunksPerPatch;
+        public int WorldSize => checked(chunkCellCountXZ * worldChunkCountXZ);
+        public int WorldHeight => checked(chunkCellCountY * worldChunkCountY);
+        public int ChunkSizeXZ => chunkCellCountXZ;
+        public int ChunkHeight => chunkCellCountY;
+        public int RenderPatchSizeXZ => checked(chunkCellCountXZ * renderChunksPerPatch);
         public float TerrainScale => terrainScale;
         public int TerrainLayers => terrainLayers;
         public float TerrainSpacing => terrainSpacing;
@@ -172,53 +180,87 @@ namespace MiniCivilization.World.Generation
         public float SnowTemperatureThreshold => snowTemperatureThreshold;
         public int WaterMoistureRadius => waterMoistureRadius;
 
+        public WorldSettingsData CreateData(int seed) => new(
+            seed,
+            CellSize,
+            ChunkCellCountXZ,
+            ChunkCellCountY,
+            WorldChunkCountXZ,
+            WorldChunkCountY,
+            RenderChunksPerPatch,
+            TerrainScale,
+            TerrainLayers,
+            TerrainSpacing,
+            TerrainDetail,
+            BaseHeightUnits,
+            HeightVariationUnits,
+            EdgeLowering,
+            MountainScale,
+            MountainHeightUnits,
+            MountainCoverage,
+            MountainSteepness,
+            SeaLevelUnits,
+            RiverCount,
+            RiverDepthCells,
+            MaximumRiverWidthCells,
+            MaximumRiverDepthCells,
+            LakeCount,
+            MinimumInlandLakeDistance,
+            MinimumInlandLakeArea,
+            MinimumInlandLakeDepthSteps,
+            PondMaximumArea,
+            WaterFlowRules,
+            DesertMoistureThreshold,
+            WetlandMoistureThreshold,
+            SnowTemperatureThreshold,
+            WaterMoistureRadius);
+
         public void ConfigureDimensions(
             int size,
             int height,
             int horizontalChunkSize,
             int verticalChunkSize)
         {
-            worldSize = size;
-            worldHeight = height;
-            chunkSizeXZ = horizontalChunkSize;
-            chunkHeight = verticalChunkSize;
-            renderPatchSizeXZ = Math.Min(size, horizontalChunkSize * 2);
-            if (size % renderPatchSizeXZ != 0)
+            if (size <= 0 || height <= 0
+                || horizontalChunkSize <= 0 || verticalChunkSize <= 0
+                || size % horizontalChunkSize != 0
+                || height % verticalChunkSize != 0)
             {
-                renderPatchSizeXZ = horizontalChunkSize;
+                throw new ArgumentException(
+                    "World dimensions must be positive and divisible by their Chunk Cell counts.");
             }
+
+            chunkCellCountXZ = horizontalChunkSize;
+            chunkCellCountY = verticalChunkSize;
+            worldChunkCountXZ = Math.Max(1, size / horizontalChunkSize);
+            worldChunkCountY = Math.Max(1, height / verticalChunkSize);
+            renderChunksPerPatch = worldChunkCountXZ % 2 == 0 ? 2 : 1;
             OnValidate();
         }
 
         public bool TryValidate(out string error)
         {
-            if (worldSize <= 0 || worldHeight <= 0)
+            if (!float.IsFinite(cellSize) || cellSize <= 0f)
             {
-                error = "World dimensions must be positive.";
+                error = "Cell size must be finite and positive.";
                 return false;
             }
 
-            if (chunkSizeXZ <= 0 || chunkHeight <= 0)
+            if (chunkCellCountXZ <= 0 || chunkCellCountY <= 0
+                || worldChunkCountXZ <= 0 || worldChunkCountY <= 0)
             {
-                error = "Chunk dimensions must be positive.";
+                error = "Chunk Cell counts and world chunk counts must be positive.";
                 return false;
             }
 
-            if (worldSize % chunkSizeXZ != 0 || worldHeight % chunkHeight != 0)
+            if (renderChunksPerPatch <= 0
+                || worldChunkCountXZ % renderChunksPerPatch != 0)
             {
-                error = "World dimensions must be divisible by chunk dimensions.";
+                error = "Render chunks per patch must divide the horizontal world chunk count.";
                 return false;
             }
 
-            if (renderPatchSizeXZ < chunkSizeXZ
-                || renderPatchSizeXZ % chunkSizeXZ != 0
-                || worldSize % renderPatchSizeXZ != 0)
-            {
-                error = "Render patch size must be a logical chunk multiple and divide the world size.";
-                return false;
-            }
-
-            if (SeaLevelUnits <= 0 || SeaLevelUnits >= worldHeight * WorldGrid.HeightStepsPerCell)
+            if (SeaLevelUnits <= 0 || SeaLevelUnits >= WorldHeight * WorldGrid.HeightStepsPerCell)
             {
                 error = "Sea level must be inside the vertical world range.";
                 return false;
@@ -230,15 +272,19 @@ namespace MiniCivilization.World.Generation
 
         private void OnValidate()
         {
-            worldSize = Math.Max(8, worldSize);
-            worldHeight = Math.Max(4, worldHeight);
-            chunkSizeXZ = Math.Clamp(chunkSizeXZ, 1, worldSize);
-            chunkHeight = Math.Clamp(chunkHeight, 1, worldHeight);
-            renderPatchSizeXZ = Math.Clamp(renderPatchSizeXZ, chunkSizeXZ, worldSize);
-            baseHeightCells = Math.Clamp(baseHeightCells, 1, worldHeight - 1);
-            heightVariationCells = Math.Clamp(heightVariationCells, 1, worldHeight - 1);
-            mountainHeightCells = Math.Clamp(mountainHeightCells, 0, worldHeight - 1);
-            seaLevelCell = Math.Clamp(seaLevelCell, 0, worldHeight - 1);
+            cellSize = Mathf.Max(0.01f, cellSize);
+            chunkCellCountXZ = Math.Max(1, chunkCellCountXZ);
+            chunkCellCountY = Math.Max(1, chunkCellCountY);
+            worldChunkCountXZ = Math.Max(1, worldChunkCountXZ);
+            worldChunkCountY = Math.Max(1, worldChunkCountY);
+            renderChunksPerPatch = Math.Clamp(
+                renderChunksPerPatch,
+                1,
+                worldChunkCountXZ);
+            baseHeightCells = Math.Clamp(baseHeightCells, 1, WorldHeight - 1);
+            heightVariationCells = Math.Clamp(heightVariationCells, 1, WorldHeight - 1);
+            mountainHeightCells = Math.Clamp(mountainHeightCells, 0, WorldHeight - 1);
+            seaLevelCell = Math.Clamp(seaLevelCell, 0, WorldHeight - 1);
             minimumInlandLakeDistance = Math.Max(
                 1,
                 minimumInlandLakeDistance);

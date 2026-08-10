@@ -9,70 +9,41 @@ namespace MiniCivilization.World.Generation
     {
         private WorldBuildInput(WorldGenerationSettings settings, int seed)
         {
-            Seed = seed;
-            WorldSize = settings.WorldSize;
-            WorldHeight = settings.WorldHeight;
-            ChunkSizeXZ = settings.ChunkSizeXZ;
-            ChunkHeight = settings.ChunkHeight;
-            TerrainScale = settings.TerrainScale;
-            TerrainLayers = settings.TerrainLayers;
-            TerrainSpacing = settings.TerrainSpacing;
-            TerrainDetail = settings.TerrainDetail;
-            BaseHeightUnits = settings.BaseHeightUnits;
-            HeightVariationUnits = settings.HeightVariationUnits;
-            EdgeLowering = settings.EdgeLowering;
-            MountainScale = settings.MountainScale;
-            MountainHeightUnits = settings.MountainHeightUnits;
-            MountainCoverage = settings.MountainCoverage;
-            MountainSteepness = settings.MountainSteepness;
-            SeaLevelUnits = settings.SeaLevelUnits;
-            RiverCount = settings.RiverCount;
-            RiverDepthCells = settings.RiverDepthCells;
-            MaximumRiverWidthCells = settings.MaximumRiverWidthCells;
-            MaximumRiverDepthCells = settings.MaximumRiverDepthCells;
-            LakeCount = settings.LakeCount;
-            MinimumInlandLakeDistance = settings.MinimumInlandLakeDistance;
-            MinimumInlandLakeArea = settings.MinimumInlandLakeArea;
-            MinimumInlandLakeDepthSteps = settings.MinimumInlandLakeDepthSteps;
-            PondMaximumArea = settings.PondMaximumArea;
-            WaterFlowRules = settings.WaterFlowRules;
-            DesertMoistureThreshold = settings.DesertMoistureThreshold;
-            WetlandMoistureThreshold = settings.WetlandMoistureThreshold;
-            SnowTemperatureThreshold = settings.SnowTemperatureThreshold;
-            WaterMoistureRadius = settings.WaterMoistureRadius;
+            Settings = settings.CreateData(seed);
         }
 
-        public int Seed { get; }
-        public int WorldSize { get; }
-        public int WorldHeight { get; }
-        public int ChunkSizeXZ { get; }
-        public int ChunkHeight { get; }
-        public float TerrainScale { get; }
-        public int TerrainLayers { get; }
-        public float TerrainSpacing { get; }
-        public float TerrainDetail { get; }
-        public int BaseHeightUnits { get; }
-        public int HeightVariationUnits { get; }
-        public float EdgeLowering { get; }
-        public float MountainScale { get; }
-        public int MountainHeightUnits { get; }
-        public float MountainCoverage { get; }
-        public float MountainSteepness { get; }
-        public int SeaLevelUnits { get; }
-        public int RiverCount { get; }
-        public int RiverDepthCells { get; }
-        public int MaximumRiverWidthCells { get; }
-        public int MaximumRiverDepthCells { get; }
-        public int LakeCount { get; }
-        public int MinimumInlandLakeDistance { get; }
-        public int MinimumInlandLakeArea { get; }
-        public int MinimumInlandLakeDepthSteps { get; }
-        public int PondMaximumArea { get; }
-        public WaterFlowRules WaterFlowRules { get; }
-        public float DesertMoistureThreshold { get; }
-        public float WetlandMoistureThreshold { get; }
-        public float SnowTemperatureThreshold { get; }
-        public int WaterMoistureRadius { get; }
+        public WorldSettingsData Settings { get; }
+        public int Seed => Settings.Seed;
+        public int WorldSize => Settings.WorldSize;
+        public int WorldHeight => Settings.WorldHeight;
+        public int ChunkSizeXZ => Settings.ChunkCellCountXZ;
+        public int ChunkHeight => Settings.ChunkCellCountY;
+        public float TerrainScale => Settings.TerrainScale;
+        public int TerrainLayers => Settings.TerrainLayers;
+        public float TerrainSpacing => Settings.TerrainSpacing;
+        public float TerrainDetail => Settings.TerrainDetail;
+        public int BaseHeightUnits => Settings.BaseHeightUnits;
+        public int HeightVariationUnits => Settings.HeightVariationUnits;
+        public float EdgeLowering => Settings.EdgeLowering;
+        public float MountainScale => Settings.MountainScale;
+        public int MountainHeightUnits => Settings.MountainHeightUnits;
+        public float MountainCoverage => Settings.MountainCoverage;
+        public float MountainSteepness => Settings.MountainSteepness;
+        public int SeaLevelUnits => Settings.SeaLevelUnits;
+        public int RiverCount => Settings.RiverCount;
+        public int RiverDepthCells => Settings.RiverDepthCells;
+        public int MaximumRiverWidthCells => Settings.MaximumRiverWidthCells;
+        public int MaximumRiverDepthCells => Settings.MaximumRiverDepthCells;
+        public int LakeCount => Settings.LakeCount;
+        public int MinimumInlandLakeDistance => Settings.MinimumInlandLakeDistance;
+        public int MinimumInlandLakeArea => Settings.MinimumInlandLakeArea;
+        public int MinimumInlandLakeDepthSteps => Settings.MinimumInlandLakeDepthSteps;
+        public int PondMaximumArea => Settings.PondMaximumArea;
+        public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
+        public float DesertMoistureThreshold => Settings.DesertMoistureThreshold;
+        public float WetlandMoistureThreshold => Settings.WetlandMoistureThreshold;
+        public float SnowTemperatureThreshold => Settings.SnowTemperatureThreshold;
+        public int WaterMoistureRadius => Settings.WaterMoistureRadius;
 
         public static WorldBuildInput Create(WorldGenerationSettings settings, int seed)
         {
@@ -123,15 +94,7 @@ namespace MiniCivilization.World.Generation
         {
             if (build == null) throw new ArgumentNullException(nameof(build));
             var input = build.Input;
-            var world = new WorldData(
-                build.Size,
-                build.Height,
-                input.ChunkSizeXZ,
-                input.ChunkHeight,
-                input.ChunkSizeXZ,
-                build.Seed);
-            world.ConfigureWaterFlow(build.WaterFlowRules);
-            world.ConfigureWaterTypes(build.PondMaximumArea);
+            var world = new WorldData(input.Settings);
 
             for (var z = 0; z < build.Size; z++)
             for (var x = 0; x < build.Size; x++)

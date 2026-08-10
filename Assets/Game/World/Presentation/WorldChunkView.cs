@@ -41,9 +41,9 @@ namespace MiniCivilization.World.Presentation
             this.patchSize = patchSize;
             name = $"World Chunk [{patchX}, {patchZ}]";
             transform.localPosition = new Vector3(
-                patchX * patchSize,
+                patchX * patchSize * world.CellSize,
                 0f,
-                patchZ * patchSize);
+                patchZ * patchSize * world.CellSize);
             transform.localRotation = Quaternion.identity;
             transform.localScale = Vector3.one;
 

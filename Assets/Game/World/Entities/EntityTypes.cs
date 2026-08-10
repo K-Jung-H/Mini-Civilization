@@ -8,103 +8,51 @@ namespace MiniCivilization.World.Entities
     public enum EntityMoveType : byte
     {
         Walk,
-        Jump
+        HeightTransition,
+        Swim
     }
 
-    public readonly struct WeightedState<TState>
-        where TState : struct, Enum
+    public enum EntityActivityPhase : byte
     {
-        public TState State { get; }
-        public int Weight { get; }
-
-        public WeightedState(TState state, int weight)
-        {
-            if (weight <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(weight));
-            }
-
-            State = state;
-            Weight = weight;
-        }
+        None,
+        Approach,
+        Execute,
+        Recover
     }
 
-    public sealed class AnimalMovementRules
+    public readonly struct EntityActivityId : IEquatable<EntityActivityId>
     {
-        private static readonly CellOffset[] CardinalDirections =
+        public static readonly EntityActivityId None = default;
+
+        public string Name { get; }
+
+        public EntityActivityId(string name)
         {
-            new(1, 0, 0),
-            new(-1, 0, 0),
-            new(0, 0, 1),
-            new(0, 0, -1)
-        };
-
-        private readonly CellOffset[] neighborOffsets;
-
-        public IReadOnlyList<CellOffset> NeighborOffsets => neighborOffsets;
-        public int MaxCellYDifference { get; }
-
-        public AnimalMovementRules(
-            IReadOnlyList<CellOffset> neighborOffsets,
-            int maxCellYDifference)
-        {
-            if (neighborOffsets == null || neighborOffsets.Count == 0)
+            if (string.IsNullOrWhiteSpace(name))
             {
                 throw new ArgumentException(
-                    "Animal movement requires at least one neighbor offset.",
-                    nameof(neighborOffsets));
+                    "Entity activity name cannot be empty.",
+                    nameof(name));
             }
 
-            if (maxCellYDifference < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(maxCellYDifference));
-            }
-
-            this.neighborOffsets = new CellOffset[neighborOffsets.Count];
-            var uniqueOffsets = new HashSet<CellOffset>();
-            for (var index = 0; index < neighborOffsets.Count; index++)
-            {
-                var offset = neighborOffsets[index];
-                if (offset == default || !uniqueOffsets.Add(offset))
-                {
-                    throw new ArgumentException(
-                        "Animal neighbor offsets must be unique and non-zero.",
-                        nameof(neighborOffsets));
-                }
-
-                this.neighborOffsets[index] = offset;
-            }
-
-            MaxCellYDifference = maxCellYDifference;
+            Name = name;
         }
 
-        public static AnimalMovementRules Cardinal4(
-            int maxCellYDifference) =>
-            new(CardinalDirections, maxCellYDifference);
+        public bool IsValid => !string.IsNullOrEmpty(Name);
+        public bool Equals(EntityActivityId other) =>
+            string.Equals(Name, other.Name, StringComparison.Ordinal);
+        public override bool Equals(object obj) =>
+            obj is EntityActivityId other && Equals(other);
+        public override int GetHashCode() =>
+            Name == null ? 0 : StringComparer.Ordinal.GetHashCode(Name);
+        public override string ToString() => Name ?? "None";
 
-        internal bool Allows(
-            CellCoordinate current,
-            CellCoordinate next)
-        {
-            if (Math.Abs(next.Y - current.Y) > MaxCellYDifference)
-            {
-                return false;
-            }
-
-            var differenceX = next.X - current.X;
-            var differenceZ = next.Z - current.Z;
-            for (var index = 0; index < neighborOffsets.Length; index++)
-            {
-                var offset = neighborOffsets[index];
-                if (offset.X == differenceX && offset.Z == differenceZ)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        public static bool operator ==(
+            EntityActivityId left,
+            EntityActivityId right) => left.Equals(right);
+        public static bool operator !=(
+            EntityActivityId left,
+            EntityActivityId right) => !left.Equals(right);
     }
 
     public abstract class Entity
@@ -119,7 +67,10 @@ namespace MiniCivilization.World.Entities
         public EntityTypeKey TypeKey => Data.TypeKey;
         public CellCoordinate AnchorCell => Data.AnchorCell;
         public EntityDirection Direction => Data.Direction;
-        public abstract int RenderStateKey { get; }
+        public abstract EntityActivityId Activity { get; }
+        public virtual EntityActivityPhase ActivityPhase =>
+            EntityActivityPhase.None;
+        public virtual EntityId InteractionTargetId => EntityId.None;
         internal abstract bool RequiresTick { get; }
 
         internal abstract void Tick(
@@ -155,15 +106,80 @@ namespace MiniCivilization.World.Entities
 
         protected bool TryBeginMove(
             EntityRuntime runtime,
-            CellCoordinate destination,
-            EntityMoveType moveType = EntityMoveType.Walk)
+            CellCoordinate destination)
         {
             if (runtime == null)
             {
                 throw new ArgumentNullException(nameof(runtime));
             }
 
-            return runtime.TryBeginMove(this, destination, moveType);
+            return runtime.TryBeginMove(
+                this,
+                destination,
+                ResolveMoveType(runtime, AnchorCell, destination));
+        }
+
+        protected virtual EntityMoveType ResolveMoveType(
+            EntityRuntime runtime,
+            CellCoordinate current,
+            CellCoordinate next)
+        {
+            if (IsWaterSurface(runtime.WorldRuntime, current)
+                || IsWaterSurface(runtime.WorldRuntime, next))
+            {
+                return EntityMoveType.Swim;
+            }
+
+            var currentHeight = ResolveMovementHeight(
+                runtime.WorldRuntime,
+                current);
+            var nextHeight = ResolveMovementHeight(
+                runtime.WorldRuntime,
+                next);
+            return nextHeight == currentHeight
+                ? EntityMoveType.Walk
+                : EntityMoveType.HeightTransition;
+        }
+
+        protected static bool IsWaterSurface(
+            WorldRuntime runtime,
+            CellCoordinate cell)
+        {
+            var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                cell.X,
+                cell.Z);
+            return surface.HasWater && surface.WaterCellY == cell.Y;
+        }
+
+        protected virtual float ResolveMovementHeight(
+            WorldRuntime runtime,
+            CellCoordinate cell)
+        {
+            var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                cell.X,
+                cell.Z);
+            if (surface.HasWater && surface.WaterCellY == cell.Y)
+            {
+                return surface.WaterHeight * runtime.Data.HeightStep;
+            }
+
+            if (surface.HasGround && surface.GroundCellY == cell.Y)
+            {
+                return surface.GroundHeight * runtime.Data.HeightStep;
+            }
+
+            if (!runtime.Data.TryGetCell(
+                    cell.X,
+                    cell.Y,
+                    cell.Z,
+                    out var data))
+            {
+                throw new InvalidOperationException(
+                    $"Entity movement Cell {cell} is outside the world.");
+            }
+
+            return (cell.Y * WorldGrid.HeightStepsPerCell
+                + data.Terrain.SolidHeight) * runtime.Data.HeightStep;
         }
 
         protected bool AdvanceMove(
@@ -251,13 +267,15 @@ namespace MiniCivilization.World.Entities
 
     public abstract class AnimalEntity : DynamicEntity
     {
-        private static readonly AnimalMovementRules DefaultMovementRules =
-            AnimalMovementRules.Cardinal4(1);
-
         private uint randomState;
+        private readonly EntityCellMovementRules movementRules;
 
-        protected AnimalEntity(EntityData data) : base(data)
+        protected AnimalEntity(
+            EntityData data,
+            EntityCellMovementRules movementRules) : base(data)
         {
+            this.movementRules = movementRules
+                ?? throw new ArgumentNullException(nameof(movementRules));
             var seed = data.Id.Value
                 ^ ((ulong)data.TypeKey.Value << 32)
                 ^ ((ulong)data.TypeKey.Category << 56);
@@ -280,10 +298,41 @@ namespace MiniCivilization.World.Entities
             CellCoordinate currentCell,
             CellCoordinate nextCell)
         {
-            var rules = ResolveMovementRules()
-                ?? throw new InvalidOperationException(
-                    $"Animal {Id} does not define movement rules.");
-            return rules.Allows(currentCell, nextCell)
+            var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                nextCell.X,
+                nextCell.Z);
+            var entersWater = surface.HasWater
+                && surface.WaterCellY == nextCell.Y;
+            if (surface.HasWater && !movementRules.CanEnterWater)
+            {
+                return false;
+            }
+
+            if (surface.HasWater
+                && movementRules.CanEnterWater
+                && !entersWater)
+            {
+                return false;
+            }
+
+            if (!entersWater
+                && (!surface.HasGround
+                    || surface.GroundCellY != nextCell.Y))
+            {
+                return false;
+            }
+
+            var currentHeight = ResolveMovementHeight(
+                runtime,
+                currentCell);
+            var nextHeight = (entersWater
+                ? surface.WaterHeight
+                : surface.GroundHeight) * runtime.Data.HeightStep;
+            return movementRules.Allows(
+                    currentCell,
+                    currentHeight,
+                    nextCell,
+                    nextHeight)
                 && CanEnterAdditional(
                     runtime,
                     currentCell,
@@ -294,8 +343,7 @@ namespace MiniCivilization.World.Entities
             EntityRuntime runtime,
             float deltaTime);
 
-        protected virtual AnimalMovementRules ResolveMovementRules() =>
-            DefaultMovementRules;
+        protected EntityCellMovementRules MovementRules => movementRules;
 
         protected virtual bool CanEnterAdditional(
             WorldRuntime runtime,
@@ -311,15 +359,14 @@ namespace MiniCivilization.World.Entities
                 throw new ArgumentNullException(nameof(runtime));
             }
 
-            var rules = ResolveMovementRules()
-                ?? throw new InvalidOperationException(
-                    $"Animal {Id} does not define movement rules.");
             var worldRuntime = runtime.WorldRuntime;
             var selected = default(CellCoordinate);
             var candidateCount = 0;
-            for (var index = 0; index < rules.NeighborOffsets.Count; index++)
+            for (var index = 0;
+                 index < movementRules.NeighborOffsets.Count;
+                 index++)
             {
-                var offset = rules.NeighborOffsets[index];
+                var offset = movementRules.NeighborOffsets[index];
                 var x = AnchorCell.X + offset.X;
                 var z = AnchorCell.Z + offset.Z;
                 if (!worldRuntime.Data.ContainsColumn(x, z))
@@ -328,14 +375,17 @@ namespace MiniCivilization.World.Entities
                 }
 
                 var surface = worldRuntime.SurfaceCache.GetSurfaceHeight(x, z);
-                if (!surface.HasGround)
+                if (!surface.HasGround
+                    || surface.HasWater && !movementRules.CanEnterWater)
                 {
                     continue;
                 }
 
                 var candidate = new CellCoordinate(
                     x,
-                    surface.GroundCellY,
+                    surface.HasWater
+                        ? surface.WaterCellY
+                        : surface.GroundCellY,
                     z);
                 if (!runtime.CanEnter(this, AnchorCell, candidate))
                 {
@@ -353,33 +403,42 @@ namespace MiniCivilization.World.Entities
             return candidateCount > 0;
         }
 
-        protected TState SelectWeightedState<TState>(
-            IReadOnlyList<WeightedState<TState>> states)
-            where TState : struct, Enum
+        protected int SelectWeightedIndex(IReadOnlyList<int> weights)
         {
-            if (states == null || states.Count == 0)
+            if (weights == null || weights.Count == 0)
             {
                 throw new ArgumentException(
                     "Animal state weights cannot be empty.",
-                    nameof(states));
+                    nameof(weights));
             }
 
             var totalWeight = 0;
-            for (var index = 0; index < states.Count; index++)
+            for (var index = 0; index < weights.Count; index++)
             {
-                totalWeight = checked(totalWeight + states[index].Weight);
+                if (weights[index] < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(weights));
+                }
+
+                totalWeight = checked(totalWeight + weights[index]);
+            }
+
+            if (totalWeight == 0)
+            {
+                throw new ArgumentException(
+                    "At least one animal state weight must be greater than zero.",
+                    nameof(weights));
             }
 
             var selectedWeight = NextRandom(totalWeight);
-            for (var index = 0; index < states.Count; index++)
+            for (var index = 0; index < weights.Count; index++)
             {
-                var state = states[index];
-                if (selectedWeight < state.Weight)
+                if (selectedWeight < weights[index])
                 {
-                    return state.State;
+                    return index;
                 }
 
-                selectedWeight -= state.Weight;
+                selectedWeight -= weights[index];
             }
 
             throw new InvalidOperationException(

@@ -5,46 +5,35 @@ namespace MiniCivilization.World.Entities.Animal
 {
     public sealed class DogEntity : global::MiniCivilization.World.Entities.AnimalEntity
     {
-        private const float DecisionIntervalSeconds = 1f;
-        private const float MoveDurationSeconds = 1f;
-
         private enum BehaviorState : byte
         {
             Idle,
             Move
         }
 
-        private enum RenderState : byte
-        {
-            IdleStill,
-            IdleCircle,
-            IdleWander,
-            Move
-        }
+        private static readonly EntityActivityId IdleActivity = new("Idle");
+        private static readonly EntityActivityId MoveActivity = new("Move");
 
-        private static readonly WeightedState<BehaviorState>[] StateWeights =
-        {
-            new(BehaviorState.Idle, 9),
-            new(BehaviorState.Move, 1)
-        };
-        private static readonly WeightedState<RenderState>[] IdleStateWeights =
-        {
-            new(RenderState.IdleStill, 1),
-            new(RenderState.IdleCircle, 1),
-            new(RenderState.IdleWander, 1)
-        };
-        private static readonly AnimalMovementRules MovementRules =
-            AnimalMovementRules.Cardinal4(1);
-
+        private readonly AnimalDecisionRules decisionRules;
         private BehaviorState currentState = BehaviorState.Idle;
-        private RenderState currentRenderState = RenderState.IdleStill;
         private float decisionElapsed;
 
-        public DogEntity(EntityData data) : base(data)
+        public DogEntity(
+            EntityData data,
+            EntityCellMovementRules movementRules,
+            AnimalDecisionRules decisionRules) : base(data, movementRules)
         {
+            this.decisionRules = decisionRules
+                ?? throw new System.ArgumentNullException(
+                    nameof(decisionRules));
         }
 
-        public override int RenderStateKey => (int)currentRenderState;
+        public override EntityActivityId Activity => currentState switch
+        {
+            BehaviorState.Idle => IdleActivity,
+            BehaviorState.Move => MoveActivity,
+            _ => throw new System.ArgumentOutOfRangeException()
+        };
 
         protected override void UpdateState(
             EntityRuntime runtime,
@@ -58,9 +47,10 @@ namespace MiniCivilization.World.Entities.Animal
                     return;
                 }
 
+                var moveDuration = MovementRules.GetDuration(MoveType);
                 if (AdvanceMove(
                         runtime,
-                        deltaTime / MoveDurationSeconds))
+                        deltaTime / moveDuration))
                 {
                     EnterIdle();
                     decisionElapsed = 0f;
@@ -70,13 +60,14 @@ namespace MiniCivilization.World.Entities.Animal
             }
 
             decisionElapsed += deltaTime;
-            if (decisionElapsed < DecisionIntervalSeconds)
+            if (decisionElapsed < decisionRules.DecisionInterval)
             {
                 return;
             }
 
-            decisionElapsed %= DecisionIntervalSeconds;
-            var selectedState = SelectWeightedState(StateWeights);
+            decisionElapsed %= decisionRules.DecisionInterval;
+            var selectedState = (BehaviorState)SelectWeightedIndex(
+                decisionRules.BehaviorWeights);
             if (selectedState != BehaviorState.Move)
             {
                 EnterIdle();
@@ -90,20 +81,15 @@ namespace MiniCivilization.World.Entities.Animal
             }
 
             currentState = BehaviorState.Move;
-            currentRenderState = RenderState.Move;
             if (!TryBeginMove(runtime, destination))
             {
                 EnterIdle();
             }
         }
 
-        protected override AnimalMovementRules ResolveMovementRules() =>
-            MovementRules;
-
         private void EnterIdle()
         {
             currentState = BehaviorState.Idle;
-            currentRenderState = SelectWeightedState(IdleStateWeights);
         }
     }
 }

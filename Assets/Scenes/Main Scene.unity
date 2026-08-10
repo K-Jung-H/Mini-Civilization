@@ -614,7 +614,6 @@ MonoBehaviour:
   terrainMaterial: {fileID: 2100000, guid: b6f6b194b8934c81a7e9b7e0ca000003, type: 2}
   waterMaterial: {fileID: 2100000, guid: b6f6b194b8934c81a7e9b7e0ca000004, type: 2}
   renderRoot: {fileID: 1900000011}
-  renderPatchSizeXZ: 8
   maxPatchRebuildsPerFrame: 2
 --- !u!114 &1900000005
 MonoBehaviour:

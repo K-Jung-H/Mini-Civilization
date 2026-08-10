@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using MiniCivilization.World.Generation;
 using UnityEngine;
 
 namespace MiniCivilization.World.Authoring
@@ -8,6 +9,9 @@ namespace MiniCivilization.World.Authoring
     {
         [SerializeField]
         private EntityAuthoringCellBox cellBoxPrefab;
+
+        [SerializeField]
+        private WorldGenerationSettings worldSettings;
 
         [SerializeField]
         private Vector3Int gridSize = Vector3Int.one;
@@ -21,6 +25,10 @@ namespace MiniCivilization.World.Authoring
         private List<EntityAuthoringCellBox> pooledCells = new();
 
         public EntityAuthoringCellBox CellBoxPrefab => cellBoxPrefab;
+        public WorldGenerationSettings WorldSettings => worldSettings;
+        public float CellSize => worldSettings != null
+            ? worldSettings.CellSize
+            : 1f;
         public Vector3Int GridSize => gridSize;
 
         internal EntityAuthoringCellBox PooledPrefab

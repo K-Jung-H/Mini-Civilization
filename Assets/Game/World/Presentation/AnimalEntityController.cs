@@ -15,6 +15,8 @@ namespace MiniCivilization.World.Presentation
     public sealed class AnimalEntityController : AnimatedEntityController
     {
         [SerializeField] private AnimalEntityType entityType;
+        [SerializeField] private EntityCellMovementProfile cellMovementProfile;
+        [SerializeField] private AnimalDecisionProfile decisionProfile;
 
         public override EntityTypeKey TypeKey => new(
             EntityCategory.Animal,
@@ -25,9 +27,19 @@ namespace MiniCivilization.World.Presentation
 
         public override Entity CreateStateMachine(EntityData data)
         {
+            if (cellMovementProfile == null || decisionProfile == null)
+            {
+                throw new InvalidOperationException(
+                    $"Animal Entity Controller '{name}' requires assigned "
+                    + "Cell Movement and Decision Profiles.");
+            }
+
             return entityType switch
             {
-                AnimalEntityType.Dog => new DogEntity(data),
+                AnimalEntityType.Dog => new DogEntity(
+                    data,
+                    cellMovementProfile.GetRuntimeRules(),
+                    decisionProfile.GetRuntimeRules()),
                 _ => throw new InvalidOperationException(
                     $"Unsupported Animal Entity type: {entityType}.")
             };

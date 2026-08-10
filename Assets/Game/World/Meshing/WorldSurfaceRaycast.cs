@@ -234,7 +234,7 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private static void RaycastSolidTop(
+        private void RaycastSolidTop(
             int x,
             int z,
             in SolidSurfaceProfile profile,
@@ -259,7 +259,7 @@ namespace MiniCivilization.World.Meshing
             RaycastSolidTopCorner(x, z, profile, 1f, 1f, ref accumulator);
         }
 
-        private static void RaycastSolidShoulder(
+        private void RaycastSolidShoulder(
             int x,
             int z,
             in SolidSurfaceProfile profile,
@@ -314,7 +314,7 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private static void RaycastSolidTopCorner(
+        private void RaycastSolidTopCorner(
             int x,
             int z,
             in SolidSurfaceProfile profile,
@@ -542,7 +542,7 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private static void RaycastWaterTop(
+        private void RaycastWaterTop(
             int x,
             int z,
             in WaterSurfaceProfile profile,
@@ -570,7 +570,7 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private static void RaycastWaterTopPatch(
+        private void RaycastWaterTopPatch(
             int x,
             int z,
             in WaterSurfaceProfile profile,
@@ -691,7 +691,7 @@ namespace MiniCivilization.World.Meshing
                 ResolveWaterNeighborCoverage(
                     x, y, z, directionX, directionZ, 1f));
 
-        private static void RaycastVerticalSegment(
+        private void RaycastVerticalSegment(
             int x,
             int z,
             int directionX,
@@ -726,7 +726,7 @@ namespace MiniCivilization.World.Meshing
                 type);
         }
 
-        private static void RaycastCornerClosure(
+        private void RaycastCornerClosure(
             int x,
             int z,
             int directionX,
@@ -827,15 +827,15 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private static Vector3 Point(
+        private Vector3 Point(
             int x,
             int z,
             float localX,
             float localZ,
             float heightUnits) =>
             new(
-                x + localX,
-                heightUnits * WorldGrid.HeightStep,
-                z + localZ);
+                (x + localX) * world.CellSize,
+                heightUnits * world.HeightStep,
+                (z + localZ) * world.CellSize);
     }
 }

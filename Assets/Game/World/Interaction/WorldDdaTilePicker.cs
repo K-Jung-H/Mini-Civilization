@@ -46,10 +46,14 @@ namespace MiniCivilization.World.Interaction
                 localOrigin,
                 localDirectionUnnormalized / directionScale);
             var maximumLocalDistance = maxDistance * directionScale;
+            var cellSize = world.CellSize;
             if (!TryIntersectBounds(
                     localRay,
                     Vector3.zero,
-                    new Vector3(world.Size, world.Height, world.Size),
+                    new Vector3(
+                        world.Size * cellSize,
+                        world.Height * cellSize,
+                        world.Size * cellSize),
                     out var boundsEntry,
                     out var boundsExit)
                 || boundsExit < 0f
@@ -64,14 +68,24 @@ namespace MiniCivilization.World.Interaction
                 Mathf.Min(
                     traversalEnd,
                     traversalStart + BoundaryEpsilon));
-            var x = Mathf.Clamp(Mathf.FloorToInt(startPoint.x), 0, world.Size - 1);
-            var y = Mathf.Clamp(Mathf.FloorToInt(startPoint.y), 0, world.Height - 1);
-            var z = Mathf.Clamp(Mathf.FloorToInt(startPoint.z), 0, world.Size - 1);
+            var x = Mathf.Clamp(
+                Mathf.FloorToInt(startPoint.x / cellSize),
+                0,
+                world.Size - 1);
+            var y = Mathf.Clamp(
+                Mathf.FloorToInt(startPoint.y / cellSize),
+                0,
+                world.Height - 1);
+            var z = Mathf.Clamp(
+                Mathf.FloorToInt(startPoint.z / cellSize),
+                0,
+                world.Size - 1);
 
             InitializeAxis(
                 localRay.origin.x,
                 localRay.direction.x,
                 x,
+                cellSize,
                 out var stepX,
                 out var nextX,
                 out var deltaX);
@@ -79,6 +93,7 @@ namespace MiniCivilization.World.Interaction
                 localRay.origin.y,
                 localRay.direction.y,
                 y,
+                cellSize,
                 out var stepY,
                 out var nextY,
                 out var deltaY);
@@ -86,6 +101,7 @@ namespace MiniCivilization.World.Interaction
                 localRay.origin.z,
                 localRay.direction.z,
                 z,
+                cellSize,
                 out var stepZ,
                 out var nextZ,
                 out var deltaZ);
@@ -163,6 +179,7 @@ namespace MiniCivilization.World.Interaction
             float origin,
             float direction,
             int cell,
+            float cellSize,
             out int step,
             out float nextBoundary,
             out float delta)
@@ -170,14 +187,14 @@ namespace MiniCivilization.World.Interaction
             if (direction > BoundaryEpsilon)
             {
                 step = 1;
-                nextBoundary = (cell + 1 - origin) / direction;
-                delta = 1f / direction;
+                nextBoundary = ((cell + 1) * cellSize - origin) / direction;
+                delta = cellSize / direction;
             }
             else if (direction < -BoundaryEpsilon)
             {
                 step = -1;
-                nextBoundary = (cell - origin) / direction;
-                delta = -1f / direction;
+                nextBoundary = (cell * cellSize - origin) / direction;
+                delta = -cellSize / direction;
             }
             else
             {

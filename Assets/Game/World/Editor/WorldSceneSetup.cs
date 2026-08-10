@@ -139,8 +139,7 @@ namespace MiniCivilization.World.Editor
                 catalog,
                 terrainMaterial,
                 waterMaterial,
-                renderRoot,
-                settings.RenderPatchSizeXZ);
+                renderRoot);
             entityRenderer.Configure(entityRoot);
             entityManager.Configure(entityCatalog, entityRenderer);
             saveController.Configure("Worlds", "default.mcw", true);
@@ -167,7 +166,7 @@ namespace MiniCivilization.World.Editor
                 manager,
                 selectionState,
                 editToolState,
-                settings.WorldSize * 4f);
+                settings.WorldSize * settings.CellSize * 4f);
             ConfigureDirectionalLight();
             EnsureSceneInBuildSettings();
 

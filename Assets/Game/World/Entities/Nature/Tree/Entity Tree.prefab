@@ -136,7 +136,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityController
   visualRoot: {fileID: 1252491562607919201}
-  animator: {fileID: 0}
   localMotionRoot: {fileID: 0}
-  renderProfile: {fileID: 0}
+  visualMotionProfile: {fileID: 0}
+  animator: {fileID: 0}
   entityType: 1

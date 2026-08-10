@@ -11,11 +11,13 @@ namespace MiniCivilization.World.Editor
     public sealed class EntityAuthoringSystemEditor : UnityEditor.Editor
     {
         private SerializedProperty cellBoxPrefab;
+        private SerializedProperty worldSettings;
         private SerializedProperty gridSize;
 
         private void OnEnable()
         {
             cellBoxPrefab = serializedObject.FindProperty("cellBoxPrefab");
+            worldSettings = serializedObject.FindProperty("worldSettings");
             gridSize = serializedObject.FindProperty("gridSize");
 
             Synchronize((EntityAuthoringSystem)target);
@@ -27,6 +29,7 @@ namespace MiniCivilization.World.Editor
 
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(cellBoxPrefab);
+            EditorGUILayout.PropertyField(worldSettings);
             EditorGUILayout.PropertyField(gridSize);
             var changed = EditorGUI.EndChangeCheck();
 
@@ -283,12 +286,13 @@ namespace MiniCivilization.World.Editor
             }
 
             var cellTransform = cell.transform;
-            if (cellTransform.localPosition != (Vector3)offset
+            var expectedPosition = (Vector3)offset * system.CellSize;
+            if (cellTransform.localPosition != expectedPosition
                 || cellTransform.localRotation != Quaternion.identity
                 || cellTransform.localScale != Vector3.one)
             {
                 cellTransform.SetLocalPositionAndRotation(
-                    offset,
+                    expectedPosition,
                     Quaternion.identity);
                 cellTransform.localScale = Vector3.one;
                 EditorUtility.SetDirty(cellTransform);

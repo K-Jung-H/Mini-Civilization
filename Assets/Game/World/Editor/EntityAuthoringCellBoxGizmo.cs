@@ -7,8 +7,6 @@ namespace MiniCivilization.World.Editor
 {
     internal static class EntityAuthoringCellBoxGizmo
     {
-        private static readonly Vector3 CellCenter = new(0f, 0.5f, 0f);
-
         [DrawGizmo(GizmoType.Selected | GizmoType.NonSelected | GizmoType.Pickable)]
         private static void DrawCellBox(
             EntityAuthoringCellBox cellBox,
@@ -24,7 +22,10 @@ namespace MiniCivilization.World.Editor
             DrawTerrain(cellBox);
 
             Handles.color = cellBox.WireColor;
-            Handles.DrawWireCube(CellCenter, Vector3.one);
+            var cellSize = cellBox.CellSize;
+            Handles.DrawWireCube(
+                new Vector3(0f, cellSize * 0.5f, 0f),
+                Vector3.one * cellSize);
 
             Handles.matrix = previousMatrix;
             Handles.color = previousColor;
@@ -34,13 +35,14 @@ namespace MiniCivilization.World.Editor
         private static void DrawTerrain(EntityAuthoringCellBox cellBox)
         {
             var topY = cellBox.TerrainSurfaceHeight;
+            var halfSize = cellBox.CellSize * 0.5f;
             var color = cellBox.TerrainColor;
             var noOutline = Color.clear;
 
-            var bottomBackLeft = new Vector3(-0.5f, 0f, -0.5f);
-            var bottomBackRight = new Vector3(0.5f, 0f, -0.5f);
-            var bottomFrontRight = new Vector3(0.5f, 0f, 0.5f);
-            var bottomFrontLeft = new Vector3(-0.5f, 0f, 0.5f);
+            var bottomBackLeft = new Vector3(-halfSize, 0f, -halfSize);
+            var bottomBackRight = new Vector3(halfSize, 0f, -halfSize);
+            var bottomFrontRight = new Vector3(halfSize, 0f, halfSize);
+            var bottomFrontLeft = new Vector3(-halfSize, 0f, halfSize);
 
             Handles.DrawSolidRectangleWithOutline(
                 new[]
@@ -58,10 +60,10 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            var topBackLeft = new Vector3(-0.5f, topY, -0.5f);
-            var topBackRight = new Vector3(0.5f, topY, -0.5f);
-            var topFrontRight = new Vector3(0.5f, topY, 0.5f);
-            var topFrontLeft = new Vector3(-0.5f, topY, 0.5f);
+            var topBackLeft = new Vector3(-halfSize, topY, -halfSize);
+            var topBackRight = new Vector3(halfSize, topY, -halfSize);
+            var topFrontRight = new Vector3(halfSize, topY, halfSize);
+            var topFrontLeft = new Vector3(-halfSize, topY, halfSize);
 
             Handles.DrawSolidRectangleWithOutline(
                 new[]

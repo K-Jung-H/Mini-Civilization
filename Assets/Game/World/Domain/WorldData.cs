@@ -67,51 +67,28 @@ namespace MiniCivilization.World.Domain
         private readonly EnvironmentData[] environmentMap;
         private readonly List<EntityData> entities = new();
 
-        public int Size { get; }
-        public int Height { get; }
-        public int ChunkSizeX { get; }
-        public int ChunkSizeY { get; }
-        public int ChunkSizeZ { get; }
-        public int ChunkCountX { get; }
-        public int ChunkCountY { get; }
-        public int ChunkCountZ { get; }
-        public int Seed { get; }
-        public WaterFlowRules WaterFlowRules { get; private set; }
-        public int PondMaximumArea { get; private set; }
+        public WorldSettingsData Settings { get; }
+        public int Size => Settings.WorldSize;
+        public int Height => Settings.WorldHeight;
+        public float CellSize => Settings.CellSize;
+        public float HeightStep => Settings.HeightStep;
+        public int ChunkSizeX => Settings.ChunkCellCountXZ;
+        public int ChunkSizeY => Settings.ChunkCellCountY;
+        public int ChunkSizeZ => Settings.ChunkCellCountXZ;
+        public int ChunkCountX => Settings.WorldChunkCountXZ;
+        public int ChunkCountY => Settings.WorldChunkCountY;
+        public int ChunkCountZ => Settings.WorldChunkCountXZ;
+        public int Seed => Settings.Seed;
+        public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
+        public int PondMaximumArea => Settings.PondMaximumArea;
         public WaterFlowScheduleData WaterFlowSchedule { get; }
         public IReadOnlyList<EntityData> Entities => entities;
 
-        public WorldData(int size, int height, int chunkSizeX, int chunkSizeY, int chunkSizeZ, int seed)
+        public WorldData(WorldSettingsData settings)
         {
-            if (size <= 0 || height <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(size), "World dimensions must be positive.");
-            }
-
-            if (chunkSizeX <= 0 || chunkSizeY <= 0 || chunkSizeZ <= 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(chunkSizeX), "Chunk dimensions must be positive.");
-            }
-
-            if (size % chunkSizeX != 0 || size % chunkSizeZ != 0 || height % chunkSizeY != 0)
-            {
-                throw new ArgumentException("World dimensions must be divisible by chunk dimensions.");
-            }
-
-            Size = size;
-            Height = height;
-            ChunkSizeX = chunkSizeX;
-            ChunkSizeY = chunkSizeY;
-            ChunkSizeZ = chunkSizeZ;
-            Seed = seed;
-            WaterFlowRules =
-                global::MiniCivilization.World.Domain.WaterFlowRules.Default;
-            PondMaximumArea = 8;
-            ChunkCountX = size / chunkSizeX;
-            ChunkCountY = height / chunkSizeY;
-            ChunkCountZ = size / chunkSizeZ;
+            Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             chunks = new ChunkData[ChunkCountX, ChunkCountY, ChunkCountZ];
-            environmentMap = new EnvironmentData[size * size];
+            environmentMap = new EnvironmentData[Size * Size];
             WaterFlowSchedule = new WaterFlowScheduleData();
 
             for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
@@ -120,23 +97,12 @@ namespace MiniCivilization.World.Domain
             {
                 chunks[chunkX, chunkY, chunkZ] = new ChunkData(
                     new ChunkCoordinate(chunkX, chunkY, chunkZ),
-                    chunkSizeX,
-                    chunkSizeY,
-                    chunkSizeZ);
+                    ChunkSizeX,
+                    ChunkSizeY,
+                    ChunkSizeZ);
             }
 
         }
-
-        public void ConfigureWaterFlow(WaterFlowRules rules)
-        {
-            WaterFlowRules = new WaterFlowRules(
-                rules.SpreadAmountLoss,
-                rules.MinimumSpreadAmount,
-                rules.DissipationAmountLoss);
-        }
-
-        public void ConfigureWaterTypes(int pondMaximumArea) =>
-            PondMaximumArea = Math.Max(1, pondMaximumArea);
 
         public bool Contains(int x, int y, int z) => (uint)x < Size && (uint)y < Height && (uint)z < Size;
         public bool ContainsColumn(int x, int z) => (uint)x < Size && (uint)z < Size;

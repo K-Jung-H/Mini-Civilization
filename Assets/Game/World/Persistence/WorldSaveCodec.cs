@@ -12,7 +12,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D; // "MEND"
         private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
         private const uint EntitiesMarker = 0x31544E45; // "ENT1"
-        private const ushort CurrentVersion = 8;
+        private const ushort CurrentVersion = 9;
         private const int CellByteSize = 13;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
@@ -69,16 +69,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(CurrentVersion);
             writer.Write((byte)WorldGrid.HeightStepsPerCell);
             writer.Write((byte)0);
-            writer.Write(world.Size);
-            writer.Write(world.Height);
-            writer.Write(world.ChunkSizeX);
-            writer.Write(world.ChunkSizeY);
-            writer.Write(world.ChunkSizeZ);
-            writer.Write(world.Seed);
-            writer.Write(world.WaterFlowRules.SpreadAmountLoss);
-            writer.Write(world.WaterFlowRules.MinimumSpreadAmount);
-            writer.Write(world.WaterFlowRules.DissipationAmountLoss);
-            writer.Write(world.PondMaximumArea);
+            WriteSettings(writer, world.Settings);
 
             var chunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
             writer.Write(chunkCount);
@@ -139,24 +130,7 @@ namespace MiniCivilization.World.Persistence
                     $"The save uses {heightSteps} height steps per Cell, but this build uses {WorldGrid.HeightStepsPerCell}.");
             }
 
-            var size = ReadPositiveDimension(reader, "world size");
-            var height = ReadPositiveDimension(reader, "world height");
-            var chunkSizeX = ReadPositiveDimension(reader, "chunk size X");
-            var chunkSizeY = ReadPositiveDimension(reader, "chunk size Y");
-            var chunkSizeZ = ReadPositiveDimension(reader, "chunk size Z");
-            var seed = reader.ReadInt32();
-            var waterFlowRules = new WaterFlowRules(
-                reader.ReadByte(),
-                reader.ReadByte(),
-                reader.ReadByte());
-            var pondMaximumArea = ReadPositiveDimension(
-                reader,
-                "pond maximum area");
-            ValidateDimensions(size, height, chunkSizeX, chunkSizeY, chunkSizeZ);
-
-            var world = new WorldData(size, height, chunkSizeX, chunkSizeY, chunkSizeZ, seed);
-            world.ConfigureWaterFlow(waterFlowRules);
-            world.ConfigureWaterTypes(pondMaximumArea);
+            var world = new WorldData(ReadSettings(reader));
             var expectedChunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
             var chunkCount = reader.ReadInt32();
             if (chunkCount != expectedChunkCount)
@@ -877,6 +851,118 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
+        private static void WriteSettings(
+            BinaryWriter writer,
+            WorldSettingsData settings)
+        {
+            writer.Write(settings.Seed);
+            writer.Write(settings.CellSize);
+            writer.Write(settings.ChunkCellCountXZ);
+            writer.Write(settings.ChunkCellCountY);
+            writer.Write(settings.WorldChunkCountXZ);
+            writer.Write(settings.WorldChunkCountY);
+            writer.Write(settings.RenderChunksPerPatch);
+            writer.Write(settings.TerrainScale);
+            writer.Write(settings.TerrainLayers);
+            writer.Write(settings.TerrainSpacing);
+            writer.Write(settings.TerrainDetail);
+            writer.Write(settings.BaseHeightUnits);
+            writer.Write(settings.HeightVariationUnits);
+            writer.Write(settings.EdgeLowering);
+            writer.Write(settings.MountainScale);
+            writer.Write(settings.MountainHeightUnits);
+            writer.Write(settings.MountainCoverage);
+            writer.Write(settings.MountainSteepness);
+            writer.Write(settings.SeaLevelUnits);
+            writer.Write(settings.RiverCount);
+            writer.Write(settings.RiverDepthCells);
+            writer.Write(settings.MaximumRiverWidthCells);
+            writer.Write(settings.MaximumRiverDepthCells);
+            writer.Write(settings.LakeCount);
+            writer.Write(settings.MinimumInlandLakeDistance);
+            writer.Write(settings.MinimumInlandLakeArea);
+            writer.Write(settings.MinimumInlandLakeDepthSteps);
+            writer.Write(settings.PondMaximumArea);
+            writer.Write(settings.WaterFlowRules.SpreadAmountLoss);
+            writer.Write(settings.WaterFlowRules.MinimumSpreadAmount);
+            writer.Write(settings.WaterFlowRules.DissipationAmountLoss);
+            writer.Write(settings.DesertMoistureThreshold);
+            writer.Write(settings.WetlandMoistureThreshold);
+            writer.Write(settings.SnowTemperatureThreshold);
+            writer.Write(settings.WaterMoistureRadius);
+        }
+
+        private static WorldSettingsData ReadSettings(BinaryReader reader)
+        {
+            var seed = reader.ReadInt32();
+            var cellSize = reader.ReadSingle();
+            var chunkCellCountXZ = ReadPositiveDimension(
+                reader,
+                "horizontal chunk Cell count");
+            var chunkCellCountY = ReadPositiveDimension(
+                reader,
+                "vertical chunk Cell count");
+            var worldChunkCountXZ = ReadPositiveDimension(
+                reader,
+                "horizontal world chunk count");
+            var worldChunkCountY = ReadPositiveDimension(
+                reader,
+                "vertical world chunk count");
+            var renderChunksPerPatch = ReadPositiveDimension(
+                reader,
+                "render chunks per patch");
+
+            var settings = new WorldSettingsData(
+                seed,
+                cellSize,
+                chunkCellCountXZ,
+                chunkCellCountY,
+                worldChunkCountXZ,
+                worldChunkCountY,
+                renderChunksPerPatch,
+                reader.ReadSingle(),
+                reader.ReadInt32(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadInt32(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                new WaterFlowRules(
+                    reader.ReadByte(),
+                    reader.ReadByte(),
+                    reader.ReadByte()),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadInt32());
+
+            var cellCount = checked(
+                (long)settings.WorldSize
+                * settings.WorldSize
+                * settings.WorldHeight);
+            if (cellCount > int.MaxValue)
+            {
+                throw new InvalidDataException(
+                    "Saved world is too large for this runtime.");
+            }
+
+            return settings;
+        }
+
         private static int ReadPositiveDimension(BinaryReader reader, string name)
         {
             var value = reader.ReadInt32();
@@ -886,28 +972,6 @@ namespace MiniCivilization.World.Persistence
             }
 
             return value;
-        }
-
-        private static void ValidateDimensions(
-            int size,
-            int height,
-            int chunkSizeX,
-            int chunkSizeY,
-            int chunkSizeZ)
-        {
-            if (size % chunkSizeX != 0
-                || size % chunkSizeZ != 0
-                || height % chunkSizeY != 0)
-            {
-                throw new InvalidDataException(
-                    "Saved world dimensions are not divisible by their chunk dimensions.");
-            }
-
-            var cellCount = checked((long)size * size * height);
-            if (cellCount > int.MaxValue)
-            {
-                throw new InvalidDataException("Saved world is too large for this runtime.");
-            }
         }
 
         private static void ValidateChunkCoordinate(

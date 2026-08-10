@@ -18,6 +18,7 @@ namespace MiniCivilization.World.Editor
             EditorGUILayout.LabelField(
                 "Dimensions",
                 $"{asset.WorldSize} x {asset.WorldSize} x {asset.WorldHeight}");
+            EditorGUILayout.LabelField("Cell Size", asset.CellSize.ToString("g"));
             EditorGUILayout.LabelField(
                 "Serialized Bytes",
                 EditorUtility.FormatBytes(asset.SerializedByteCount));

@@ -21,7 +21,11 @@ namespace MiniCivilization.World.Editor
 
             var cells = (long)settings.WorldSize * settings.WorldSize * settings.WorldHeight;
             EditorGUILayout.HelpBox(
-                $"Total cells: {cells:N0}\nVertical height units: {settings.WorldHeight * 5}\nSea level units: {settings.SeaLevelUnits}",
+                $"Cell: {settings.CellSize:g} x {settings.CellSize:g} x {settings.CellSize:g}\n" +
+                $"Height step: {settings.HeightStep:g}\n" +
+                $"World Cells: {settings.WorldSize} x {settings.WorldHeight} x {settings.WorldSize}\n" +
+                $"Total Cells: {cells:N0}\n" +
+                $"Sea level: {settings.SeaLevelUnits * settings.HeightStep:g}",
                 MessageType.None);
         }
     }

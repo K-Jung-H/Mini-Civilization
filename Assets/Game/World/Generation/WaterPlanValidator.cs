@@ -301,15 +301,7 @@ namespace MiniCivilization.World.Generation
             }
 
             var input = build.Input;
-            var world = new WorldData(
-                build.Size,
-                build.Height,
-                input.ChunkSizeXZ,
-                input.ChunkHeight,
-                input.ChunkSizeXZ,
-                build.Seed);
-            world.ConfigureWaterFlow(build.WaterFlowRules);
-            world.ConfigureWaterTypes(build.PondMaximumArea);
+            var world = new WorldData(input.Settings);
 
             for (var z = 0; z < build.Size; z++)
             for (var x = 0; x < build.Size; x++)
@@ -392,15 +384,7 @@ namespace MiniCivilization.World.Generation
 
             public static WaterPreview Create(WorldData source)
             {
-                var data = new WorldData(
-                    source.Size,
-                    source.Height,
-                    source.ChunkSizeX,
-                    source.ChunkSizeY,
-                    source.ChunkSizeZ,
-                    source.Seed);
-                data.ConfigureWaterFlow(source.WaterFlowRules);
-                data.ConfigureWaterTypes(source.PondMaximumArea);
+                var data = new WorldData(source.Settings);
 
                 for (var y = 0; y < source.Height; y++)
                 for (var z = 0; z < source.Size; z++)

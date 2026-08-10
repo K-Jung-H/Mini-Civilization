@@ -25,7 +25,6 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Transform renderRoot;
 
         [Header("Mesh")]
-        [SerializeField, Min(1)] private int renderPatchSizeXZ = 32;
         [SerializeField, Min(1)] private int maxPatchRebuildsPerFrame = 2;
 
         private readonly HashSet<Vector2Int> pendingFullPatches = new();
@@ -55,7 +54,6 @@ namespace MiniCivilization.World.Presentation
 
         private void OnValidate()
         {
-            renderPatchSizeXZ = Math.Max(1, renderPatchSizeXZ);
             maxPatchRebuildsPerFrame = Math.Max(
                 1,
                 maxPatchRebuildsPerFrame);
@@ -451,14 +449,12 @@ namespace MiniCivilization.World.Presentation
             WorldSurfaceCatalog catalog,
             Material terrain,
             Material water,
-            Transform root,
-            int patchSize)
+            Transform root)
         {
             surfaceCatalog = catalog;
             terrainMaterial = terrain;
             waterMaterial = water;
             renderRoot = root;
-            renderPatchSizeXZ = Math.Max(1, patchSize);
         }
 
         private void BuildAllPatches(bool persistentSceneObjects)
@@ -501,11 +497,7 @@ namespace MiniCivilization.World.Presentation
 
         private int ResolveRenderPatchSize(WorldData world)
         {
-            return renderPatchSizeXZ >= world.ChunkSizeX
-                && renderPatchSizeXZ % world.ChunkSizeX == 0
-                && world.Size % renderPatchSizeXZ == 0
-                    ? renderPatchSizeXZ
-                    : world.ChunkSizeX;
+            return world.Settings.RenderPatchSizeXZ;
         }
 
         private void ValidateReferences()

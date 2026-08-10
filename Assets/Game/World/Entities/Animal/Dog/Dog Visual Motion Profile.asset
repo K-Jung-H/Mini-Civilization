@@ -1,0 +1,145 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7dfc9d849c3c4e52a4c1cc8f6b9f1e07, type: 3}
+  m_Name: Dog Visual Motion Profile
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.EntityVisualMotionProfile
+  stateVisuals:
+  - stateName: Idle
+    phase: 0
+    variants:
+    - name: Hold
+      selectWeight: 1
+      settings:
+        animatorMode: 0
+        animatorBlendValue: 0
+        heightBasis: 0
+        visualYOffset: 0
+        jumpHeight: 0
+        localMotion:
+          mode: 0
+          radius: 0
+          moveSpeed: 0
+          turnInterval: 0
+          returnSpeed: 1
+          waveAmplitude: 0
+          waveFrequency: 0
+          interactionDistance: 0
+          faceTarget: 0
+    - name: Circle
+      selectWeight: 1
+      settings:
+        animatorMode: 0
+        animatorBlendValue: 1
+        heightBasis: 0
+        visualYOffset: 0
+        jumpHeight: 0
+        localMotion:
+          mode: 1
+          radius: 0.25
+          moveSpeed: 0.4
+          turnInterval: 0
+          returnSpeed: 1
+          waveAmplitude: 0
+          waveFrequency: 0
+          interactionDistance: 0
+          faceTarget: 0
+    - name: Wander
+      selectWeight: 1
+      settings:
+        animatorMode: 0
+        animatorBlendValue: 1
+        heightBasis: 0
+        visualYOffset: 0
+        jumpHeight: 0
+        localMotion:
+          mode: 2
+          radius: 1
+          moveSpeed: 0.3
+          turnInterval: 1.5
+          returnSpeed: 1
+          waveAmplitude: 0
+          waveFrequency: 0
+          interactionDistance: 0
+          faceTarget: 0
+  - stateName: Move
+    phase: 0
+    variants:
+    - name: Return To Anchor
+      selectWeight: 1
+      settings:
+        animatorMode: 0
+        animatorBlendValue: 1
+        heightBasis: 0
+        visualYOffset: 0
+        jumpHeight: 0
+        localMotion:
+          mode: 3
+          radius: 0
+          moveSpeed: 0
+          turnInterval: 0
+          returnSpeed: 1
+          waveAmplitude: 0
+          waveFrequency: 0
+          interactionDistance: 0
+          faceTarget: 0
+  cellMoveVisuals:
+  - moveType: 0
+    settings:
+      animatorMode: 0
+      animatorBlendValue: 1
+      heightBasis: 0
+      visualYOffset: 0
+      jumpHeight: 0
+      localMotion:
+        mode: 3
+        radius: 0
+        moveSpeed: 0
+        turnInterval: 0
+        returnSpeed: 1
+        waveAmplitude: 0
+        waveFrequency: 0
+        interactionDistance: 0
+        faceTarget: 0
+  - moveType: 1
+    settings:
+      animatorMode: 1
+      animatorBlendValue: 0
+      heightBasis: 0
+      visualYOffset: 0
+      jumpHeight: 0.1
+      localMotion:
+        mode: 3
+        radius: 0
+        moveSpeed: 0
+        turnInterval: 0
+        returnSpeed: 1
+        waveAmplitude: 0
+        waveFrequency: 0
+        interactionDistance: 0
+        faceTarget: 0
+  - moveType: 2
+    settings:
+      animatorMode: 2
+      animatorBlendValue: 1
+      heightBasis: 1
+      visualYOffset: -0.5
+      jumpHeight: 0
+      localMotion:
+        mode: 4
+        radius: 0
+        moveSpeed: 0
+        turnInterval: 0
+        returnSpeed: 1
+        waveAmplitude: 0.05
+        waveFrequency: 1
+        interactionDistance: 0
+        faceTarget: 0

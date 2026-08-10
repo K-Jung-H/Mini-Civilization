@@ -607,12 +607,12 @@ namespace MiniCivilization.World.Meshing
                         : worldX;
             return new SurfaceVertex(
                 new Vector3(
-                    x - startX + localX,
-                    heightUnits * WorldGrid.HeightStep,
-                    z - startZ + localZ),
+                    (x - startX + localX) * world.CellSize,
+                    heightUnits * world.HeightStep,
+                    (z - startZ + localZ) * world.CellSize),
                 new Vector2(
                     horizontalUv,
-                    heightUnits * WorldGrid.HeightStep),
+                    heightUnits * world.HeightStep),
                 MaterialBlendResolver.ResolveTerrainCell(
                     world,
                     catalog,
@@ -644,12 +644,12 @@ namespace MiniCivilization.World.Meshing
                 - worldZ * directionX;
             return new SurfaceVertex(
                 new Vector3(
-                    x - startX + localX,
-                    heightUnits * WorldGrid.HeightStep,
-                    z - startZ + localZ),
+                    (x - startX + localX) * world.CellSize,
+                    heightUnits * world.HeightStep,
+                    (z - startZ + localZ) * world.CellSize),
                 new Vector2(
                     horizontalUv,
-                    heightUnits * WorldGrid.HeightStep),
+                    heightUnits * world.HeightStep),
                 MaterialBlendResolver.ResolveTerrainCell(
                     world,
                     catalog,
@@ -676,9 +676,9 @@ namespace MiniCivilization.World.Meshing
         {
             return new SurfaceVertex(
                 new Vector3(
-                    x - startX + localX,
-                    heightUnits * WorldGrid.HeightStep,
-                    z - startZ + localZ),
+                    (x - startX + localX) * world.CellSize,
+                    heightUnits * world.HeightStep,
+                    (z - startZ + localZ) * world.CellSize),
                 new Vector2(x + localX, z + localZ),
                 MaterialBlendResolver.ResolveTerrainCell(
                     world,

@@ -19,12 +19,31 @@ namespace MiniCivilization.World.Presentation
         private readonly List<Entity> entities = new();
         private readonly List<DynamicEntity> movingEntities = new();
         private readonly HashSet<WorldEntityId> pendingEntityIds = new();
+        private readonly HashSet<WorldEntityId> interactionEntityIds = new();
         private WorldRuntime runtime;
         private EntityCatalog catalog;
 
         public WorldRuntime Runtime => runtime;
         public EntityCatalog Catalog => catalog;
         public int ViewCount => viewsByEntityId.Count;
+
+        public bool TryGetView(
+            WorldEntityId id,
+            out EntityController view) =>
+            viewsByEntityId.TryGetValue(id, out view);
+
+        public bool IsWaterSurface(CellCoordinate coordinate)
+        {
+            if (runtime == null)
+            {
+                return false;
+            }
+
+            var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                coordinate.X,
+                coordinate.Z);
+            return surface.HasWater && surface.WaterCellY == coordinate.Y;
+        }
 
         public void Configure(Transform root)
         {
@@ -117,6 +136,7 @@ namespace MiniCivilization.World.Presentation
             entities.Clear();
             movingEntities.Clear();
             pendingEntityIds.Clear();
+            interactionEntityIds.Clear();
         }
 
         private void OnPresentationChanged(WorldEntityId id)
@@ -184,8 +204,8 @@ namespace MiniCivilization.World.Presentation
         {
             if (viewsByEntityId.TryGetValue(entity.Id, out var existing))
             {
-                ApplyRenderPose(entity, existing);
                 existing.RefreshState();
+                ApplyRenderPose(entity, existing);
                 return;
             }
 
@@ -197,7 +217,7 @@ namespace MiniCivilization.World.Presentation
             try
             {
                 view.name = $"{definition.DisplayName} [{entity.Id}]";
-                view.Bind(entity);
+                view.Bind(entity, this);
                 ApplyRenderPose(entity, view);
                 viewsByEntityId.Add(entity.Id, view);
             }
@@ -220,19 +240,33 @@ namespace MiniCivilization.World.Presentation
             Entity entity,
             EntityController view)
         {
-            var position = ResolveCellPosition(entity.AnchorCell);
+            var heightBasis = view.RenderHeightBasis;
+            var position = ResolveCellPosition(
+                entity.AnchorCell,
+                heightBasis);
             if (entity is DynamicEntity { IsMoving: true } moving)
             {
-                position = Vector3.Lerp(
-                    ResolveCellPosition(moving.MoveFrom),
-                    ResolveCellPosition(moving.MoveTo),
-                    moving.MoveProgress);
+                var from = ResolveCellPosition(moving.MoveFrom, heightBasis);
+                var to = ResolveCellPosition(moving.MoveTo, heightBasis);
+                var progress = moving.MoveProgress;
+                position = moving.MoveType switch
+                {
+                    EntityMoveType.HeightTransition =>
+                        ResolveHeightTransitionPosition(
+                        from,
+                        to,
+                        progress,
+                        view.JumpHeight),
+                    _ => Vector3.Lerp(from, to, progress)
+                };
             }
 
             view.ApplyRenderPose(position, entity.Direction);
         }
 
-        private Vector3 ResolveCellPosition(CellCoordinate coordinate)
+        private Vector3 ResolveCellPosition(
+            CellCoordinate coordinate,
+            EntityVisualMotionProfile.RenderHeightBasis heightBasis)
         {
             if (!runtime.Data.TryGetCell(
                     coordinate.X,
@@ -246,15 +280,72 @@ namespace MiniCivilization.World.Presentation
 
             var heightUnits = coordinate.Y * WorldGrid.HeightStepsPerCell
                 + cell.Terrain.SolidHeight;
+            if (heightBasis
+                    == EntityVisualMotionProfile.RenderHeightBasis.WaterSurface)
+            {
+                var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                    coordinate.X,
+                    coordinate.Z);
+                if (surface.HasWater
+                    && surface.WaterCellY == coordinate.Y)
+                {
+                    heightUnits = surface.WaterHeight;
+                }
+                else if (surface.HasGround)
+                {
+                    heightUnits = surface.GroundHeight;
+                }
+            }
+
             return new Vector3(
-                coordinate.X + 0.5f,
-                heightUnits * WorldGrid.HeightStep,
-                coordinate.Z + 0.5f);
+                (coordinate.X + 0.5f) * runtime.Data.CellSize,
+                heightUnits * runtime.Data.HeightStep,
+                (coordinate.Z + 0.5f) * runtime.Data.CellSize);
+        }
+
+        private static Vector3 ResolveHeightTransitionPosition(
+            Vector3 from,
+            Vector3 to,
+            float progress,
+            float jumpHeight)
+        {
+            var position = Vector3.Lerp(from, to, progress);
+            if (to.y > from.y)
+            {
+                position.y += jumpHeight
+                    * 4f
+                    * progress
+                    * (1f - progress);
+            }
+            else if (to.y < from.y)
+            {
+                position.y = Mathf.Lerp(
+                    from.y,
+                    to.y,
+                    progress * progress);
+            }
+
+            return position;
         }
 
         private void RefreshVisualGroups()
         {
             visibleViewsByGroup.Clear();
+            interactionEntityIds.Clear();
+            foreach (var pair in viewsByEntityId)
+            {
+                var entity = pair.Value != null
+                    ? pair.Value.BoundEntity
+                    : null;
+                if (entity == null || !entity.InteractionTargetId.IsValid)
+                {
+                    continue;
+                }
+
+                interactionEntityIds.Add(entity.Id);
+                interactionEntityIds.Add(entity.InteractionTargetId);
+            }
+
             foreach (var pair in viewsByEntityId)
             {
                 var view = pair.Value;
@@ -264,7 +355,8 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (entity is DynamicEntity { IsMoving: true })
+                if (entity is DynamicEntity { IsMoving: true }
+                    || interactionEntityIds.Contains(entity.Id))
                 {
                     view.SetVisualVisible(true);
                     continue;
@@ -314,21 +406,27 @@ namespace MiniCivilization.World.Presentation
             private readonly CellCoordinate cell;
             private readonly EntityTypeKey typeKey;
             private readonly EntityDirection direction;
-            private readonly int renderStateKey;
+            private readonly EntityActivityId activity;
+            private readonly EntityActivityPhase activityPhase;
+            private readonly WorldEntityId interactionTargetId;
 
             public RenderGroupKey(Entity entity)
             {
                 cell = entity.AnchorCell;
                 typeKey = entity.TypeKey;
                 direction = entity.Direction;
-                renderStateKey = entity.RenderStateKey;
+                activity = entity.Activity;
+                activityPhase = entity.ActivityPhase;
+                interactionTargetId = entity.InteractionTargetId;
             }
 
             public bool Equals(RenderGroupKey other) =>
                 cell.Equals(other.cell)
                 && typeKey.Equals(other.typeKey)
                 && direction == other.direction
-                && renderStateKey == other.renderStateKey;
+                && activity == other.activity
+                && activityPhase == other.activityPhase
+                && interactionTargetId == other.interactionTargetId;
 
             public override bool Equals(object obj) =>
                 obj is RenderGroupKey other && Equals(other);
@@ -337,7 +435,9 @@ namespace MiniCivilization.World.Presentation
                 cell,
                 typeKey,
                 direction,
-                renderStateKey);
+                activity,
+                activityPhase,
+                interactionTargetId);
         }
     }
 }
