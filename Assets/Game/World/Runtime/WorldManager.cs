@@ -584,6 +584,11 @@ namespace MiniCivilization.World.Runtime
 
         private void OnEditChanged(WorldChangeSet changeSet)
         {
+            if (CurrentWorldRuntime.AffectsWayPointGraph(changeSet))
+            {
+                CurrentWorldRuntime.RebuildWayPointGraph();
+            }
+
             waterFlowController.ApplyChanges(changeSet);
             worldRenderer.ApplyChanges(changeSet);
             MarkDirty();
@@ -611,6 +616,11 @@ namespace MiniCivilization.World.Runtime
 
         private void OnEntityChanged(EntityChangeSet changeSet)
         {
+            if (changeSet.WayTopologyChanged)
+            {
+                worldRenderer.ApplyWayTopologyChanges(changeSet);
+            }
+
             MarkDirty();
             EntityChanged?.Invoke(changeSet);
         }

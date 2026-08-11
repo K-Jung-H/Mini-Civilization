@@ -12,8 +12,8 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D; // "MEND"
         private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
         private const uint EntitiesMarker = 0x31544E45; // "ENT1"
-        private const ushort CurrentVersion = 9;
-        private const int CellByteSize = 13;
+        private const ushort CurrentVersion = 10;
+        private const int CellByteSize = 16;
         private const int EnvironmentByteSize = 5;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -682,6 +682,8 @@ namespace MiniCivilization.World.Persistence
             writer.Write((byte)cell.Water.Role);
             writer.Write((byte)cell.Water.Type);
             writer.Write((byte)cell.Water.Flow);
+            writer.Write((ushort)cell.Road.Type);
+            writer.Write(cell.Road.CrossesCenter);
         }
 
         private static CellData ReadCell(BinaryReader reader)
@@ -702,6 +704,11 @@ namespace MiniCivilization.World.Persistence
                     Role = (WaterRole)reader.ReadByte(),
                     Type = (WaterType)reader.ReadByte(),
                     Flow = (FlowDirection)reader.ReadByte()
+                },
+                Road = new RoadData
+                {
+                    Type = (RoadType)reader.ReadUInt16(),
+                    CrossesCenter = reader.ReadBoolean()
                 }
             };
         }
@@ -862,6 +869,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.WorldChunkCountXZ);
             writer.Write(settings.WorldChunkCountY);
             writer.Write(settings.RenderChunksPerPatch);
+            writer.Write(settings.RoadMaxHeightSteps);
             writer.Write(settings.TerrainScale);
             writer.Write(settings.TerrainLayers);
             writer.Write(settings.TerrainSpacing);
@@ -920,6 +928,7 @@ namespace MiniCivilization.World.Persistence
                 worldChunkCountXZ,
                 worldChunkCountY,
                 renderChunksPerPatch,
+                reader.ReadInt32(),
                 reader.ReadSingle(),
                 reader.ReadInt32(),
                 reader.ReadSingle(),

@@ -498,7 +498,8 @@ namespace MiniCivilization.World.Meshing
                     (z - startZ + localZ) * world.CellSize),
                 new Vector2(
                     horizontalUv,
-                    heightUnits * world.HeightStep),
+                    heightUnits
+                    / WorldGrid.HeightStepsPerCell),
                 MaterialBlendResolver.ResolveWaterCell(
                     world,
                     catalog,

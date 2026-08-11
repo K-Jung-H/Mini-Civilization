@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Meshing;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -18,6 +19,8 @@ namespace MiniCivilization.World.Presentation
         private MeshRenderer terrainRenderer;
         private MeshFilter waterFilter;
         private MeshRenderer waterRenderer;
+        private MeshFilter roadFilter;
+        private MeshRenderer roadRenderer;
 
         public int PatchX => patchX;
         public int PatchZ => patchZ;
@@ -34,6 +37,8 @@ namespace MiniCivilization.World.Presentation
             Material waterMaterial,
             WorldSurfaceQuery surfaceQuery,
             WorldExposureCache exposureCache,
+            WorldWayPointGraph wayPointGraph,
+            float roadWidthRatio,
             WorldMeshBuildScratch scratch)
         {
             this.patchX = patchX;
@@ -73,6 +78,23 @@ namespace MiniCivilization.World.Presentation
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
             terrainRenderer.enabled = !terrainBuffers.IsEmpty;
+
+            var roadBuffers = RoadChunkMeshBuilder.Build(
+                world,
+                wayPointGraph,
+                patchX,
+                patchZ,
+                patchSize,
+                roadWidthRatio,
+                catalog,
+                scratch.Road);
+            roadFilter.sharedMesh = roadBuffers.CreateMesh(
+                $"Road [{patchX}, {patchZ}]",
+                replacePreparedMeshes ? null : roadFilter.sharedMesh);
+            roadRenderer.sharedMaterial = terrainMaterial;
+            roadRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            roadRenderer.receiveShadows = true;
+            roadRenderer.enabled = !roadBuffers.IsEmpty;
 
             var waterBuffers = WaterChunkMeshBuilder.Build(
                 world,
@@ -165,6 +187,39 @@ namespace MiniCivilization.World.Presentation
             terrainRenderer.enabled = !terrainBuffers.IsEmpty;
         }
 
+        internal void RebuildRoad(
+            WorldData world,
+            WorldWayPointGraph wayPointGraph,
+            float roadWidthRatio,
+            WorldSurfaceCatalog catalog,
+            Material terrainMaterial,
+            WorldMeshBuildScratch scratch)
+        {
+            if (preparedReadOnly)
+            {
+                throw new System.InvalidOperationException(
+                    "Prepared patches must be converted with a full rebuild.");
+            }
+
+            EnsureChildren();
+            var buffers = RoadChunkMeshBuilder.Build(
+                world,
+                wayPointGraph,
+                patchX,
+                patchZ,
+                patchSize,
+                roadWidthRatio,
+                catalog,
+                scratch.Road);
+            roadFilter.sharedMesh = buffers.CreateMesh(
+                $"Road [{patchX}, {patchZ}]",
+                roadFilter.sharedMesh);
+            roadRenderer.sharedMaterial = terrainMaterial;
+            roadRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            roadRenderer.receiveShadows = true;
+            roadRenderer.enabled = !buffers.IsEmpty;
+        }
+
         public void ReleaseMeshes()
         {
             if (preparedReadOnly)
@@ -185,10 +240,13 @@ namespace MiniCivilization.World.Presentation
         {
             terrainFilter = FindFilter("Terrain", out terrainRenderer);
             waterFilter = FindFilter("Water", out waterRenderer);
+            roadFilter = FindFilter("Road", out roadRenderer);
             if (terrainFilter == null
                 || waterFilter == null
+                || roadFilter == null
                 || terrainFilter.sharedMesh == null
                 || waterFilter.sharedMesh == null
+                || roadFilter.sharedMesh == null
                 || (waterFilter.sharedMesh.vertexCount > 0
                     && !waterFilter.sharedMesh.HasVertexAttribute(
                         VertexAttribute.TexCoord5)))
@@ -217,6 +275,11 @@ namespace MiniCivilization.World.Presentation
             {
                 yield return waterFilter.sharedMesh;
             }
+
+            if (roadFilter != null && roadFilter.sharedMesh != null)
+            {
+                yield return roadFilter.sharedMesh;
+            }
         }
 
         private void EnsureChildren()
@@ -229,12 +292,17 @@ namespace MiniCivilization.World.Presentation
                 "Water",
                 ref waterFilter,
                 ref waterRenderer);
+            EnsureRenderChild(
+                "Road",
+                ref roadFilter,
+                ref roadRenderer);
         }
 
         private void CacheExistingChildren()
         {
             terrainFilter = FindFilter("Terrain", out terrainRenderer);
             waterFilter = FindFilter("Water", out waterRenderer);
+            roadFilter = FindFilter("Road", out roadRenderer);
         }
 
         private MeshFilter FindFilter(

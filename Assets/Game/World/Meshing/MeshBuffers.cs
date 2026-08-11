@@ -10,6 +10,7 @@ namespace MiniCivilization.World.Meshing
     {
         public MeshBuffers Terrain { get; } = new();
         public MeshBuffers Water { get; } = new();
+        public MeshBuffers Road { get; } = new();
         public List<ExposedCell> SolidCells { get; } = new();
         public List<ExposedCell> WaterCells { get; } = new();
         public HashSet<int> WaterCellIndices { get; } = new();

@@ -19,6 +19,10 @@ namespace MiniCivilization.World.Runtime
         private readonly HashSet<int> terrainAnchorColumns = new();
         private readonly List<Entity> tickEntities = new();
         private readonly HashSet<EntityId> movingEntityIds = new();
+        private readonly Dictionary<EntityId, BuildingWayLocation>
+            buildingWayLocations = new();
+        private readonly Dictionary<EntityId, WayMovementPlan>
+            activeWayMoves = new();
         private ulong nextEntityId = 1;
 
         internal EntityRuntime(
@@ -33,7 +37,10 @@ namespace MiniCivilization.World.Runtime
             {
                 var data = world.Entities[index];
                 ReserveEntityId(data.Id);
-                AddRuntimeEntity(registry.Create(data));
+                AddRuntimeEntity(
+                    registry.Create(data),
+                    removeRoadsForBuilding: false,
+                    out _);
             }
         }
 
@@ -148,6 +155,25 @@ namespace MiniCivilization.World.Runtime
             world.ContainsColumn(x, z)
             && terrainAnchorColumns.Contains(WorldIndex.EncodeColumn(world, x, z));
 
+        public bool HasBuildingInColumn(int x, int z)
+        {
+            if (!world.ContainsColumn(x, z))
+            {
+                return false;
+            }
+
+            for (var y = 0; y < world.Height; y++)
+            {
+                if (buildingCells.ContainsKey(
+                    WorldIndex.EncodeCell(world, x, y, z)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public EntityChangeSet Add(EntityData data)
         {
             if (data == null)
@@ -163,9 +189,13 @@ namespace MiniCivilization.World.Runtime
 
             var entity = registry.Create(data);
             world.AddEntity(data);
+            var clearedRoadCells = Array.Empty<CellCoordinate>();
             try
             {
-                AddRuntimeEntity(entity);
+                AddRuntimeEntity(
+                    entity,
+                    removeRoadsForBuilding: true,
+                    out clearedRoadCells);
             }
             catch
             {
@@ -173,11 +203,19 @@ namespace MiniCivilization.World.Runtime
                 throw;
             }
 
+            if (entity is BuildingEntity && runtime.WayPointGraph != null)
+            {
+                runtime.RebuildWayPointGraph();
+            }
+
             return PublishChange(
                 new[] { data.Id },
                 NoEntityIds,
                 NoEntityIds,
-                GetIndexedCells(entity));
+                CombineAffectedCells(
+                    GetIndexedCells(entity),
+                    clearedRoadCells),
+                wayTopologyChanged: entity is BuildingEntity);
         }
 
         public EntityData Create(
@@ -216,11 +254,17 @@ namespace MiniCivilization.World.Runtime
             var affectedCells = GetIndexedCells(entity);
             RemoveRuntimeEntity(entity);
             world.RemoveEntity(id);
+            if (entity is BuildingEntity && runtime.WayPointGraph != null)
+            {
+                runtime.RebuildWayPointGraph();
+            }
+
             return PublishChange(
                 NoEntityIds,
                 new[] { id },
                 NoEntityIds,
-                affectedCells);
+                affectedCells,
+                wayTopologyChanged: entity is BuildingEntity);
         }
 
         internal bool TryBeginMove(
@@ -256,9 +300,18 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
-            if (!CanEnter(entity, current, destination))
+            if (!TryResolveMove(
+                    entity,
+                    current,
+                    destination,
+                    out var wayPlan))
             {
                 return false;
+            }
+
+            if (wayPlan != null)
+            {
+                activeWayMoves.Add(entity.Id, wayPlan);
             }
 
             entity.BeginMove(destination, moveType);
@@ -290,6 +343,18 @@ namespace MiniCivilization.World.Runtime
             AddEntityToCell(entity.Id, destination);
             entity.FinishMove();
             movingEntityIds.Remove(entity.Id);
+            if (activeWayMoves.Remove(entity.Id, out var wayPlan))
+            {
+                if (wayPlan.EndsInsideBuilding)
+                {
+                    buildingWayLocations[entity.Id] = wayPlan.EndLocation;
+                }
+                else
+                {
+                    buildingWayLocations.Remove(entity.Id);
+                }
+            }
+
             return PublishChange(
                 NoEntityIds,
                 NoEntityIds,
@@ -312,25 +377,106 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
-            var currentHasBuilding = TryGetBuildingCell(
+            return TryResolveMove(
+                entity,
                 currentCell,
-                out var currentBuilding);
-            var nextHasBuilding = TryGetBuildingCell(
                 nextCell,
-                out var nextBuilding);
-            if (currentHasBuilding
-                && !currentBuilding.HasWalkLinkTo(nextCell))
+                out _);
+        }
+
+        internal bool TryGetBuildingWayPosition(
+            EntityId id,
+            out UnityEngine.Vector3 position)
+        {
+            if (runtime.WayPointGraph != null
+                && buildingWayLocations.TryGetValue(id, out var location))
+            {
+                return runtime.WayPointGraph.TryGetPosition(
+                    location,
+                    out position);
+            }
+
+            position = default;
+            return false;
+        }
+
+        internal bool TryGetActiveWayMove(
+            EntityId id,
+            out WayMovementPlan plan) =>
+            activeWayMoves.TryGetValue(id, out plan);
+
+        internal void RestoreBuildingWayLocations(
+            WorldWayPointGraph graph)
+        {
+            if (graph == null)
+            {
+                throw new ArgumentNullException(nameof(graph));
+            }
+
+            var removed = new List<EntityId>();
+            foreach (var pair in buildingWayLocations)
+            {
+                if (!entitiesById.ContainsKey(pair.Key)
+                    || !graph.TryGetPosition(pair.Value, out _))
+                {
+                    removed.Add(pair.Key);
+                }
+            }
+
+            for (var index = 0; index < removed.Count; index++)
+            {
+                buildingWayLocations.Remove(removed[index]);
+            }
+
+            foreach (var entity in entitiesById.Values)
+            {
+                if (entity is not DynamicEntity
+                    || buildingWayLocations.ContainsKey(entity.Id)
+                    || !TryGetBuildingCell(entity.AnchorCell, out _)
+                    || !graph.TryGetInitialLocation(
+                        world,
+                        entity.AnchorCell,
+                        out var location))
+                {
+                    continue;
+                }
+
+                buildingWayLocations.Add(entity.Id, location);
+            }
+        }
+
+        private bool TryResolveMove(
+            DynamicEntity entity,
+            CellCoordinate currentCell,
+            CellCoordinate nextCell,
+            out WayMovementPlan wayPlan)
+        {
+            wayPlan = null;
+            var currentHasBuilding = TryGetBuildingCell(currentCell, out _);
+            var nextHasBuilding = TryGetBuildingCell(nextCell, out _);
+            if (!currentHasBuilding && !nextHasBuilding)
+            {
+                return entity.CanEnterWorld(
+                    runtime,
+                    currentCell,
+                    nextCell);
+            }
+
+            if (runtime.WayPointGraph == null)
             {
                 return false;
             }
 
-            if (nextHasBuilding
-                && !nextBuilding.HasWalkLinkTo(currentCell))
-            {
-                return false;
-            }
-
-            return entity.CanEnterWorld(runtime, currentCell, nextCell);
+            var hasLocation = buildingWayLocations.TryGetValue(
+                entity.Id,
+                out var currentLocation);
+            return runtime.WayPointGraph.TryPlan(
+                world,
+                currentCell,
+                nextCell,
+                hasLocation,
+                currentLocation,
+                out wayPlan);
         }
 
         private bool TryGetBuildingCell(
@@ -379,7 +525,10 @@ namespace MiniCivilization.World.Runtime
                 : id.Value + 1;
         }
 
-        private void AddRuntimeEntity(Entity entity)
+        private void AddRuntimeEntity(
+            Entity entity,
+            bool removeRoadsForBuilding,
+            out CellCoordinate[] clearedRoadCells)
         {
             if (entity == null)
             {
@@ -392,11 +541,14 @@ namespace MiniCivilization.World.Runtime
                     $"Entity ID {entity.Id} already exists in the runtime.");
             }
 
+            clearedRoadCells = Array.Empty<CellCoordinate>();
             try
             {
                 if (entity is BuildingEntity building)
                 {
-                    AddBuilding(building);
+                    clearedRoadCells = AddBuilding(
+                        building,
+                        removeRoadsForBuilding);
                 }
                 else
                 {
@@ -421,6 +573,8 @@ namespace MiniCivilization.World.Runtime
         {
             tickEntities.Remove(entity);
             movingEntityIds.Remove(entity.Id);
+            activeWayMoves.Remove(entity.Id);
+            buildingWayLocations.Remove(entity.Id);
             if (entity is BuildingEntity building)
             {
                 RemoveBuilding(building);
@@ -433,13 +587,21 @@ namespace MiniCivilization.World.Runtime
             entitiesById.Remove(entity.Id);
         }
 
-        private void AddBuilding(BuildingEntity building)
+        private CellCoordinate[] AddBuilding(
+            BuildingEntity building,
+            bool removeRoads)
         {
             var layout = building.Layout
                 ?? throw new InvalidOperationException(
                     $"Building {building.Id} does not define a layout.");
             var occupied = new BuildingCellState[layout.OccupiedCells.Count];
             var anchors = new int[layout.TerrainAnchorOffsets.Count];
+            var roadCells = CollectRoadCells(layout, building.Data);
+            if (!removeRoads && roadCells.Count != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Building {building.Id} overlaps saved Road data.");
+            }
 
             for (var index = 0; index < layout.OccupiedCells.Count; index++)
             {
@@ -453,12 +615,9 @@ namespace MiniCivilization.World.Runtime
                         $"Building {building.Id} overlaps another building Cell or Terrain Anchor.");
                 }
 
-                occupied[index] = BuildingCellState.Create(
+                occupied[index] = new BuildingCellState(
                     building.Id,
-                    coordinate,
-                    layout,
-                    building.Data,
-                    localCell);
+                    coordinate);
             }
 
             for (var index = 0; index < layout.TerrainAnchorOffsets.Count; index++)
@@ -507,6 +666,66 @@ namespace MiniCivilization.World.Runtime
                     out var z);
                 terrainAnchorColumns.Add(WorldIndex.EncodeColumn(world, x, z));
             }
+
+            for (var index = 0; index < roadCells.Count; index++)
+            {
+                var coordinate = roadCells[index];
+                var cell = world.GetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z);
+                cell.Road = default;
+                world.SetCellForEdit(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z,
+                    cell);
+            }
+
+            return roadCells.ToArray();
+        }
+
+        private List<CellCoordinate> CollectRoadCells(
+            BuildingLayout layout,
+            EntityData buildingData)
+        {
+            var result = new List<CellCoordinate>();
+            var columns = new HashSet<int>();
+            for (var index = 0; index < layout.OccupiedCells.Count; index++)
+            {
+                var occupied = layout.ToWorld(
+                    buildingData,
+                    layout.OccupiedCells[index].LocalOffset);
+                var columnIndex = WorldIndex.EncodeColumn(
+                    world,
+                    occupied.X,
+                    occupied.Z);
+                if (!columns.Add(columnIndex))
+                {
+                    continue;
+                }
+
+                var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                    occupied.X,
+                    occupied.Z);
+                if (!surface.HasGround
+                    || !world.TryGetCell(
+                        occupied.X,
+                        surface.GroundCellY,
+                        occupied.Z,
+                        out var cell)
+                    || !cell.HasRoad)
+                {
+                    continue;
+                }
+
+                result.Add(new CellCoordinate(
+                    occupied.X,
+                    surface.GroundCellY,
+                    occupied.Z));
+            }
+
+            return result;
         }
 
         private void RemoveBuilding(BuildingEntity building)
@@ -636,11 +855,30 @@ namespace MiniCivilization.World.Runtime
             return cells;
         }
 
+        private static CellCoordinate[] CombineAffectedCells(
+            IReadOnlyList<CellCoordinate> first,
+            IReadOnlyList<CellCoordinate> second)
+        {
+            var result = new CellCoordinate[first.Count + second.Count];
+            for (var index = 0; index < first.Count; index++)
+            {
+                result[index] = first[index];
+            }
+
+            for (var index = 0; index < second.Count; index++)
+            {
+                result[first.Count + index] = second[index];
+            }
+
+            return result;
+        }
+
         private EntityChangeSet PublishChange(
             IReadOnlyList<EntityId> added,
             IReadOnlyList<EntityId> removed,
             IReadOnlyList<EntityId> moved,
-            IReadOnlyList<CellCoordinate> affectedCells)
+            IReadOnlyList<CellCoordinate> affectedCells,
+            bool wayTopologyChanged = false)
         {
             var uniqueCells = new HashSet<int>();
             var chunks = new HashSet<ChunkCoordinate>();
@@ -677,7 +915,8 @@ namespace MiniCivilization.World.Runtime
                 CopyAndSort(removed),
                 CopyAndSort(moved),
                 cellIndices,
-                affectedChunks);
+                affectedChunks,
+                wayTopologyChanged);
             Changed?.Invoke(changeSet);
             return changeSet;
         }
@@ -713,51 +952,15 @@ namespace MiniCivilization.World.Runtime
 
         private readonly struct BuildingCellState
         {
-            private readonly CellCoordinate[] walkLinks;
-
             public EntityId BuildingId { get; }
             public CellCoordinate Coordinate { get; }
 
-            private BuildingCellState(
+            public BuildingCellState(
                 EntityId buildingId,
-                CellCoordinate coordinate,
-                CellCoordinate[] walkLinks)
+                CellCoordinate coordinate)
             {
                 BuildingId = buildingId;
                 Coordinate = coordinate;
-                this.walkLinks = walkLinks;
-            }
-
-            public static BuildingCellState Create(
-                EntityId buildingId,
-                CellCoordinate coordinate,
-                BuildingLayout layout,
-                EntityData buildingData,
-                BuildingOccupiedCell source)
-            {
-                var links = new CellCoordinate[source.WalkLinks.Count];
-                for (var index = 0; index < links.Length; index++)
-                {
-                    links[index] = layout.ToWorldWalkLink(
-                        buildingData,
-                        source,
-                        source.WalkLinks[index]);
-                }
-
-                return new BuildingCellState(buildingId, coordinate, links);
-            }
-
-            public bool HasWalkLinkTo(CellCoordinate destination)
-            {
-                for (var index = 0; index < walkLinks.Length; index++)
-                {
-                    if (walkLinks[index].Equals(destination))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
             }
         }
     }

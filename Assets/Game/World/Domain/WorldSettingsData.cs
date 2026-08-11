@@ -12,6 +12,7 @@ namespace MiniCivilization.World.Domain
             int worldChunkCountXZ,
             int worldChunkCountY,
             int renderChunksPerPatch,
+            int roadMaxHeightSteps,
             float terrainScale,
             int terrainLayers,
             float terrainSpacing,
@@ -62,6 +63,14 @@ namespace MiniCivilization.World.Domain
                     "Render chunks per patch must be positive and divide the horizontal world chunk count.");
             }
 
+            if (roadMaxHeightSteps < 0
+                || roadMaxHeightSteps > WorldGrid.HeightStepsPerCell)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(roadMaxHeightSteps),
+                    "Road maximum height steps must be inside one Cell height.");
+            }
+
             Seed = seed;
             CellSize = cellSize;
             ChunkCellCountXZ = chunkCellCountXZ;
@@ -69,6 +78,7 @@ namespace MiniCivilization.World.Domain
             WorldChunkCountXZ = worldChunkCountXZ;
             WorldChunkCountY = worldChunkCountY;
             RenderChunksPerPatch = renderChunksPerPatch;
+            RoadMaxHeightSteps = roadMaxHeightSteps;
             TerrainScale = terrainScale;
             TerrainLayers = terrainLayers;
             TerrainSpacing = terrainSpacing;
@@ -113,6 +123,7 @@ namespace MiniCivilization.World.Domain
         public int WorldChunkCountXZ { get; }
         public int WorldChunkCountY { get; }
         public int RenderChunksPerPatch { get; }
+        public int RoadMaxHeightSteps { get; }
         public int WorldSize => checked(ChunkCellCountXZ * WorldChunkCountXZ);
         public int WorldHeight => checked(ChunkCellCountY * WorldChunkCountY);
         public int RenderPatchSizeXZ => checked(ChunkCellCountXZ * RenderChunksPerPatch);

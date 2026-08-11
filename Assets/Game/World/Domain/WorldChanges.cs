@@ -49,7 +49,8 @@ namespace MiniCivilization.World.Domain
         Navigation = 1 << 5,
         Ecology = 1 << 6,
         Occupancy = 1 << 7,
-        WaterSurface = 1 << 8
+        WaterSurface = 1 << 8,
+        RoadTopology = 1 << 9
     }
 
     public readonly struct CellBounds : IEquatable<CellBounds>
@@ -114,6 +115,7 @@ namespace MiniCivilization.World.Domain
         public IReadOnlyList<EntityId> MovedEntityIds { get; }
         public IReadOnlyList<int> AffectedCellIndices { get; }
         public IReadOnlyList<ChunkCoordinate> AffectedChunks { get; }
+        public bool WayTopologyChanged { get; }
 
         internal EntityChangeSet(
             WorldData world,
@@ -122,7 +124,8 @@ namespace MiniCivilization.World.Domain
             IReadOnlyList<EntityId> removedEntityIds,
             IReadOnlyList<EntityId> movedEntityIds,
             IReadOnlyList<int> affectedCellIndices,
-            IReadOnlyList<ChunkCoordinate> affectedChunks)
+            IReadOnlyList<ChunkCoordinate> affectedChunks,
+            bool wayTopologyChanged)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
             ChangeId = changeId;
@@ -136,6 +139,7 @@ namespace MiniCivilization.World.Domain
                 ?? throw new ArgumentNullException(nameof(affectedCellIndices));
             AffectedChunks = affectedChunks
                 ?? throw new ArgumentNullException(nameof(affectedChunks));
+            WayTopologyChanged = wayTopologyChanged;
         }
     }
 

@@ -244,25 +244,175 @@ namespace MiniCivilization.World.Presentation
             var position = ResolveCellPosition(
                 entity.AnchorCell,
                 heightBasis);
-            if (entity is DynamicEntity { IsMoving: true } moving)
+            var rotation = ToRotation(entity.Direction);
+            var followsBuildingWay = runtime.Entities.TryGetBuildingWayPosition(
+                entity.Id,
+                out var buildingPosition);
+            if (followsBuildingWay)
             {
-                var from = ResolveCellPosition(moving.MoveFrom, heightBasis);
-                var to = ResolveCellPosition(moving.MoveTo, heightBasis);
-                var progress = moving.MoveProgress;
-                position = moving.MoveType switch
-                {
-                    EntityMoveType.HeightTransition =>
-                        ResolveHeightTransitionPosition(
-                        from,
-                        to,
-                        progress,
-                        view.JumpHeight),
-                    _ => Vector3.Lerp(from, to, progress)
-                };
+                position = buildingPosition;
             }
 
-            view.ApplyRenderPose(position, entity.Direction);
+            if (entity is DynamicEntity { IsMoving: true } moving)
+            {
+                if (runtime.Entities.TryGetActiveWayMove(
+                        entity.Id,
+                        out var wayMove))
+                {
+                    var from = ResolveCellPosition(moving.MoveFrom, heightBasis);
+                    var to = ResolveCellPosition(moving.MoveTo, heightBasis);
+                    position = SampleWayMove(
+                        wayMove,
+                        from,
+                        to,
+                        moving.MoveProgress,
+                        out var forward);
+                    if (forward.sqrMagnitude > 0.000001f)
+                    {
+                        rotation = Quaternion.LookRotation(
+                            forward.normalized,
+                            Vector3.up);
+                    }
+
+                    followsBuildingWay = true;
+                }
+                else
+                {
+                    var from = ResolveCellPosition(moving.MoveFrom, heightBasis);
+                    var to = ResolveCellPosition(moving.MoveTo, heightBasis);
+                    var progress = moving.MoveProgress;
+                    position = moving.MoveType switch
+                    {
+                        EntityMoveType.HeightTransition =>
+                            ResolveHeightTransitionPosition(
+                            from,
+                            to,
+                            progress,
+                            view.JumpHeight),
+                        _ => Vector3.Lerp(from, to, progress)
+                    };
+                }
+            }
+
+            view.SetWayConstrained(followsBuildingWay);
+            view.ApplyRenderPose(position, rotation);
         }
+
+        private static Vector3 SampleWayMove(
+            WayMovementPlan move,
+            Vector3 cellStart,
+            Vector3 cellEnd,
+            float progress,
+            out Vector3 forward)
+        {
+            var pointCount = move.GraphPositions.Length
+                + (move.StartsAtCellCenter ? 1 : 0)
+                + (move.EndsAtCellCenter ? 1 : 0);
+            if (pointCount == 0)
+            {
+                forward = cellEnd - cellStart;
+                return Vector3.Lerp(cellStart, cellEnd, progress);
+            }
+
+            if (pointCount == 1)
+            {
+                forward = Vector3.zero;
+                return GetWayMovePoint(move, cellStart, cellEnd, 0);
+            }
+
+            var totalLength = 0f;
+            for (var index = 1; index < pointCount; index++)
+            {
+                totalLength += Vector3.Distance(
+                    GetWayMovePoint(move, cellStart, cellEnd, index - 1),
+                    GetWayMovePoint(move, cellStart, cellEnd, index));
+            }
+
+            if (totalLength <= 0.000001f)
+            {
+                forward = Vector3.zero;
+                return GetWayMovePoint(
+                    move,
+                    cellStart,
+                    cellEnd,
+                    pointCount - 1);
+            }
+
+            var remaining = Mathf.Clamp01(progress) * totalLength;
+            for (var index = 1; index < pointCount; index++)
+            {
+                var previous = GetWayMovePoint(
+                    move,
+                    cellStart,
+                    cellEnd,
+                    index - 1);
+                var current = GetWayMovePoint(
+                    move,
+                    cellStart,
+                    cellEnd,
+                    index);
+                var segment = current - previous;
+                var length = segment.magnitude;
+                if (remaining <= length || index == pointCount - 1)
+                {
+                    forward = segment;
+                    return length <= 0.000001f
+                        ? current
+                        : Vector3.Lerp(
+                            previous,
+                            current,
+                            Mathf.Clamp01(remaining / length));
+                }
+
+                remaining -= length;
+            }
+
+            var last = GetWayMovePoint(
+                move,
+                cellStart,
+                cellEnd,
+                pointCount - 1);
+            forward = last - GetWayMovePoint(
+                move,
+                cellStart,
+                cellEnd,
+                pointCount - 2);
+            return last;
+        }
+
+        private static Vector3 GetWayMovePoint(
+            WayMovementPlan move,
+            Vector3 cellStart,
+            Vector3 cellEnd,
+            int index)
+        {
+            if (move.StartsAtCellCenter)
+            {
+                if (index == 0)
+                {
+                    return cellStart;
+                }
+
+                index--;
+            }
+
+            if ((uint)index < move.GraphPositions.Length)
+            {
+                return move.GraphPositions[index];
+            }
+
+            return cellEnd;
+        }
+
+        private static Quaternion ToRotation(EntityDirection direction) =>
+            direction switch
+            {
+                EntityDirection.North => Quaternion.identity,
+                EntityDirection.East => Quaternion.Euler(0f, 90f, 0f),
+                EntityDirection.South => Quaternion.Euler(0f, 180f, 0f),
+                EntityDirection.West => Quaternion.Euler(0f, 270f, 0f),
+                _ => throw new ArgumentOutOfRangeException(nameof(direction))
+            };
 
         private Vector3 ResolveCellPosition(
             CellCoordinate coordinate,

@@ -2,48 +2,118 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
+using UnityEngine;
 
 namespace MiniCivilization.World.Entities
 {
+    public enum BuildingWayPointDirection : byte
+    {
+        None = 0,
+        North = 1,
+        East = 2,
+        South = 3,
+        West = 4
+    }
+
     public readonly struct BuildingOccupiedCell
     {
-        private readonly CellOffset[] walkLinks;
-
         public CellOffset LocalOffset { get; }
-        public IReadOnlyList<CellOffset> WalkLinks => walkLinks;
 
-        public BuildingOccupiedCell(
-            CellOffset localOffset,
-            IReadOnlyList<CellOffset> walkLinks)
+        public BuildingOccupiedCell(CellOffset localOffset)
         {
             LocalOffset = localOffset;
-            this.walkLinks = CopyWalkLinks(walkLinks);
+        }
+    }
+
+    public readonly struct BuildingWayPoint
+    {
+        public CellOffset LocalCellOffset { get; }
+        public Vector3 LocalPosition { get; }
+        public BuildingWayPointDirection ExternalDirection { get; }
+
+        public BuildingWayPoint(
+            CellOffset localCellOffset,
+            Vector3 localPosition,
+            BuildingWayPointDirection externalDirection)
+        {
+            if (!IsFinite(localPosition))
+            {
+                throw new ArgumentOutOfRangeException(nameof(localPosition));
+            }
+
+            if (localPosition.x < -0.5f
+                || localPosition.x > 0.5f
+                || localPosition.y < 0f
+                || localPosition.y > 1f
+                || localPosition.z < -0.5f
+                || localPosition.z > 0.5f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(localPosition),
+                    "Building WayPoint position must stay inside its local Cell.");
+            }
+
+            if (!Enum.IsDefined(typeof(BuildingWayPointDirection), externalDirection))
+            {
+                throw new ArgumentOutOfRangeException(nameof(externalDirection));
+            }
+
+            LocalCellOffset = localCellOffset;
+            LocalPosition = localPosition;
+            ExternalDirection = externalDirection;
+            if (!IsOnExternalBoundary(externalDirection, localPosition))
+            {
+                throw new ArgumentException(
+                    "External Building WayPoint must be placed on its selected Cell boundary.",
+                    nameof(localPosition));
+            }
         }
 
-        private static CellOffset[] CopyWalkLinks(
-            IReadOnlyList<CellOffset> source)
+        public bool IsExternal =>
+            ExternalDirection != BuildingWayPointDirection.None;
+
+        private static bool IsFinite(Vector3 value) =>
+            float.IsFinite(value.x)
+            && float.IsFinite(value.y)
+            && float.IsFinite(value.z);
+
+        private static bool IsOnExternalBoundary(
+            BuildingWayPointDirection direction,
+            Vector3 position)
         {
-            if (source == null || source.Count == 0)
+            const float tolerance = 0.001f;
+            return direction switch
             {
-                return Array.Empty<CellOffset>();
+                BuildingWayPointDirection.None => true,
+                BuildingWayPointDirection.North =>
+                    Mathf.Abs(position.z - 0.5f) <= tolerance,
+                BuildingWayPointDirection.East =>
+                    Mathf.Abs(position.x - 0.5f) <= tolerance,
+                BuildingWayPointDirection.South =>
+                    Mathf.Abs(position.z + 0.5f) <= tolerance,
+                BuildingWayPointDirection.West =>
+                    Mathf.Abs(position.x + 0.5f) <= tolerance,
+                _ => false
+            };
+        }
+    }
+
+    public readonly struct BuildingWay
+    {
+        public int PointA { get; }
+        public int PointB { get; }
+        public bool OneWay { get; }
+
+        public BuildingWay(int pointA, int pointB, bool oneWay = false)
+        {
+            if (pointA < 0 || pointB < 0 || pointA == pointB)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pointA));
             }
 
-            var uniqueLinks = new HashSet<CellOffset>();
-            var result = new CellOffset[source.Count];
-            for (var index = 0; index < source.Count; index++)
-            {
-                var offset = source[index];
-                if (offset == default || !uniqueLinks.Add(offset))
-                {
-                    throw new ArgumentException(
-                        "Building walk links must be unique non-zero offsets.",
-                        nameof(source));
-                }
-
-                result[index] = offset;
-            }
-
-            return result;
+            PointA = pointA;
+            PointB = pointB;
+            OneWay = oneWay;
         }
     }
 
@@ -51,15 +121,21 @@ namespace MiniCivilization.World.Entities
     {
         private readonly BuildingOccupiedCell[] occupiedCells;
         private readonly CellOffset[] terrainAnchorOffsets;
+        private readonly BuildingWayPoint[] wayPoints;
+        private readonly BuildingWay[] ways;
 
         public IReadOnlyList<BuildingOccupiedCell> OccupiedCells =>
             occupiedCells;
         public IReadOnlyList<CellOffset> TerrainAnchorOffsets =>
             terrainAnchorOffsets;
+        public IReadOnlyList<BuildingWayPoint> WayPoints => wayPoints;
+        public IReadOnlyList<BuildingWay> Ways => ways;
 
         public BuildingLayout(
             IReadOnlyList<BuildingOccupiedCell> occupiedCells,
-            IReadOnlyList<CellOffset> terrainAnchorOffsets)
+            IReadOnlyList<CellOffset> terrainAnchorOffsets,
+            IReadOnlyList<BuildingWayPoint> wayPoints = null,
+            IReadOnlyList<BuildingWay> ways = null)
         {
             if (occupiedCells == null || occupiedCells.Count == 0)
             {
@@ -83,26 +159,13 @@ namespace MiniCivilization.World.Entities
                 this.occupiedCells[index] = cell;
             }
 
-            if (terrainAnchorOffsets == null || terrainAnchorOffsets.Count == 0)
-            {
-                this.terrainAnchorOffsets = Array.Empty<CellOffset>();
-                return;
-            }
-
-            this.terrainAnchorOffsets = new CellOffset[terrainAnchorOffsets.Count];
-            var anchors = new HashSet<CellOffset>();
-            for (var index = 0; index < terrainAnchorOffsets.Count; index++)
-            {
-                var offset = terrainAnchorOffsets[index];
-                if (!anchors.Add(offset) || occupiedOffsets.Contains(offset))
-                {
-                    throw new ArgumentException(
-                        "Building Terrain Anchors cannot overlap occupied or anchor Cells.",
-                        nameof(terrainAnchorOffsets));
-                }
-
-                this.terrainAnchorOffsets[index] = offset;
-            }
+            this.terrainAnchorOffsets = CopyAnchors(
+                terrainAnchorOffsets,
+                occupiedOffsets);
+            this.wayPoints = CopyWayPoints(
+                wayPoints,
+                occupiedOffsets);
+            this.ways = CopyWays(ways, this.wayPoints.Length);
         }
 
         public CellCoordinate ToWorld(
@@ -121,22 +184,138 @@ namespace MiniCivilization.World.Entities
                 checked(entity.AnchorCell.Z + rotated.Z));
         }
 
-        public CellCoordinate ToWorldWalkLink(
+        public Vector3 ToWorldPosition(
+            WorldData world,
             EntityData entity,
-            BuildingOccupiedCell source,
-            CellOffset linkOffset)
+            BuildingWayPoint point)
         {
-            return ToWorld(entity, new CellOffset(
-                checked(source.LocalOffset.X + linkOffset.X),
-                checked(source.LocalOffset.Y + linkOffset.Y),
-                checked(source.LocalOffset.Z + linkOffset.Z)));
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
+
+            var cell = ToWorld(entity, point.LocalCellOffset);
+            var local = Rotate(point.LocalPosition, entity.Direction);
+            return new Vector3(
+                (cell.X + 0.5f + local.x) * world.CellSize,
+                (cell.Y + local.y) * world.CellSize,
+                (cell.Z + 0.5f + local.z) * world.CellSize);
+        }
+
+        public BuildingWayPointDirection ToWorldDirection(
+            BuildingWayPointDirection direction,
+            EntityDirection entityDirection)
+        {
+            if (direction == BuildingWayPointDirection.None)
+            {
+                return direction;
+            }
+
+            var turns = entityDirection switch
+            {
+                EntityDirection.North => 0,
+                EntityDirection.East => 1,
+                EntityDirection.South => 2,
+                EntityDirection.West => 3,
+                _ => throw new ArgumentOutOfRangeException(nameof(entityDirection))
+            };
+            var value = ((int)direction - 1 + turns) % 4;
+            return (BuildingWayPointDirection)(value + 1);
+        }
+
+        private static CellOffset[] CopyAnchors(
+            IReadOnlyList<CellOffset> source,
+            ISet<CellOffset> occupiedOffsets)
+        {
+            if (source == null || source.Count == 0)
+            {
+                return Array.Empty<CellOffset>();
+            }
+
+            var result = new CellOffset[source.Count];
+            var anchors = new HashSet<CellOffset>();
+            for (var index = 0; index < source.Count; index++)
+            {
+                var offset = source[index];
+                if (!anchors.Add(offset) || occupiedOffsets.Contains(offset))
+                {
+                    throw new ArgumentException(
+                        "Building Terrain Anchors cannot overlap occupied or anchor Cells.",
+                        nameof(source));
+                }
+
+                result[index] = offset;
+            }
+
+            return result;
+        }
+
+        private static BuildingWayPoint[] CopyWayPoints(
+            IReadOnlyList<BuildingWayPoint> source,
+            ISet<CellOffset> occupiedOffsets)
+        {
+            if (source == null || source.Count == 0)
+            {
+                return Array.Empty<BuildingWayPoint>();
+            }
+
+            var result = new BuildingWayPoint[source.Count];
+            for (var index = 0; index < source.Count; index++)
+            {
+                if (!occupiedOffsets.Contains(source[index].LocalCellOffset))
+                {
+                    throw new ArgumentException(
+                        "Building WayPoints must belong to an occupied Cell.",
+                        nameof(source));
+                }
+
+                result[index] = source[index];
+            }
+
+            return result;
+        }
+
+        private static BuildingWay[] CopyWays(
+            IReadOnlyList<BuildingWay> source,
+            int pointCount)
+        {
+            if (source == null || source.Count == 0)
+            {
+                return Array.Empty<BuildingWay>();
+            }
+
+            var result = new BuildingWay[source.Count];
+            var unique = new HashSet<(int, int, bool)>();
+            for (var index = 0; index < source.Count; index++)
+            {
+                var way = source[index];
+                if ((uint)way.PointA >= pointCount
+                    || (uint)way.PointB >= pointCount)
+                {
+                    throw new ArgumentException(
+                        "Building Way references a missing WayPoint.",
+                        nameof(source));
+                }
+
+                var key = way.OneWay || way.PointA < way.PointB
+                    ? (way.PointA, way.PointB, way.OneWay)
+                    : (way.PointB, way.PointA, way.OneWay);
+                if (!unique.Add(key))
+                {
+                    throw new ArgumentException(
+                        "Building Ways cannot contain duplicate links.",
+                        nameof(source));
+                }
+
+                result[index] = way;
+            }
+
+            return result;
         }
 
         private static CellOffset Rotate(
             CellOffset offset,
-            EntityDirection direction)
-        {
-            return direction switch
+            EntityDirection direction) => direction switch
             {
                 EntityDirection.North => offset,
                 EntityDirection.East => new CellOffset(
@@ -151,10 +330,28 @@ namespace MiniCivilization.World.Entities
                     -offset.Z,
                     offset.Y,
                     offset.X),
-                _ => throw new ArgumentOutOfRangeException(
-                    nameof(direction))
+                _ => throw new ArgumentOutOfRangeException(nameof(direction))
             };
-        }
+
+        private static Vector3 Rotate(
+            Vector3 position,
+            EntityDirection direction) => direction switch
+            {
+                EntityDirection.North => position,
+                EntityDirection.East => new Vector3(
+                    position.z,
+                    position.y,
+                    -position.x),
+                EntityDirection.South => new Vector3(
+                    -position.x,
+                    position.y,
+                    -position.z),
+                EntityDirection.West => new Vector3(
+                    -position.z,
+                    position.y,
+                    position.x),
+                _ => throw new ArgumentOutOfRangeException(nameof(direction))
+            };
     }
 
     public readonly struct BuildingPlacementContext

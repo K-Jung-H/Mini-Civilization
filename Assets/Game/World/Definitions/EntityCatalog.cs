@@ -175,6 +175,7 @@ namespace MiniCivilization.World.Definitions
                 || !prefab.TypeKey.IsValid
                 || !prefab.HasValidEntityType
                 || !prefab.HasValidVisualRoot
+                || !prefab.HasValidCellScaleRoot
                 || prefab.TypeKey.Category != category)
             {
                 throw new InvalidOperationException(

@@ -1,4 +1,3 @@
-using System;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
 
@@ -9,19 +8,17 @@ namespace MiniCivilization.World.Entities.Building
         private static readonly EntityActivityId IdleActivity = new("Idle");
 
         private static readonly CellOffset SupportOffset = new(0, 0, 0);
-        private static readonly BuildingLayout HouseLayout = new(
-            new[]
-            {
-                new BuildingOccupiedCell(
-                    new CellOffset(0, 1, 0),
-                    Array.Empty<CellOffset>())
-            },
-            new[] { SupportOffset });
-        public HouseEntity(EntityData data) : base(data)
+        private readonly BuildingLayout layout;
+
+        public HouseEntity(
+            EntityData data,
+            BuildingLayout layout) : base(data)
         {
+            this.layout = layout
+                ?? throw new System.ArgumentNullException(nameof(layout));
         }
 
-        public override BuildingLayout Layout => HouseLayout;
+        public override BuildingLayout Layout => layout;
         public override EntityActivityId Activity => IdleActivity;
         internal override bool RequiresTick => false;
 

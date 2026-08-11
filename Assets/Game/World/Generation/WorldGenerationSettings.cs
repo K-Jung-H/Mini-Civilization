@@ -26,6 +26,11 @@ namespace MiniCivilization.World.Generation
         [Tooltip("렌더 Patch 한 변에 포함되는 논리 Chunk 수입니다.")]
         [InspectorName("Patch당 Chunk 수")]
         [SerializeField, Min(1)] private int renderChunksPerPatch = 2;
+        [Header("Road")]
+        [Tooltip("인접 Road가 연결될 수 있는 최대 표면 높이 차이입니다. 한 단계는 Cell 높이의 1/5입니다.")]
+        [InspectorName("Road 최대 높이 단계")]
+        [SerializeField, Range(0, WorldGrid.HeightStepsPerCell)]
+        private int roadMaxHeightSteps = 1;
         [Header("기본 지형")]
         [Tooltip("지형 노이즈의 좌표 배율입니다. 값이 클수록 지형 변화가 더 짧은 간격으로 나타납니다.")]
         [InspectorName("지형 크기")]
@@ -139,6 +144,7 @@ namespace MiniCivilization.World.Generation
         public int WorldChunkCountXZ => worldChunkCountXZ;
         public int WorldChunkCountY => worldChunkCountY;
         public int RenderChunksPerPatch => renderChunksPerPatch;
+        public int RoadMaxHeightSteps => roadMaxHeightSteps;
         public int WorldSize => checked(chunkCellCountXZ * worldChunkCountXZ);
         public int WorldHeight => checked(chunkCellCountY * worldChunkCountY);
         public int ChunkSizeXZ => chunkCellCountXZ;
@@ -188,6 +194,7 @@ namespace MiniCivilization.World.Generation
             WorldChunkCountXZ,
             WorldChunkCountY,
             RenderChunksPerPatch,
+            RoadMaxHeightSteps,
             TerrainScale,
             TerrainLayers,
             TerrainSpacing,
@@ -281,6 +288,10 @@ namespace MiniCivilization.World.Generation
                 renderChunksPerPatch,
                 1,
                 worldChunkCountXZ);
+            roadMaxHeightSteps = Math.Clamp(
+                roadMaxHeightSteps,
+                0,
+                WorldGrid.HeightStepsPerCell);
             baseHeightCells = Math.Clamp(baseHeightCells, 1, WorldHeight - 1);
             heightVariationCells = Math.Clamp(heightVariationCells, 1, WorldHeight - 1);
             mountainHeightCells = Math.Clamp(mountainHeightCells, 0, WorldHeight - 1);

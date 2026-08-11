@@ -38,6 +38,12 @@ namespace MiniCivilization.World.Domain
         Shore = 7
     }
 
+    public enum RoadType : ushort
+    {
+        None = 0,
+        Basic = 1
+    }
+
     public enum WaterRole : byte
     {
         None = 0,
@@ -275,13 +281,45 @@ namespace MiniCivilization.World.Domain
     }
 
     [Serializable]
+    public struct RoadData : IEquatable<RoadData>
+    {
+        public RoadType Type;
+        public bool CrossesCenter;
+
+        public readonly bool HasRoad => Type != RoadType.None;
+
+        public void Normalize()
+        {
+            if (!Enum.IsDefined(typeof(RoadType), Type)
+                || Type == RoadType.None)
+            {
+                Type = RoadType.None;
+                CrossesCenter = false;
+            }
+        }
+
+        public readonly bool Equals(RoadData other) =>
+            Type == other.Type
+            && CrossesCenter == other.CrossesCenter;
+
+        public override readonly bool Equals(object obj) =>
+            obj is RoadData other && Equals(other);
+
+        public override readonly int GetHashCode() => HashCode.Combine(
+            Type,
+            CrossesCenter);
+    }
+
+    [Serializable]
     public struct CellData : IEquatable<CellData>
     {
         public TerrainData Terrain;
         public WaterData Water;
+        public RoadData Road;
 
         public readonly bool HasTerrain => Terrain.HasTerrain;
         public readonly bool HasWater => Water.HasWater;
+        public readonly bool HasRoad => Road.HasRoad;
         public readonly byte WaterHeight => Water.Falls
             ? (byte)(WorldGrid.HeightStepsPerCell - Terrain.SolidHeight)
             : WaterAmount.ToRenderFill(
@@ -292,6 +330,12 @@ namespace MiniCivilization.World.Domain
         {
             Terrain.Normalize();
             Water.Normalize();
+            Road.Normalize();
+
+            if (!Terrain.HasTerrain)
+            {
+                Road = default;
+            }
 
             if (!Water.HasWater
                 || WorldGrid.HeightStepsPerCell
@@ -304,13 +348,15 @@ namespace MiniCivilization.World.Domain
         public readonly bool Equals(CellData other)
         {
             return Terrain.Equals(other.Terrain)
-                && Water.Equals(other.Water);
+                && Water.Equals(other.Water)
+                && Road.Equals(other.Road);
         }
 
         public override readonly bool Equals(object obj) => obj is CellData other && Equals(other);
         public override readonly int GetHashCode() => HashCode.Combine(
             Terrain,
-            Water);
+            Water,
+            Road);
     }
 
     [Serializable]

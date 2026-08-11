@@ -13,6 +13,7 @@ namespace MiniCivilization.World.Presentation
         private const float RotationSpeed = 360f;
 
         [SerializeField] private Transform visualRoot;
+        [SerializeField] private Transform cellScaleRoot;
         [SerializeField] private Transform localMotionRoot;
         [SerializeField] private EntityVisualMotionProfile visualMotionProfile;
 
@@ -28,7 +29,9 @@ namespace MiniCivilization.World.Presentation
         private WorldEntityId visualMotionInteractionTarget;
         private EntityMoveType visualMotionMoveType;
         private bool currentUsesMoveVisual;
+        private bool wayConstrained;
         private uint randomState;
+        private float worldCellScale = 1f;
 
         public abstract EntityTypeKey TypeKey { get; }
         public abstract string EntityTypeName { get; }
@@ -40,20 +43,27 @@ namespace MiniCivilization.World.Presentation
         public Transform VisualRoot => visualRoot;
         public EntityVisualMotionProfile.RenderHeightBasis RenderHeightBasis =>
             currentVisualMotion.HeightBasis;
-        public float JumpHeight => currentVisualMotion.JumpHeight;
+        public float JumpHeight => currentVisualMotion.JumpHeight
+            * worldCellScale;
         protected EntityVisualMotionProfile.AnimationMode
             PresentationAnimationMode => currentVisualMotion.AnimatorMode;
         protected float PresentationAnimatorBlendValue =>
             currentVisualMotion.AnimatorBlendValue;
         public bool HasValidVisualRoot => visualRoot != null
             && visualRoot != transform
-            && visualRoot.IsChildOf(transform);
+            && visualRoot.IsChildOf(transform)
+            && HasValidCellScaleRoot
+            && visualRoot.IsChildOf(cellScaleRoot);
+        public bool HasValidCellScaleRoot => cellScaleRoot != null
+            && cellScaleRoot != transform
+            && cellScaleRoot.IsChildOf(transform);
 
         protected virtual void Update()
         {
             if (BoundEntity == null
                 || localMotionRoot == null
                 || visualRoot == null
+                || wayConstrained
                 || !visualRoot.gameObject.activeInHierarchy)
             {
                 return;
@@ -83,6 +93,12 @@ namespace MiniCivilization.World.Presentation
                     + $"{entity.TypeKey}.");
             }
 
+            if (!HasValidVisualRoot)
+            {
+                throw new InvalidOperationException(
+                    $"Entity Controller '{name}' requires a CellScaleRoot with VisualRoot below it.");
+            }
+
             if (BoundEntity != null)
             {
                 Unbind();
@@ -90,6 +106,8 @@ namespace MiniCivilization.World.Presentation
 
             BoundEntity = entity;
             rendererContext = renderer;
+            worldCellScale = renderer.Runtime.Data.CellSize;
+            cellScaleRoot.localScale = Vector3.one * worldCellScale;
             InitializeRandom(entity);
             ResetVisualMotion();
             OnBound(entity);
@@ -106,6 +124,11 @@ namespace MiniCivilization.World.Presentation
 
             BoundEntity = null;
             rendererContext = null;
+            worldCellScale = 1f;
+            if (cellScaleRoot != null)
+            {
+                cellScaleRoot.localScale = Vector3.one;
+            }
             OnUnbound(entity);
             ResetVisualMotion();
             SetVisualVisible(true);
@@ -117,6 +140,29 @@ namespace MiniCivilization.World.Presentation
         {
             transform.localPosition = localPosition;
             transform.localRotation = ToRotation(direction);
+        }
+
+        public void ApplyRenderPose(
+            Vector3 localPosition,
+            Quaternion localRotation)
+        {
+            transform.localPosition = localPosition;
+            transform.localRotation = localRotation;
+        }
+
+        public void SetWayConstrained(bool constrained)
+        {
+            if (wayConstrained == constrained)
+            {
+                return;
+            }
+
+            wayConstrained = constrained;
+            if (constrained && localMotionRoot != null)
+            {
+                localMotionRoot.localPosition = Vector3.zero;
+                localMotionRoot.localRotation = Quaternion.identity;
+            }
         }
 
         public void RefreshState()

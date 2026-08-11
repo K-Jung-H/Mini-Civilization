@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MiniCivilization.World.Generation;
+using MiniCivilization.World.Presentation;
 using UnityEngine;
 
 namespace MiniCivilization.World.Authoring
@@ -14,6 +15,9 @@ namespace MiniCivilization.World.Authoring
         private WorldGenerationSettings worldSettings;
 
         [SerializeField]
+        private EntityController entityPrefab;
+
+        [SerializeField]
         private Vector3Int gridSize = Vector3Int.one;
 
         [SerializeField]
@@ -24,8 +28,21 @@ namespace MiniCivilization.World.Authoring
         [HideInInspector]
         private List<EntityAuthoringCellBox> pooledCells = new();
 
+        [SerializeField]
+        [HideInInspector]
+        private EntityController previewPrefab;
+
+        [SerializeField]
+        [HideInInspector]
+        private Transform previewScaleRoot;
+
+        [SerializeField]
+        [HideInInspector]
+        private EntityController previewInstance;
+
         public EntityAuthoringCellBox CellBoxPrefab => cellBoxPrefab;
         public WorldGenerationSettings WorldSettings => worldSettings;
+        public EntityController EntityPrefab => entityPrefab;
         public float CellSize => worldSettings != null
             ? worldSettings.CellSize
             : 1f;
@@ -38,6 +55,24 @@ namespace MiniCivilization.World.Authoring
         }
 
         internal List<EntityAuthoringCellBox> PooledCells => pooledCells;
+
+        internal EntityController PreviewPrefab
+        {
+            get => previewPrefab;
+            set => previewPrefab = value;
+        }
+
+        internal Transform PreviewScaleRoot
+        {
+            get => previewScaleRoot;
+            set => previewScaleRoot = value;
+        }
+
+        internal EntityController PreviewInstance
+        {
+            get => previewInstance;
+            set => previewInstance = value;
+        }
 
         internal bool NormalizeSettings()
         {

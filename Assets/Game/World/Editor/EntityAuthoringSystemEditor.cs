@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Authoring;
+using MiniCivilization.World.Presentation;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -12,12 +13,14 @@ namespace MiniCivilization.World.Editor
     {
         private SerializedProperty cellBoxPrefab;
         private SerializedProperty worldSettings;
+        private SerializedProperty entityPrefab;
         private SerializedProperty gridSize;
 
         private void OnEnable()
         {
             cellBoxPrefab = serializedObject.FindProperty("cellBoxPrefab");
             worldSettings = serializedObject.FindProperty("worldSettings");
+            entityPrefab = serializedObject.FindProperty("entityPrefab");
             gridSize = serializedObject.FindProperty("gridSize");
 
             Synchronize((EntityAuthoringSystem)target);
@@ -30,6 +33,7 @@ namespace MiniCivilization.World.Editor
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(cellBoxPrefab);
             EditorGUILayout.PropertyField(worldSettings);
+            EditorGUILayout.PropertyField(entityPrefab);
             EditorGUILayout.PropertyField(gridSize);
             var changed = EditorGUI.EndChangeCheck();
 
@@ -51,6 +55,7 @@ namespace MiniCivilization.World.Editor
 
             var changed = system.NormalizeSettings();
             changed |= RemoveMissingPoolEntries(system);
+            changed |= SynchronizePreview(system);
 
             if (system.PooledPrefab != system.CellBoxPrefab)
             {
@@ -91,6 +96,141 @@ namespace MiniCivilization.World.Editor
             }
 
             return changed;
+        }
+
+        private static bool SynchronizePreview(EntityAuthoringSystem system)
+        {
+            var changed = false;
+            if (system.PreviewScaleRoot == null
+                && system.PreviewInstance != null)
+            {
+                system.PreviewInstance = null;
+                changed = true;
+            }
+
+            if (system.PreviewPrefab != system.EntityPrefab
+                || system.PreviewScaleRoot != null
+                    && system.PreviewInstance == null)
+            {
+                changed |= ClearPreview(system);
+                system.PreviewPrefab = system.EntityPrefab;
+                changed = true;
+            }
+
+            if (system.EntityPrefab == null)
+            {
+                return changed | ClearPreview(system);
+            }
+
+            if (!PrefabUtility.IsPartOfPrefabAsset(system.EntityPrefab))
+            {
+                throw new InvalidOperationException(
+                    "Entity Prefab must reference a Prefab asset.");
+            }
+
+            if (system.PreviewScaleRoot == null)
+            {
+                var rootObject = new GameObject("Entity Preview");
+                var root = rootObject.transform;
+                root.SetParent(system.transform, false);
+                system.PreviewScaleRoot = root;
+                changed = true;
+            }
+
+            if (system.PreviewInstance == null)
+            {
+                var controller = FindExistingPreview(system);
+                if (controller == null)
+                {
+                    var instance = PrefabUtility.InstantiatePrefab(
+                        system.EntityPrefab.gameObject,
+                        system.PreviewScaleRoot) as GameObject;
+                    if (instance == null
+                        || !instance.TryGetComponent(
+                            out controller))
+                    {
+                        if (instance != null)
+                        {
+                            DestroyImmediate(instance);
+                        }
+
+                        throw new InvalidOperationException(
+                            "Entity Prefab root requires an EntityController.");
+                    }
+                }
+
+                system.PreviewInstance = controller;
+                changed = true;
+            }
+
+            var previewRoot = system.PreviewScaleRoot;
+            var expectedScale = Vector3.one * system.CellSize;
+            if (previewRoot.localPosition != Vector3.zero
+                || previewRoot.localRotation != Quaternion.identity
+                || previewRoot.localScale != expectedScale)
+            {
+                previewRoot.SetLocalPositionAndRotation(
+                    Vector3.zero,
+                    Quaternion.identity);
+                previewRoot.localScale = expectedScale;
+                EditorUtility.SetDirty(previewRoot);
+                changed = true;
+            }
+
+            var previewTransform = system.PreviewInstance.transform;
+            if (previewTransform.parent != previewRoot
+                || previewTransform.localPosition != Vector3.zero
+                || previewTransform.localRotation != Quaternion.identity
+                || previewTransform.localScale != Vector3.one)
+            {
+                previewTransform.SetParent(previewRoot, false);
+                previewTransform.SetLocalPositionAndRotation(
+                    Vector3.zero,
+                    Quaternion.identity);
+                previewTransform.localScale = Vector3.one;
+                EditorUtility.SetDirty(previewTransform);
+                PrefabUtility.RecordPrefabInstancePropertyModifications(
+                    previewTransform);
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static EntityController FindExistingPreview(
+            EntityAuthoringSystem system)
+        {
+            var searchRoot = system.transform.parent != null
+                ? system.transform.parent
+                : system.transform;
+            var candidates = searchRoot.GetComponentsInChildren<
+                EntityController>(true);
+            for (var index = 0; index < candidates.Length; index++)
+            {
+                var candidate = candidates[index];
+                if (candidate != null
+                    && PrefabUtility.GetCorrespondingObjectFromSource(
+                        candidate) == system.EntityPrefab)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool ClearPreview(EntityAuthoringSystem system)
+        {
+            if (system.PreviewScaleRoot == null)
+            {
+                system.PreviewInstance = null;
+                return false;
+            }
+
+            DestroyImmediate(system.PreviewScaleRoot.gameObject);
+            system.PreviewScaleRoot = null;
+            system.PreviewInstance = null;
+            return true;
         }
 
         private static bool ClearPool(EntityAuthoringSystem system)

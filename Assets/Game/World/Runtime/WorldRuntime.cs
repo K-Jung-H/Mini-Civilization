@@ -24,6 +24,7 @@ namespace MiniCivilization.World.Runtime
         public WorldChangeId CurrentChangeId { get; private set; }
         public RuntimeChangeApplier ChangeApplier { get; internal set; }
         public EntityRuntime Entities { get; private set; }
+        public WorldWayPointGraph WayPointGraph { get; private set; }
 
         public static WorldRuntime CreatePrepared(WorldData data)
         {
@@ -49,7 +50,59 @@ namespace MiniCivilization.World.Runtime
             runtime.Entities = new EntityRuntime(
                 runtime,
                 EntityTypeRegistry.Shared);
+            runtime.RebuildWayPointGraph();
             return runtime;
+        }
+
+        internal void RebuildWayPointGraph()
+        {
+            WayPointGraph = WorldWayPointGraph.Build(this, Entities);
+            Entities.RestoreBuildingWayLocations(WayPointGraph);
+        }
+
+        internal bool AffectsWayPointGraph(WorldChangeSet changeSet)
+        {
+            if (changeSet == null)
+            {
+                throw new ArgumentNullException(nameof(changeSet));
+            }
+
+            if (changeSet.Includes(WorldChangeType.RoadTopology))
+            {
+                return true;
+            }
+
+            if ((changeSet.ChangeTypes & (
+                    WorldChangeType.CellStructure
+                    | WorldChangeType.Surface)) == 0)
+            {
+                return false;
+            }
+
+            for (var index = 0;
+                 index < changeSet.ChangedCellIndices.Count;
+                 index++)
+            {
+                var changed = WorldIndex.DecodeCell(
+                    Data,
+                    changeSet.ChangedCellIndices[index]);
+                for (var z = changed.Z - 1; z <= changed.Z + 1; z++)
+                for (var x = changed.X - 1; x <= changed.X + 1; x++)
+                {
+                    if (!Data.ContainsColumn(x, z))
+                    {
+                        continue;
+                    }
+
+                    if (RoadTopologyResolver.TryGetRoad(this, x, z, out _)
+                        || Entities.HasBuildingInColumn(x, z))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         internal WorldChangeId AdvanceChangeId()

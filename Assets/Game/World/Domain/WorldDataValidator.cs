@@ -81,6 +81,20 @@ namespace MiniCivilization.World.Domain
                     $"Cell ({x}, {y}, {z}) has an invalid solid height.");
             }
 
+            if (!Enum.IsDefined(typeof(RoadType), cell.Road.Type)
+                || cell.Road.Type == RoadType.None
+                    && cell.Road.CrossesCenter)
+            {
+                throw new InvalidOperationException(
+                    $"Cell ({x}, {y}, {z}) has invalid Road data.");
+            }
+
+            if (cell.Road.HasRoad && !cell.HasTerrain)
+            {
+                throw new InvalidOperationException(
+                    $"Cell ({x}, {y}, {z}) has a Road without terrain.");
+            }
+
             var water = cell.Water;
             if (water.Amount > WaterAmount.Full)
             {

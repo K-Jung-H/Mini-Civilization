@@ -138,6 +138,16 @@ namespace MiniCivilization.World.Editing
             return Commit(transaction);
         }
 
+        public WorldChangeSet SetRoad(
+            int x,
+            int z,
+            RoadData road)
+        {
+            var transaction = BeginTransaction();
+            transaction.SetRoad(x, z, road);
+            return Commit(transaction);
+        }
+
         public WorldChangeSet SetBiome(int x, int z, BiomeType biome)
         {
             var transaction = BeginTransaction();
@@ -538,6 +548,12 @@ namespace MiniCivilization.World.Editing
                     | WorldChangeType.Ecology;
             }
 
+            if (!previous.Road.Equals(current.Road))
+            {
+                types |= WorldChangeType.RoadTopology
+                    | WorldChangeType.Navigation;
+            }
+
             return types;
         }
 
@@ -678,6 +694,32 @@ namespace MiniCivilization.World.Editing
                     new CellCoordinate(x, y, z),
                     previous,
                     cell));
+        }
+
+        public bool SetRoad(int x, int z, RoadData road)
+        {
+            EnsureColumn(x, z);
+            road.Normalize();
+            if (road.HasRoad && runtime.Entities.HasBuildingInColumn(x, z))
+            {
+                return false;
+            }
+
+            var surface = runtime.SurfaceCache.GetSurfaceHeight(x, z);
+            if (!surface.HasGround)
+            {
+                return false;
+            }
+
+            var cell = GetPendingCell(x, surface.GroundCellY, z);
+            if (!cell.HasTerrain)
+            {
+                return false;
+            }
+
+            cell.Road = road;
+            SetCell(x, surface.GroundCellY, z, cell);
+            return true;
         }
 
         public bool RaiseColumn(int x, int z)
