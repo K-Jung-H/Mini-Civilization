@@ -29,9 +29,15 @@ namespace MiniCivilization.World.Interaction
             new(0.08f, 1f, 0.22f, 0.3f);
         [SerializeField] private Color editSelectedColor =
             new(0.05f, 0.9f, 0.16f, 0.48f);
+        [SerializeField] private Color editSecondaryColor =
+            new(0.08f, 0.72f, 1f, 0.48f);
+        [SerializeField] private Color editInvalidColor =
+            new(1f, 0.12f, 0.08f, 0.52f);
 
         private readonly List<CellCoordinate> selectedCells = new();
-        private readonly List<Matrix4x4> instanceMatrices = new();
+        private readonly List<Matrix4x4> primaryMatrices = new();
+        private readonly List<Matrix4x4> secondaryMatrices = new();
+        private readonly List<Matrix4x4> invalidMatrices = new();
 
         private WorldTileSelectionState subscribedState;
         private WorldManager subscribedManager;
@@ -91,6 +97,7 @@ namespace MiniCivilization.World.Interaction
                 subscribedState.SelectionChanged += OnSelectionStateChanged;
                 subscribedState.EditHoverChanged += OnEditStateChanged;
                 subscribedState.EditSelectionChanged += OnEditStateChanged;
+                subscribedState.EditPreviewChanged += OnEditPreviewChanged;
             }
 
             if (worldManager != null && subscribedManager != worldManager)
@@ -108,6 +115,7 @@ namespace MiniCivilization.World.Interaction
                 subscribedState.SelectionChanged -= OnSelectionStateChanged;
                 subscribedState.EditHoverChanged -= OnEditStateChanged;
                 subscribedState.EditSelectionChanged -= OnEditStateChanged;
+                subscribedState.EditPreviewChanged -= OnEditPreviewChanged;
                 subscribedState = null;
             }
 
@@ -124,9 +132,11 @@ namespace MiniCivilization.World.Interaction
         private void OnEditStateChanged(IWorldCellSelection _) =>
             instancesDirty = true;
 
+        private void OnEditPreviewChanged() => instancesDirty = true;
+
         private void OnWorldChanged(WorldDataAsset _)
         {
-            instanceMatrices.Clear();
+            ClearMatrices();
             selectionState?.Clear();
             instancesDirty = true;
         }
@@ -134,31 +144,61 @@ namespace MiniCivilization.World.Interaction
         private void RebuildInstances()
         {
             instancesDirty = false;
-            instanceMatrices.Clear();
+            ClearMatrices();
             if (!TryGetWorld(out var world))
             {
                 return;
             }
 
-            if (selectionState?.EditHovered != null)
+            if (selectionState?.EditPrimaryPreview != null
+                || selectionState?.EditSecondaryPreview != null
+                || selectionState?.EditInvalidPreview != null)
+            {
+                AppendSelection(
+                    selectionState.EditPrimaryPreview,
+                    world,
+                    primaryMatrices);
+                AppendSelection(
+                    selectionState.EditSecondaryPreview,
+                    world,
+                    secondaryMatrices);
+                AppendSelection(
+                    selectionState.EditInvalidPreview,
+                    world,
+                    invalidMatrices);
+                activeColor = editSelectedColor;
+            }
+            else if (selectionState?.EditHovered != null)
             {
                 activeColor = editHoverColor;
-                AppendSelection(selectionState.EditHovered, world);
+                AppendSelection(
+                    selectionState.EditHovered,
+                    world,
+                    primaryMatrices);
             }
             else if (selectionState?.EditSelected != null)
             {
                 activeColor = editSelectedColor;
-                AppendSelection(selectionState.EditSelected, world);
+                AppendSelection(
+                    selectionState.EditSelected,
+                    world,
+                    primaryMatrices);
             }
             else if (selectionState?.Selected != null)
             {
                 activeColor = selectedColor;
-                AppendCell(selectionState.Selected.Value.Cell, world.CellSize);
+                AppendCell(
+                    selectionState.Selected.Value.Cell,
+                    world.CellSize,
+                    primaryMatrices);
             }
             else if (selectionState?.Hovered != null)
             {
                 activeColor = hoverColor;
-                AppendCell(selectionState.Hovered.Value.Cell, world.CellSize);
+                AppendCell(
+                    selectionState.Hovered.Value.Cell,
+                    world.CellSize,
+                    primaryMatrices);
             }
 
             RecalculateInstanceBounds();
@@ -166,11 +206,17 @@ namespace MiniCivilization.World.Interaction
 
         private void AppendSelection(
             IWorldCellSelection selection,
-            WorldData world)
+            WorldData world,
+            List<Matrix4x4> target)
         {
+            if (selection == null)
+            {
+                return;
+            }
+
             if (selection is WorldCellBoxSelection box)
             {
-                AppendBox(box.Bounds, world.CellSize);
+                AppendBox(box.Bounds, world.CellSize, target);
                 return;
             }
 
@@ -178,21 +224,28 @@ namespace MiniCivilization.World.Interaction
             selection.CopyCellsTo(selectedCells, world);
             for (var index = 0; index < selectedCells.Count; index++)
             {
-                AppendCell(selectedCells[index], world.CellSize);
+                AppendCell(selectedCells[index], world.CellSize, target);
             }
         }
 
-        private void AppendCell(CellCoordinate coordinate, float cellSize)
+        private void AppendCell(
+            CellCoordinate coordinate,
+            float cellSize,
+            List<Matrix4x4> target)
         {
             AppendLocalBox(
                 new Vector3(
                     (coordinate.X + 0.5f) * cellSize,
                     (coordinate.Y + 0.5f) * cellSize,
                     (coordinate.Z + 0.5f) * cellSize),
-                Vector3.one * cellSize);
+                Vector3.one * cellSize,
+                target);
         }
 
-        private void AppendBox(in CellBounds bounds, float cellSize)
+        private void AppendBox(
+            in CellBounds bounds,
+            float cellSize,
+            List<Matrix4x4> target)
         {
             var size = new Vector3(
                 bounds.Maximum.X - bounds.Minimum.X + 1,
@@ -203,10 +256,13 @@ namespace MiniCivilization.World.Interaction
                 (bounds.Minimum.Y + bounds.Maximum.Y + 1) * 0.5f,
                 (bounds.Minimum.Z + bounds.Maximum.Z + 1) * 0.5f)
                 * cellSize;
-            AppendLocalBox(center, size);
+            AppendLocalBox(center, size, target);
         }
 
-        private void AppendLocalBox(Vector3 center, Vector3 size)
+        private void AppendLocalBox(
+            Vector3 center,
+            Vector3 size,
+            List<Matrix4x4> target)
         {
             var rootMatrix = Matrix4x4.identity;
             if (worldManager?.Renderer?.RenderRoot != null)
@@ -215,7 +271,7 @@ namespace MiniCivilization.World.Interaction
             }
 
             var paddedSize = size + Vector3.one * (cellPadding * 2f);
-            instanceMatrices.Add(
+            target.Add(
                 rootMatrix * Matrix4x4.TRS(
                     center,
                     Quaternion.identity,
@@ -224,7 +280,9 @@ namespace MiniCivilization.World.Interaction
 
         private void RenderInstances()
         {
-            if (instanceMatrices.Count == 0
+            if ((primaryMatrices.Count == 0
+                && secondaryMatrices.Count == 0
+                && invalidMatrices.Count == 0)
                 || !EnsureRuntimeMaterial()
                 || !Application.isPlaying)
             {
@@ -232,10 +290,21 @@ namespace MiniCivilization.World.Interaction
             }
 
             EnsureUnitCube();
+            RenderBatch(primaryMatrices, activeColor);
+            RenderBatch(secondaryMatrices, editSecondaryColor);
+            RenderBatch(invalidMatrices, editInvalidColor);
+        }
+
+        private void RenderBatch(List<Matrix4x4> matrices, Color color)
+        {
+            if (matrices.Count == 0)
+            {
+                return;
+            }
+
             propertyBlock ??= new MaterialPropertyBlock();
             propertyBlock.Clear();
-            propertyBlock.SetColor(BaseColorId, activeColor);
-
+            propertyBlock.SetColor(BaseColorId, color);
             var renderParams = new RenderParams(runtimeMaterial)
             {
                 layer = gameObject.layer,
@@ -245,17 +314,17 @@ namespace MiniCivilization.World.Interaction
                 receiveShadows = false
             };
 
-            for (var start = 0; start < instanceMatrices.Count;
+            for (var start = 0; start < matrices.Count;
                  start += MaxInstancesPerDraw)
             {
                 var count = Mathf.Min(
                     MaxInstancesPerDraw,
-                    instanceMatrices.Count - start);
+                    matrices.Count - start);
                 Graphics.RenderMeshInstanced(
                     renderParams,
                     unitCubeMesh,
                     0,
-                    instanceMatrices,
+                    matrices,
                     count,
                     start);
             }
@@ -263,7 +332,9 @@ namespace MiniCivilization.World.Interaction
 
         private void RecalculateInstanceBounds()
         {
-            if (instanceMatrices.Count == 0)
+            if (primaryMatrices.Count == 0
+                && secondaryMatrices.Count == 0
+                && invalidMatrices.Count == 0)
             {
                 instanceBounds = default;
                 return;
@@ -277,11 +348,25 @@ namespace MiniCivilization.World.Interaction
                 float.NegativeInfinity,
                 float.NegativeInfinity,
                 float.NegativeInfinity);
+            EncapsulateMatrices(primaryMatrices, ref minimum, ref maximum);
+            EncapsulateMatrices(secondaryMatrices, ref minimum, ref maximum);
+            EncapsulateMatrices(invalidMatrices, ref minimum, ref maximum);
+
+            instanceBounds = new Bounds(
+                (minimum + maximum) * 0.5f,
+                maximum - minimum);
+        }
+
+        private static void EncapsulateMatrices(
+            List<Matrix4x4> matrices,
+            ref Vector3 minimum,
+            ref Vector3 maximum)
+        {
             for (var matrixIndex = 0;
-                 matrixIndex < instanceMatrices.Count;
+                 matrixIndex < matrices.Count;
                  matrixIndex++)
             {
-                var matrix = instanceMatrices[matrixIndex];
+                var matrix = matrices[matrixIndex];
                 for (var corner = 0; corner < 8; corner++)
                 {
                     var point = matrix.MultiplyPoint3x4(new Vector3(
@@ -293,9 +378,13 @@ namespace MiniCivilization.World.Interaction
                 }
             }
 
-            instanceBounds = new Bounds(
-                (minimum + maximum) * 0.5f,
-                maximum - minimum);
+        }
+
+        private void ClearMatrices()
+        {
+            primaryMatrices.Clear();
+            secondaryMatrices.Clear();
+            invalidMatrices.Clear();
         }
 
         private bool TryGetWorld(out WorldData world)

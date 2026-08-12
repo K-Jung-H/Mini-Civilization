@@ -1,4 +1,5 @@
 using System;
+using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using UnityEngine;
 
@@ -18,7 +19,7 @@ namespace MiniCivilization.World.Editing
         Terrain,
         Biome,
         Water,
-        Surface
+        Road
     }
 
     public enum TerrainEditOperation : byte
@@ -29,36 +30,62 @@ namespace MiniCivilization.World.Editing
         Remove
     }
 
+    public enum RoadEditOperation : byte
+    {
+        Place,
+        Remove
+    }
+
     public readonly struct WorldEditAction : IEquatable<WorldEditAction>
     {
         public readonly WorldEditPropertyGroup PropertyGroup;
         public readonly TerrainEditOperation TerrainOperation;
         public readonly BiomeType Biome;
+        public readonly RoadEditOperation RoadOperation;
 
         public bool IsSupported =>
             PropertyGroup == WorldEditPropertyGroup.Terrain
-            || PropertyGroup == WorldEditPropertyGroup.Biome;
+            || PropertyGroup == WorldEditPropertyGroup.Biome
+            || PropertyGroup == WorldEditPropertyGroup.Road;
 
         private WorldEditAction(
             WorldEditPropertyGroup propertyGroup,
             TerrainEditOperation terrainOperation,
-            BiomeType biome)
+            BiomeType biome,
+            RoadEditOperation roadOperation)
         {
             PropertyGroup = propertyGroup;
             TerrainOperation = terrainOperation;
             Biome = biome;
+            RoadOperation = roadOperation;
         }
 
         public static WorldEditAction Terrain(TerrainEditOperation operation) =>
-            new(WorldEditPropertyGroup.Terrain, operation, BiomeType.None);
+            new(
+                WorldEditPropertyGroup.Terrain,
+                operation,
+                BiomeType.None,
+                default);
 
         public static WorldEditAction SetBiome(BiomeType biome) =>
-            new(WorldEditPropertyGroup.Biome, default, biome);
+            new(
+                WorldEditPropertyGroup.Biome,
+                default,
+                biome,
+                default);
+
+        public static WorldEditAction Road(RoadEditOperation operation) =>
+            new(
+                WorldEditPropertyGroup.Road,
+                default,
+                BiomeType.None,
+                operation);
 
         public bool Equals(WorldEditAction other) =>
             PropertyGroup == other.PropertyGroup
             && TerrainOperation == other.TerrainOperation
-            && Biome == other.Biome;
+            && Biome == other.Biome
+            && RoadOperation == other.RoadOperation;
 
         public override bool Equals(object obj) =>
             obj is WorldEditAction other && Equals(other);
@@ -67,40 +94,42 @@ namespace MiniCivilization.World.Editing
             HashCode.Combine(
                 (byte)PropertyGroup,
                 (byte)TerrainOperation,
-                (ushort)Biome);
+                (ushort)Biome,
+                (byte)RoadOperation);
     }
 
     public readonly struct WorldEditToolSnapshot :
         IEquatable<WorldEditToolSnapshot>
     {
         public readonly WorldEditMode Mode;
-        public readonly WorldEditPropertyGroup PropertyGroup;
-        public readonly int DetailIndex;
+        public readonly WorldEditAction Action;
+        public readonly EntityDefinition EntityDefinition;
         public readonly int BrushSize;
 
+        public WorldEditPropertyGroup PropertyGroup => Action.PropertyGroup;
         public bool CapturesPointer => Mode != WorldEditMode.None;
+        public bool IsEntityTool => EntityDefinition != null;
         public bool IsReady =>
             CapturesPointer
-            && PropertyGroup != WorldEditPropertyGroup.None
-            && DetailIndex >= 0;
+            && (Action.IsSupported || EntityDefinition != null);
 
         public WorldEditToolSnapshot(
             WorldEditMode mode,
-            WorldEditPropertyGroup propertyGroup,
-            int detailIndex,
+            WorldEditAction action,
+            EntityDefinition entityDefinition,
             int brushSize = 1)
         {
             Mode = mode;
-            PropertyGroup = propertyGroup;
-            DetailIndex = detailIndex;
+            Action = action;
+            EntityDefinition = entityDefinition;
             BrushSize = Math.Clamp(brushSize, 1, 3);
         }
 
         public bool Equals(WorldEditToolSnapshot other)
         {
             return Mode == other.Mode
-                && PropertyGroup == other.PropertyGroup
-                && DetailIndex == other.DetailIndex
+                && Action.Equals(other.Action)
+                && ReferenceEquals(EntityDefinition, other.EntityDefinition)
                 && BrushSize == other.BrushSize;
         }
 
@@ -110,8 +139,8 @@ namespace MiniCivilization.World.Editing
         public override int GetHashCode() =>
             HashCode.Combine(
                 (byte)Mode,
-                (byte)PropertyGroup,
-                DetailIndex,
+                Action,
+                EntityDefinition,
                 BrushSize);
     }
 
@@ -119,23 +148,27 @@ namespace MiniCivilization.World.Editing
     public sealed class WorldEditToolState : MonoBehaviour
     {
         private WorldEditToolbarView toolbarView;
-
+        private WorldEntityCatalogView catalogView;
         private WorldEditToolSnapshot current;
         private bool isSubscribed;
+        private bool isSynchronizingSelection;
 
         public WorldEditToolSnapshot Current => current;
         public WorldEditMode Mode => current.Mode;
-        public WorldEditPropertyGroup PropertyGroup => current.PropertyGroup;
-        public int DetailIndex => current.DetailIndex;
+        public WorldEditAction Action => current.Action;
+        public EntityDefinition EntityDefinition => current.EntityDefinition;
         public int BrushSize => current.BrushSize;
         public bool CapturesPointer => current.CapturesPointer;
         public bool IsToolReady => current.IsReady;
+        public bool BlocksCellSelection =>
+            toolbarView != null && toolbarView.IsExpanded;
 
         public event Action<WorldEditToolSnapshot> StateChanged;
 
         private void OnEnable()
         {
             Subscribe();
+            SynchronizeEntityToolAvailability();
             Refresh();
         }
 
@@ -144,11 +177,15 @@ namespace MiniCivilization.World.Editing
             Unsubscribe();
         }
 
-        public void Configure(WorldEditToolbarView view)
+        public void Configure(
+            WorldEditToolbarView toolbar,
+            WorldEntityCatalogView catalog = null)
         {
             Unsubscribe();
-            toolbarView = view;
+            toolbarView = toolbar;
+            catalogView = catalog;
             Subscribe();
+            SynchronizeEntityToolAvailability();
             Refresh();
         }
 
@@ -160,6 +197,14 @@ namespace MiniCivilization.World.Editing
             }
 
             toolbarView.SelectionChanged += Refresh;
+            toolbarView.EditActionSelected += OnEditActionSelected;
+            toolbarView.PropertyCategorySelected += OnPropertyCategorySelected;
+            if (catalogView != null)
+            {
+                catalogView.ActiveCategoryChanged += OnActiveCategoryChanged;
+                catalogView.DefinitionSelected += OnDefinitionSelected;
+            }
+
             isSubscribed = true;
         }
 
@@ -173,9 +218,79 @@ namespace MiniCivilization.World.Editing
             if (toolbarView != null)
             {
                 toolbarView.SelectionChanged -= Refresh;
+                toolbarView.EditActionSelected -= OnEditActionSelected;
+                toolbarView.PropertyCategorySelected -=
+                    OnPropertyCategorySelected;
+            }
+
+            if (catalogView != null)
+            {
+                catalogView.ActiveCategoryChanged -= OnActiveCategoryChanged;
+                catalogView.DefinitionSelected -= OnDefinitionSelected;
             }
 
             isSubscribed = false;
+        }
+
+        private void OnEditActionSelected(WorldEditAction _)
+        {
+            ClearEntitySelection();
+            toolbarView?.EnsureSelectModeGroupExpanded();
+            Refresh();
+        }
+
+        private void OnPropertyCategorySelected()
+        {
+            ClearEntitySelection();
+            Refresh();
+        }
+
+        private void OnDefinitionSelected(EntityDefinition definition)
+        {
+            if (isSynchronizingSelection)
+            {
+                return;
+            }
+
+            if (definition != null)
+            {
+                isSynchronizingSelection = true;
+                toolbarView?.ClearActiveEditAction();
+                toolbarView?.EnsureSelectModeGroupExpanded();
+                isSynchronizingSelection = false;
+            }
+
+            Refresh();
+        }
+
+        private void OnActiveCategoryChanged(EntityCategory? category)
+        {
+            if (category.HasValue)
+            {
+                isSynchronizingSelection = true;
+                toolbarView?.ClearActiveEditAction();
+                isSynchronizingSelection = false;
+            }
+
+            toolbarView?.SetEntityToolActive(category);
+            Refresh();
+        }
+
+        private void ClearEntitySelection()
+        {
+            if (catalogView == null || catalogView.SelectedDefinition == null)
+            {
+                return;
+            }
+
+            isSynchronizingSelection = true;
+            catalogView.ClearSelectedDefinition();
+            isSynchronizingSelection = false;
+        }
+
+        private void SynchronizeEntityToolAvailability()
+        {
+            toolbarView?.SetEntityToolActive(catalogView?.ActiveCategory);
         }
 
         private void Refresh()
@@ -205,29 +320,22 @@ namespace MiniCivilization.World.Editing
                 _ => WorldEditMode.None
             };
             var brushSize = toolbarView.GetSelectedBrushSize();
-            if (!toolbarView.TryGetSelectedProperty(
-                    out var sectionIndex,
-                    out var detailIndex))
+            if (toolbarView.TryGetSelectedEditAction(out var action))
             {
                 return new WorldEditToolSnapshot(
                     mode,
-                    WorldEditPropertyGroup.None,
-                    -1,
+                    action,
+                    null,
                     brushSize);
             }
 
-            var propertyGroup = sectionIndex switch
-            {
-                0 => WorldEditPropertyGroup.Terrain,
-                1 => WorldEditPropertyGroup.Biome,
-                2 => WorldEditPropertyGroup.Water,
-                3 => WorldEditPropertyGroup.Surface,
-                _ => WorldEditPropertyGroup.None
-            };
+            var definition = toolbarView.IsEntityGroupExpanded
+                ? catalogView?.SelectedDefinition
+                : null;
             return new WorldEditToolSnapshot(
                 mode,
-                propertyGroup,
-                detailIndex,
+                default,
+                definition,
                 brushSize);
         }
     }

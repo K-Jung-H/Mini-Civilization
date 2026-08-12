@@ -40,6 +40,13 @@ namespace MiniCivilization.World.Interaction
                 selectionState.Clear();
             }
 
+            var blocksCellSelection = editToolState != null
+                && editToolState.BlocksCellSelection;
+            if (blocksCellSelection && selectionState.Selected.HasValue)
+            {
+                selectionState.SetSelected(null);
+            }
+
             if (EventSystem.current != null
                 && EventSystem.current.IsPointerOverGameObject())
             {
@@ -73,7 +80,7 @@ namespace MiniCivilization.World.Interaction
             }
 
             if (mouse.leftButton.wasPressedThisFrame
-                && (editToolState == null || !editToolState.CapturesPointer))
+                && !blocksCellSelection)
             {
                 selectionState.SelectHovered();
             }

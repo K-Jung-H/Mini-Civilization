@@ -54,17 +54,23 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private WorldManager worldManager;
         [SerializeField] private WorldEditToolState toolState;
         [SerializeField] private WorldTileSelectionState selectionState;
+        [SerializeField] private WorldEditConfirmationView confirmationView;
+        [SerializeField] private WorldEditToolbarView toolbarView;
 
         private bool isDragging;
+        private bool isPending;
+        private bool pendingExecutable;
         private TilePickResult dragStart;
         private TilePickResult dragCurrent;
         private WorldEditToolSnapshot dragTool;
         private readonly HashSet<int> brushCellIndices = new();
         private readonly List<CellCoordinate> brushCells = new();
-        private TilePickResult? brushPreviewAnchor;
+        private TilePickResult? idlePreviewAnchor;
         private int brushPreviewSize;
+        private WorldEditToolSnapshot pendingTool;
 
         public bool IsDragging => isDragging;
+        public bool IsPending => isPending;
         public WorldEditDragSnapshot? CurrentDrag =>
             isDragging
                 ? new WorldEditDragSnapshot(
@@ -78,6 +84,11 @@ namespace MiniCivilization.World.Editing
         public event Action<WorldEditDragSnapshot> DragChanged;
         public event Action<WorldEditDragSnapshot> DragCompleted;
         public event Action DragCancelled;
+        public event Action<IWorldCellSelection, WorldEditToolSnapshot>
+            PendingSelectionChanged;
+        public event Action<IWorldCellSelection, WorldEditToolSnapshot>
+            ExecutionRequested;
+        public event Action PendingCancelled;
 
         private void OnEnable()
         {
@@ -85,6 +96,9 @@ namespace MiniCivilization.World.Editing
             {
                 toolState.StateChanged += OnToolStateChanged;
             }
+
+            BindToolbarView();
+            BindConfirmationView();
         }
 
         private void OnDisable()
@@ -94,6 +108,9 @@ namespace MiniCivilization.World.Editing
                 toolState.StateChanged -= OnToolStateChanged;
             }
 
+            UnbindToolbarView();
+            UnbindConfirmationView();
+            CancelPending();
             CancelDrag();
         }
 
@@ -113,14 +130,24 @@ namespace MiniCivilization.World.Editing
             if ((Keyboard.current?.escapeKey.wasPressedThisFrame ?? false)
                 || mouse.rightButton.wasPressedThisFrame)
             {
-                CancelDrag();
+                if (isPending)
+                {
+                    CancelPending();
+                }
+                else
+                {
+                    CancelDrag();
+                }
                 return;
             }
 
-            // Selection shape input belongs to the edit mode itself. Property
-            // details are only required when the resulting selection is
-            // applied, so changing a property must not disable reselection.
-            if (!toolState.CapturesPointer)
+            if (isPending)
+            {
+                selectionState.ClearEditHovered();
+                return;
+            }
+
+            if (!toolState.IsToolReady)
             {
                 CancelDrag();
                 return;
@@ -164,27 +191,83 @@ namespace MiniCivilization.World.Editing
             {
                 RefreshIdleBrushPreview(hovered);
             }
+            else
+            {
+                RefreshSinglePreview(hovered);
+            }
         }
 
         public void Configure(
             WorldManager manager,
             WorldEditToolState state,
-            WorldTileSelectionState selection)
+            WorldTileSelectionState selection,
+            WorldEditConfirmationView confirmation = null,
+            WorldEditToolbarView toolbar = null)
         {
             if (isActiveAndEnabled && toolState != null)
             {
                 toolState.StateChanged -= OnToolStateChanged;
             }
 
+            UnbindToolbarView();
+            UnbindConfirmationView();
+            CancelPending();
             CancelDrag();
             worldManager = manager;
             toolState = state;
             selectionState = selection;
+            confirmationView = confirmation;
+            toolbarView = toolbar;
 
             if (isActiveAndEnabled && toolState != null)
             {
                 toolState.StateChanged += OnToolStateChanged;
             }
+
+            BindToolbarView();
+            BindConfirmationView();
+        }
+
+        public void SetPendingExecutable(bool executable)
+        {
+            if (!isPending)
+            {
+                return;
+            }
+
+            pendingExecutable = executable;
+            confirmationView?.SetExecutable(executable);
+        }
+
+        public void CompletePendingExecution()
+        {
+            if (!isPending)
+            {
+                return;
+            }
+
+            isPending = false;
+            pendingExecutable = false;
+            selectionState?.ClearEditSelected();
+            selectionState?.ClearEditPreview();
+            confirmationView?.Hide();
+        }
+
+        public void CancelPending()
+        {
+            if (!isPending
+                && selectionState?.EditSelected == null)
+            {
+                confirmationView?.Hide();
+                return;
+            }
+
+            isPending = false;
+            pendingExecutable = false;
+            selectionState?.ClearEditSelected();
+            selectionState?.ClearEditPreview();
+            confirmationView?.Hide();
+            PendingCancelled?.Invoke();
         }
 
         public void CancelDrag()
@@ -192,7 +275,7 @@ namespace MiniCivilization.World.Editing
             selectionState?.ClearEditHovered();
             brushCellIndices.Clear();
             brushCells.Clear();
-            brushPreviewAnchor = null;
+            idlePreviewAnchor = null;
             if (!isDragging)
             {
                 return;
@@ -204,11 +287,21 @@ namespace MiniCivilization.World.Editing
 
         private void BeginDrag(TilePickResult pick)
         {
+            dragTool = toolState.Current;
+            if (!TryResolveToolPick(pick, dragTool, out pick))
+            {
+                selectionState?.ClearEditHovered();
+                return;
+            }
+
             isDragging = true;
             dragStart = pick;
             dragCurrent = pick;
-            dragTool = toolState.Current;
-            if (dragTool.Mode == WorldEditMode.Brush)
+            if (dragTool.Mode == WorldEditMode.Single)
+            {
+                RefreshSinglePreview(pick);
+            }
+            else if (dragTool.Mode == WorldEditMode.Brush)
             {
                 brushCellIndices.Clear();
                 brushCells.Clear();
@@ -226,6 +319,12 @@ namespace MiniCivilization.World.Editing
 
         private void UpdateDrag(TilePickResult pick)
         {
+            if (!TryResolveToolPick(pick, dragTool, out pick))
+            {
+                selectionState?.ClearEditHovered();
+                return;
+            }
+
             if (pick.Cell.Equals(dragCurrent.Cell))
             {
                 return;
@@ -233,7 +332,11 @@ namespace MiniCivilization.World.Editing
 
             var previous = dragCurrent;
             dragCurrent = pick;
-            if (dragTool.Mode == WorldEditMode.Brush)
+            if (dragTool.Mode == WorldEditMode.Single)
+            {
+                RefreshSinglePreview(pick);
+            }
+            else if (dragTool.Mode == WorldEditMode.Brush)
             {
                 AppendBrushSegment(previous, pick);
                 RefreshBrushStrokePreview();
@@ -250,19 +353,28 @@ namespace MiniCivilization.World.Editing
         private void CompleteDrag()
         {
             var snapshot = CreateSnapshot();
-            if (dragTool.Mode == WorldEditMode.Single)
-            {
-                CommitSingleSelection();
-            }
-            else
-            {
-                selectionState.CommitEditHovered();
-            }
-
+            var selection = selectionState?.EditHovered;
             isDragging = false;
             brushCellIndices.Clear();
             brushCells.Clear();
-            brushPreviewAnchor = null;
+            idlePreviewAnchor = null;
+            if (selection == null)
+            {
+                DragCompleted?.Invoke(snapshot);
+                return;
+            }
+
+            pendingTool = dragTool;
+            isPending = true;
+            pendingExecutable = false;
+            var screenPosition = Mouse.current != null
+                ? Mouse.current.position.ReadValue()
+                : Vector2.zero;
+            confirmationView?.Show(screenPosition, false);
+            selectionState.CommitEditHovered();
+            PendingSelectionChanged?.Invoke(
+                selectionState.EditSelected,
+                pendingTool);
             DragCompleted?.Invoke(snapshot);
         }
 
@@ -294,8 +406,8 @@ namespace MiniCivilization.World.Editing
         private void RefreshIdleBrushPreview(TilePickResult hovered)
         {
             var size = Mathf.Clamp(toolState.BrushSize, 1, 3);
-            if (brushPreviewAnchor.HasValue
-                && brushPreviewAnchor.Value.Equals(hovered)
+            if (idlePreviewAnchor.HasValue
+                && idlePreviewAnchor.Value.Equals(hovered)
                 && brushPreviewSize == size
                 && selectionState.EditHovered is WorldCellSetSelection)
             {
@@ -306,18 +418,18 @@ namespace MiniCivilization.World.Editing
             brushCells.Clear();
             AddBrushFootprint(hovered.Cell, size);
             RefreshBrushStrokePreview();
-            brushPreviewAnchor = hovered;
+            idlePreviewAnchor = hovered;
             brushPreviewSize = size;
         }
 
         private void ClearIdleBrushPreview()
         {
-            if (isDragging || toolState?.Mode != WorldEditMode.Brush)
+            if (isDragging)
             {
                 return;
             }
 
-            brushPreviewAnchor = null;
+            idlePreviewAnchor = null;
             selectionState?.ClearEditHovered();
         }
 
@@ -351,22 +463,119 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private void CommitSingleSelection()
+        private void RefreshSinglePreview(TilePickResult pick)
         {
-            if (worldManager == null
-                || !worldManager.HasWorld
-                || selectionState == null
-                || !selectionState.Hovered.HasValue)
+            var source = pick;
+            if (!isDragging
+                && idlePreviewAnchor.HasValue
+                && idlePreviewAnchor.Value.Equals(source)
+                && selectionState?.EditHovered != null)
             {
                 return;
             }
 
-            var pick = selectionState.Hovered.Value;
-            dragCurrent = pick;
-            selectionState.ReplaceEditSelected(
+            var tool = isDragging ? dragTool : toolState.Current;
+            if (!TryResolveToolPick(pick, tool, out pick))
+            {
+                selectionState?.ClearEditHovered();
+                return;
+            }
+
+            if (worldManager == null
+                || !worldManager.HasWorld
+                || selectionState == null
+                || !worldManager.CurrentWorldData.Contains(
+                    pick.Cell.X,
+                    pick.Cell.Y,
+                    pick.Cell.Z))
+            {
+                return;
+            }
+
+            selectionState.ReplaceEditHovered(
                 WorldCellSetSelection.Create(
                     worldManager.CurrentWorldData,
                     new[] { pick.Cell }));
+            if (!isDragging)
+            {
+                idlePreviewAnchor = source;
+            }
+        }
+
+        private bool TryResolveToolPick(
+            TilePickResult source,
+            WorldEditToolSnapshot tool,
+            out TilePickResult resolved)
+        {
+            resolved = source;
+            if (!tool.IsEntityTool
+                || tool.EntityDefinition.Prefab.Category
+                    != EntityCategory.Building)
+            {
+                return true;
+            }
+
+            var world = worldManager?.CurrentWorldData;
+            if (world == null)
+            {
+                return false;
+            }
+
+            var normal = source.HitNormal;
+            var rendererTransform = worldManager.Renderer != null
+                ? worldManager.Renderer.RenderRoot
+                : null;
+            if (rendererTransform != null)
+            {
+                normal = rendererTransform.InverseTransformDirection(normal);
+            }
+
+            var absoluteX = Mathf.Abs(normal.x);
+            var absoluteY = Mathf.Abs(normal.y);
+            var absoluteZ = Mathf.Abs(normal.z);
+            var offsetX = 0;
+            var offsetY = 0;
+            var offsetZ = 0;
+            if (absoluteY >= absoluteX && absoluteY >= absoluteZ)
+            {
+                offsetY = normal.y >= 0f ? 1 : -1;
+            }
+            else if (absoluteX >= absoluteZ)
+            {
+                offsetX = normal.x >= 0f ? 1 : -1;
+            }
+            else
+            {
+                offsetZ = normal.z >= 0f ? 1 : -1;
+            }
+
+            var target = new CellCoordinate(
+                source.Cell.X + offsetX,
+                source.Cell.Y + offsetY,
+                source.Cell.Z + offsetZ);
+            if (!world.TryGetCell(
+                    target.X,
+                    target.Y,
+                    target.Z,
+                    out var targetCell)
+                || targetCell.HasTerrain
+                || targetCell.HasWater)
+            {
+                return false;
+            }
+
+            resolved = new TilePickResult(
+                target,
+                WorldCellIndex.Encode(
+                    world,
+                    target.X,
+                    target.Y,
+                    target.Z),
+                source.SurfaceType,
+                source.HitPoint,
+                source.HitNormal,
+                source.Distance);
+            return true;
         }
 
         private void AddBrushFootprint(
@@ -417,6 +626,13 @@ namespace MiniCivilization.World.Editing
 
         private void OnToolStateChanged(WorldEditToolSnapshot next)
         {
+            if (isPending && !pendingTool.Equals(next))
+            {
+                CancelPending();
+                CancelDrag();
+                return;
+            }
+
             if (isDragging && !dragTool.Equals(next))
             {
                 CancelDrag();
@@ -428,8 +644,71 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            brushPreviewAnchor = null;
+            idlePreviewAnchor = null;
             selectionState?.ClearEditHovered();
+        }
+
+        private void BindConfirmationView()
+        {
+            if (confirmationView == null)
+            {
+                return;
+            }
+
+            confirmationView.CancelRequested -= CancelPending;
+            confirmationView.CancelRequested += CancelPending;
+            confirmationView.ExecuteRequested -= RequestExecution;
+            confirmationView.ExecuteRequested += RequestExecution;
+        }
+
+        private void UnbindConfirmationView()
+        {
+            if (confirmationView == null)
+            {
+                return;
+            }
+
+            confirmationView.CancelRequested -= CancelPending;
+            confirmationView.ExecuteRequested -= RequestExecution;
+        }
+
+        private void BindToolbarView()
+        {
+            if (toolbarView == null)
+            {
+                return;
+            }
+
+            toolbarView.StructureChanged -= OnToolbarStructureChanged;
+            toolbarView.StructureChanged += OnToolbarStructureChanged;
+        }
+
+        private void UnbindToolbarView()
+        {
+            if (toolbarView != null)
+            {
+                toolbarView.StructureChanged -= OnToolbarStructureChanged;
+            }
+        }
+
+        private void OnToolbarStructureChanged()
+        {
+            CancelPending();
+            CancelDrag();
+        }
+
+        private void RequestExecution()
+        {
+            if (!isPending
+                || !pendingExecutable
+                || selectionState?.EditSelected == null)
+            {
+                return;
+            }
+
+            ExecutionRequested?.Invoke(
+                selectionState.EditSelected,
+                pendingTool);
         }
     }
 }

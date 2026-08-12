@@ -40,72 +40,28 @@ namespace MiniCivilization.World.Editor
                     authoring.TargetController.gameObject);
             }
 
+            EntityAuthoringSystemEditor.RebuildPreview(
+                authoring.AuthoringSystem);
+
             if (authoring.gameObject.scene.IsValid())
             {
                 EditorSceneManager.MarkSceneDirty(authoring.gameObject.scene);
             }
         }
 
-        private void OnSceneGUI()
+    }
+
+    [CustomEditor(typeof(BuildingWayPointMarker))]
+    public sealed class BuildingWayPointMarkerEditor : UnityEditor.Editor
+    {
+        public override void OnInspectorGUI()
         {
-            var authoring = (BuildingWayAuthoring)target;
-            var previousColor = Handles.color;
-            var previousZTest = Handles.zTest;
-            Handles.zTest = CompareFunction.Always;
-            Handles.color = new Color(0.15f, 0.8f, 1f, 1f);
-            var markerContainer = authoring.MarkerContainer;
-            if (markerContainer == null)
+            EditorGUI.BeginChangeCheck();
+            DrawDefaultInspector();
+            if (EditorGUI.EndChangeCheck())
             {
-                Handles.color = previousColor;
-                Handles.zTest = previousZTest;
-                return;
+                SceneView.RepaintAll();
             }
-
-            var markers = markerContainer.GetComponentsInChildren<
-                BuildingWayPointMarker>(true);
-            for (var markerIndex = 0;
-                 markerIndex < markers.Length;
-                 markerIndex++)
-            {
-                var marker = markers[markerIndex];
-                var connections = marker.Connections;
-                for (var connectionIndex = 0;
-                     connectionIndex < connections.Count;
-                     connectionIndex++)
-                {
-                    var connection = connections[connectionIndex];
-                    if (connection.Target == null)
-                    {
-                        continue;
-                    }
-
-                    var start = marker.transform.position;
-                    var end = connection.Target.transform.position;
-                    Handles.DrawAAPolyLine(4f, start, end);
-                    if (!connection.OneWay)
-                    {
-                        continue;
-                    }
-
-                    var direction = end - start;
-                    if (direction.sqrMagnitude <= 0f)
-                    {
-                        continue;
-                    }
-
-                    var midpoint = Vector3.Lerp(start, end, 0.65f);
-                    var size = HandleUtility.GetHandleSize(midpoint) * 0.08f;
-                    Handles.ConeHandleCap(
-                        0,
-                        midpoint,
-                        Quaternion.LookRotation(direction.normalized),
-                        size,
-                        EventType.Repaint);
-                }
-            }
-
-            Handles.color = previousColor;
-            Handles.zTest = previousZTest;
         }
     }
 
@@ -119,18 +75,49 @@ namespace MiniCivilization.World.Editor
             var previousColor = Handles.color;
             var previousZTest = Handles.zTest;
             Handles.zTest = CompareFunction.Always;
-            Handles.color = marker.ExternalDirection
-                == MiniCivilization.World.Entities.BuildingWayPointDirection.None
-                ? new Color(0.15f, 0.8f, 1f, 1f)
-                : new Color(1f, 0.55f, 0.1f, 1f);
+            Handles.color = new Color32(0, 0, 255, 255);
             var size = HandleUtility.GetHandleSize(marker.transform.position)
-                * 0.06f;
+                * 0.1f;
             Handles.SphereHandleCap(
                 0,
                 marker.transform.position,
                 Quaternion.identity,
                 size,
                 EventType.Repaint);
+
+            var connections = marker.Connections;
+            for (var index = 0; index < connections.Count; index++)
+            {
+                var connection = connections[index];
+                if (connection.Target == null)
+                {
+                    continue;
+                }
+
+                var start = marker.transform.position;
+                var end = connection.Target.transform.position;
+                Handles.DrawAAPolyLine(4f, start, end);
+                if (!connection.OneWay)
+                {
+                    continue;
+                }
+
+                var direction = end - start;
+                if (direction.sqrMagnitude <= 0f)
+                {
+                    continue;
+                }
+
+                var midpoint = Vector3.Lerp(start, end, 0.65f);
+                var arrowSize = HandleUtility.GetHandleSize(midpoint) * 0.08f;
+                Handles.ConeHandleCap(
+                    0,
+                    midpoint,
+                    Quaternion.LookRotation(direction.normalized),
+                    arrowSize,
+                    EventType.Repaint);
+            }
+
             Handles.color = previousColor;
             Handles.zTest = previousZTest;
         }

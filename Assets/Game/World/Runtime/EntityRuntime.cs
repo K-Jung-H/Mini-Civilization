@@ -37,10 +37,7 @@ namespace MiniCivilization.World.Runtime
             {
                 var data = world.Entities[index];
                 ReserveEntityId(data.Id);
-                AddRuntimeEntity(
-                    registry.Create(data),
-                    removeRoadsForBuilding: false,
-                    out _);
+                AddRuntimeEntity(registry.Create(data));
             }
         }
 
@@ -189,13 +186,9 @@ namespace MiniCivilization.World.Runtime
 
             var entity = registry.Create(data);
             world.AddEntity(data);
-            var clearedRoadCells = Array.Empty<CellCoordinate>();
             try
             {
-                AddRuntimeEntity(
-                    entity,
-                    removeRoadsForBuilding: true,
-                    out clearedRoadCells);
+                AddRuntimeEntity(entity);
             }
             catch
             {
@@ -212,9 +205,7 @@ namespace MiniCivilization.World.Runtime
                 new[] { data.Id },
                 NoEntityIds,
                 NoEntityIds,
-                CombineAffectedCells(
-                    GetIndexedCells(entity),
-                    clearedRoadCells),
+                GetIndexedCells(entity),
                 wayTopologyChanged: entity is BuildingEntity);
         }
 
@@ -241,6 +232,276 @@ namespace MiniCivilization.World.Runtime
                 typeKey,
                 anchorCell,
                 direction);
+        }
+
+        public BuildingPlacementResult EvaluateBuildingPlacement(
+            EntityData data)
+        {
+            if (data == null)
+            {
+                throw new ArgumentNullException(nameof(data));
+            }
+
+            if (registry.Create(data) is not BuildingEntity building)
+            {
+                throw new ArgumentException(
+                    $"Entity type key {data.TypeKey} is not a Building type.",
+                    nameof(data));
+            }
+
+            var layout = building.Layout
+                ?? throw new InvalidOperationException(
+                    $"Building type {data.TypeKey} does not define a layout.");
+            var hasCenterCell = false;
+            for (var index = 0; index < layout.BuildingCells.Count; index++)
+            {
+                if (layout.BuildingCells[index].LocalOffset.Equals(default))
+                {
+                    hasCenterCell = true;
+                    break;
+                }
+            }
+
+            if (!hasCenterCell)
+            {
+                throw new InvalidOperationException(
+                    $"Building type {data.TypeKey} must contain Building Cell (0, 0, 0).");
+            }
+
+            var buildingWorldCells = new CellCoordinate[
+                layout.BuildingCells.Count];
+            var anchorWorldCells = new CellCoordinate[
+                layout.TerrainAnchorCells.Count];
+            var columns = new Dictionary<int, BuildingPlacementColumn>();
+            var invalidCells = new HashSet<CellCoordinate>();
+            var centerSurface = runtime.SurfaceCache.GetSurfaceHeight(
+                data.AnchorCell.X,
+                data.AnchorCell.Z);
+            if (!centerSurface.HasGround)
+            {
+                invalidCells.Add(data.AnchorCell);
+            }
+
+            for (var index = 0; index < layout.BuildingCells.Count; index++)
+            {
+                var localCell = layout.BuildingCells[index];
+                var coordinate = layout.ToWorld(data, localCell.LocalOffset);
+                buildingWorldCells[index] = coordinate;
+                if (!world.Contains(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z))
+                {
+                    invalidCells.Add(coordinate);
+                    continue;
+                }
+
+                if (IsBuildingOccupied(coordinate)
+                    || IsTerrainAnchored(coordinate))
+                {
+                    invalidCells.Add(coordinate);
+                }
+
+                var column = GetOrCreatePlacementColumn(
+                    columns,
+                    coordinate);
+                var targetHeight = centerSurface.GroundHeight
+                    + localCell.LocalOffset.Y
+                    * WorldGrid.HeightStepsPerCell;
+                column.SetBuildingTarget(targetHeight, coordinate);
+            }
+
+            for (var index = 0;
+                 index < layout.TerrainAnchorCells.Count;
+                 index++)
+            {
+                var coordinate = layout.ToWorld(
+                    data,
+                    layout.TerrainAnchorCells[index]);
+                anchorWorldCells[index] = coordinate;
+                if (!world.Contains(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z))
+                {
+                    invalidCells.Add(coordinate);
+                    continue;
+                }
+
+                if (IsBuildingOccupied(coordinate)
+                    || IsTerrainAnchored(coordinate))
+                {
+                    invalidCells.Add(coordinate);
+                }
+
+                var column = GetOrCreatePlacementColumn(
+                    columns,
+                    coordinate);
+                column.RequireAnchorHeight(
+                    checked((coordinate.Y + 1)
+                        * WorldGrid.HeightStepsPerCell),
+                    coordinate);
+                var currentCell = world.GetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z);
+                if (WorldGrid.HeightStepsPerCell
+                        - currentCell.Terrain.SolidHeight
+                    > building.MaxTerrainCorrectionSteps)
+                {
+                    invalidCells.Add(coordinate);
+                }
+
+                if (currentCell.Terrain.SolidHeight
+                    < WorldGrid.HeightStepsPerCell)
+                {
+                    column.RequiresRebuild = true;
+                }
+            }
+
+            var terrainCorrections = new List<BuildingTerrainCorrection>();
+            var roadCells = new List<CellCoordinate>();
+            foreach (var column in columns.Values)
+            {
+                if (!column.Surface.HasGround)
+                {
+                    invalidCells.Add(column.RepresentativeCell);
+                    continue;
+                }
+
+                var targetHeight = column.HasBuildingTarget
+                    ? column.BuildingTargetHeight
+                    : Math.Max(
+                        column.Surface.GroundHeight,
+                        column.MinimumAnchorHeight);
+                if (column.HasBuildingTarget
+                    && targetHeight < column.MinimumAnchorHeight)
+                {
+                    invalidCells.Add(column.AnchorRepresentative);
+                }
+
+                if (targetHeight <= 0
+                    || targetHeight
+                        > world.Height * WorldGrid.HeightStepsPerCell
+                    || Math.Abs(
+                        targetHeight - column.Surface.GroundHeight)
+                        > building.MaxTerrainCorrectionSteps)
+                {
+                    invalidCells.Add(column.RepresentativeCell);
+                }
+
+                column.TargetHeight = targetHeight;
+                var changesTerrain = targetHeight
+                    != column.Surface.GroundHeight
+                    || column.RequiresRebuild;
+                if (changesTerrain
+                    && HasTerrainAnchorInColumn(column.X, column.Z))
+                {
+                    invalidCells.Add(column.RepresentativeCell);
+                }
+
+                if (changesTerrain)
+                {
+                    terrainCorrections.Add(new BuildingTerrainCorrection(
+                        column.X,
+                        column.Z,
+                        column.Surface.GroundHeight,
+                        targetHeight,
+                        ResolveSurfaceType(column)));
+                }
+            }
+
+            for (var index = 0; index < anchorWorldCells.Length; index++)
+            {
+                var coordinate = anchorWorldCells[index];
+                if (!world.Contains(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z))
+                {
+                    continue;
+                }
+
+                var column = columns[WorldIndex.EncodeColumn(
+                    world,
+                    coordinate.X,
+                    coordinate.Z)];
+                var projectedHeight = Math.Clamp(
+                    column.TargetHeight
+                        - coordinate.Y * WorldGrid.HeightStepsPerCell,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                if (projectedHeight < WorldGrid.HeightStepsPerCell)
+                {
+                    invalidCells.Add(coordinate);
+                }
+            }
+
+            var buildingColumns = new HashSet<int>();
+            for (var index = 0; index < buildingWorldCells.Length; index++)
+            {
+                var coordinate = buildingWorldCells[index];
+                if (!world.ContainsColumn(coordinate.X, coordinate.Z))
+                {
+                    continue;
+                }
+
+                var columnIndex = WorldIndex.EncodeColumn(
+                    world,
+                    coordinate.X,
+                    coordinate.Z);
+                if (!buildingColumns.Add(columnIndex))
+                {
+                    continue;
+                }
+
+                var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                    coordinate.X,
+                    coordinate.Z);
+                if (!surface.HasGround
+                    || !world.TryGetCell(
+                        coordinate.X,
+                        surface.GroundCellY,
+                        coordinate.Z,
+                        out var surfaceCell)
+                    || !surfaceCell.HasRoad)
+                {
+                    continue;
+                }
+
+                var roadCell = new CellCoordinate(
+                    coordinate.X,
+                    surface.GroundCellY,
+                    coordinate.Z);
+                roadCells.Add(roadCell);
+                if (IsTerrainAnchored(roadCell))
+                {
+                    invalidCells.Add(roadCell);
+                }
+            }
+
+            var placementContext = new BuildingPlacementContext(
+                world,
+                this,
+                building);
+            if (!building.ValidatePlacement(placementContext))
+            {
+                invalidCells.Add(data.AnchorCell);
+            }
+
+            Array.Sort(buildingWorldCells, CompareCells);
+            Array.Sort(anchorWorldCells, CompareCells);
+            terrainCorrections.Sort(CompareTerrainCorrections);
+            roadCells.Sort(CompareCells);
+            var invalidWorldCells = new CellCoordinate[invalidCells.Count];
+            invalidCells.CopyTo(invalidWorldCells);
+            Array.Sort(invalidWorldCells, CompareCells);
+            return new BuildingPlacementResult(
+                buildingWorldCells,
+                anchorWorldCells,
+                terrainCorrections.ToArray(),
+                roadCells.ToArray(),
+                invalidWorldCells);
         }
 
         public EntityChangeSet Remove(EntityId id)
@@ -513,6 +774,44 @@ namespace MiniCivilization.World.Runtime
             return id;
         }
 
+        private BuildingPlacementColumn GetOrCreatePlacementColumn(
+            Dictionary<int, BuildingPlacementColumn> columns,
+            CellCoordinate representativeCell)
+        {
+            var columnIndex = WorldIndex.EncodeColumn(
+                world,
+                representativeCell.X,
+                representativeCell.Z);
+            if (columns.TryGetValue(columnIndex, out var column))
+            {
+                return column;
+            }
+
+            column = new BuildingPlacementColumn(
+                representativeCell,
+                runtime.SurfaceCache.GetSurfaceHeight(
+                    representativeCell.X,
+                    representativeCell.Z));
+            columns.Add(columnIndex, column);
+            return column;
+        }
+
+        private SurfaceType ResolveSurfaceType(
+            BuildingPlacementColumn column)
+        {
+            if (!column.Surface.HasGround
+                || !world.TryGetCell(
+                    column.X,
+                    column.Surface.GroundCellY,
+                    column.Z,
+                    out var cell))
+            {
+                return SurfaceType.Ground;
+            }
+
+            return cell.Terrain.Surface;
+        }
+
         private void ReserveEntityId(EntityId id)
         {
             if (nextEntityId == 0 || id.Value < nextEntityId)
@@ -525,10 +824,7 @@ namespace MiniCivilization.World.Runtime
                 : id.Value + 1;
         }
 
-        private void AddRuntimeEntity(
-            Entity entity,
-            bool removeRoadsForBuilding,
-            out CellCoordinate[] clearedRoadCells)
+        private void AddRuntimeEntity(Entity entity)
         {
             if (entity == null)
             {
@@ -541,14 +837,11 @@ namespace MiniCivilization.World.Runtime
                     $"Entity ID {entity.Id} already exists in the runtime.");
             }
 
-            clearedRoadCells = Array.Empty<CellCoordinate>();
             try
             {
                 if (entity is BuildingEntity building)
                 {
-                    clearedRoadCells = AddBuilding(
-                        building,
-                        removeRoadsForBuilding);
+                    AddBuilding(building);
                 }
                 else
                 {
@@ -587,25 +880,25 @@ namespace MiniCivilization.World.Runtime
             entitiesById.Remove(entity.Id);
         }
 
-        private CellCoordinate[] AddBuilding(
-            BuildingEntity building,
-            bool removeRoads)
+        private void AddBuilding(BuildingEntity building)
         {
             var layout = building.Layout
                 ?? throw new InvalidOperationException(
                     $"Building {building.Id} does not define a layout.");
-            var occupied = new BuildingCellState[layout.OccupiedCells.Count];
-            var anchors = new int[layout.TerrainAnchorOffsets.Count];
+            var buildingStates = new BuildingCellState[
+                layout.BuildingCells.Count];
+            var anchors = new int[layout.TerrainAnchorCells.Count];
             var roadCells = CollectRoadCells(layout, building.Data);
-            if (!removeRoads && roadCells.Count != 0)
+            if (roadCells.Count != 0)
             {
                 throw new InvalidOperationException(
-                    $"Building {building.Id} overlaps saved Road data.");
+                    $"Building {building.Id} overlaps Road data. "
+                    + "Roads must be removed through the world edit path before adding the Building.");
             }
 
-            for (var index = 0; index < layout.OccupiedCells.Count; index++)
+            for (var index = 0; index < layout.BuildingCells.Count; index++)
             {
-                var localCell = layout.OccupiedCells[index];
+                var localCell = layout.BuildingCells[index];
                 var coordinate = layout.ToWorld(building.Data, localCell.LocalOffset);
                 var cellIndex = RequireWorldCell(coordinate, building.Id);
                 if (buildingCells.ContainsKey(cellIndex)
@@ -615,22 +908,32 @@ namespace MiniCivilization.World.Runtime
                         $"Building {building.Id} overlaps another building Cell or Terrain Anchor.");
                 }
 
-                occupied[index] = new BuildingCellState(
+                buildingStates[index] = new BuildingCellState(
                     building.Id,
                     coordinate);
             }
 
-            for (var index = 0; index < layout.TerrainAnchorOffsets.Count; index++)
+            for (var index = 0; index < layout.TerrainAnchorCells.Count; index++)
             {
                 var coordinate = layout.ToWorld(
                     building.Data,
-                    layout.TerrainAnchorOffsets[index]);
+                    layout.TerrainAnchorCells[index]);
                 var cellIndex = RequireWorldCell(coordinate, building.Id);
                 if (buildingCells.ContainsKey(cellIndex)
                     || terrainAnchorCells.Contains(cellIndex))
                 {
                     throw new InvalidOperationException(
                         $"Building {building.Id} overlaps another building Cell or Terrain Anchor.");
+                }
+
+                if (world.GetCell(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z).Terrain.SolidHeight
+                    != WorldGrid.HeightStepsPerCell)
+                {
+                    throw new InvalidOperationException(
+                        $"Building {building.Id} Terrain Anchor {coordinate} must be fully filled.");
                 }
 
                 anchors[index] = cellIndex;
@@ -643,9 +946,9 @@ namespace MiniCivilization.World.Runtime
                     $"Building {building.Id} does not satisfy its placement conditions.");
             }
 
-            for (var index = 0; index < occupied.Length; index++)
+            for (var index = 0; index < buildingStates.Length; index++)
             {
-                var state = occupied[index];
+                var state = buildingStates[index];
                 buildingCells.Add(
                     WorldIndex.EncodeCell(
                         world,
@@ -667,22 +970,6 @@ namespace MiniCivilization.World.Runtime
                 terrainAnchorColumns.Add(WorldIndex.EncodeColumn(world, x, z));
             }
 
-            for (var index = 0; index < roadCells.Count; index++)
-            {
-                var coordinate = roadCells[index];
-                var cell = world.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                cell.Road = default;
-                world.SetCellForEdit(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z,
-                    cell);
-            }
-
-            return roadCells.ToArray();
         }
 
         private List<CellCoordinate> CollectRoadCells(
@@ -691,28 +978,28 @@ namespace MiniCivilization.World.Runtime
         {
             var result = new List<CellCoordinate>();
             var columns = new HashSet<int>();
-            for (var index = 0; index < layout.OccupiedCells.Count; index++)
+            for (var index = 0; index < layout.BuildingCells.Count; index++)
             {
-                var occupied = layout.ToWorld(
+                var buildingCell = layout.ToWorld(
                     buildingData,
-                    layout.OccupiedCells[index].LocalOffset);
+                    layout.BuildingCells[index].LocalOffset);
                 var columnIndex = WorldIndex.EncodeColumn(
                     world,
-                    occupied.X,
-                    occupied.Z);
+                    buildingCell.X,
+                    buildingCell.Z);
                 if (!columns.Add(columnIndex))
                 {
                     continue;
                 }
 
                 var surface = runtime.SurfaceCache.GetSurfaceHeight(
-                    occupied.X,
-                    occupied.Z);
+                    buildingCell.X,
+                    buildingCell.Z);
                 if (!surface.HasGround
                     || !world.TryGetCell(
-                        occupied.X,
+                        buildingCell.X,
                         surface.GroundCellY,
-                        occupied.Z,
+                        buildingCell.Z,
                         out var cell)
                     || !cell.HasRoad)
                 {
@@ -720,9 +1007,9 @@ namespace MiniCivilization.World.Runtime
                 }
 
                 result.Add(new CellCoordinate(
-                    occupied.X,
+                    buildingCell.X,
                     surface.GroundCellY,
-                    occupied.Z));
+                    buildingCell.Z));
             }
 
             return result;
@@ -731,11 +1018,11 @@ namespace MiniCivilization.World.Runtime
         private void RemoveBuilding(BuildingEntity building)
         {
             var layout = building.Layout;
-            for (var index = 0; index < layout.OccupiedCells.Count; index++)
+            for (var index = 0; index < layout.BuildingCells.Count; index++)
             {
                 var coordinate = layout.ToWorld(
                     building.Data,
-                    layout.OccupiedCells[index].LocalOffset);
+                    layout.BuildingCells[index].LocalOffset);
                 var cellIndex = WorldIndex.EncodeCell(
                     world,
                     coordinate.X,
@@ -745,11 +1032,11 @@ namespace MiniCivilization.World.Runtime
                 RemoveEntityFromCell(building.Id, coordinate);
             }
 
-            for (var index = 0; index < layout.TerrainAnchorOffsets.Count; index++)
+            for (var index = 0; index < layout.TerrainAnchorCells.Count; index++)
             {
                 var coordinate = layout.ToWorld(
                     building.Data,
-                    layout.TerrainAnchorOffsets[index]);
+                    layout.TerrainAnchorCells[index]);
                 var cellIndex = WorldIndex.EncodeCell(
                     world,
                     coordinate.X,
@@ -844,33 +1131,15 @@ namespace MiniCivilization.World.Runtime
                 return new[] { entity.AnchorCell };
             }
 
-            var cells = new CellCoordinate[building.Layout.OccupiedCells.Count];
+            var cells = new CellCoordinate[building.Layout.BuildingCells.Count];
             for (var index = 0; index < cells.Length; index++)
             {
                 cells[index] = building.Layout.ToWorld(
                     building.Data,
-                    building.Layout.OccupiedCells[index].LocalOffset);
+                    building.Layout.BuildingCells[index].LocalOffset);
             }
 
             return cells;
-        }
-
-        private static CellCoordinate[] CombineAffectedCells(
-            IReadOnlyList<CellCoordinate> first,
-            IReadOnlyList<CellCoordinate> second)
-        {
-            var result = new CellCoordinate[first.Count + second.Count];
-            for (var index = 0; index < first.Count; index++)
-            {
-                result[index] = first[index];
-            }
-
-            for (var index = 0; index < second.Count; index++)
-            {
-                result[first.Count + index] = second[index];
-            }
-
-            return result;
         }
 
         private EntityChangeSet PublishChange(
@@ -947,8 +1216,81 @@ namespace MiniCivilization.World.Runtime
             return z != 0 ? z : left.X.CompareTo(right.X);
         }
 
+        private static int CompareCells(
+            CellCoordinate left,
+            CellCoordinate right)
+        {
+            var y = left.Y.CompareTo(right.Y);
+            if (y != 0)
+            {
+                return y;
+            }
+
+            var z = left.Z.CompareTo(right.Z);
+            return z != 0 ? z : left.X.CompareTo(right.X);
+        }
+
+        private static int CompareTerrainCorrections(
+            BuildingTerrainCorrection left,
+            BuildingTerrainCorrection right)
+        {
+            var z = left.Z.CompareTo(right.Z);
+            return z != 0 ? z : left.X.CompareTo(right.X);
+        }
+
         private static int CompareEntities(Entity left, Entity right) =>
             left.Id.CompareTo(right.Id);
+
+        private sealed class BuildingPlacementColumn
+        {
+            public int X => RepresentativeCell.X;
+            public int Z => RepresentativeCell.Z;
+            public CellCoordinate RepresentativeCell { get; private set; }
+            public CellCoordinate AnchorRepresentative { get; private set; }
+            public SurfaceHeightData Surface { get; }
+            public bool HasBuildingTarget { get; private set; }
+            public int BuildingTargetHeight { get; private set; }
+            public int MinimumAnchorHeight { get; private set; }
+            public bool RequiresRebuild { get; set; }
+            public int TargetHeight { get; set; }
+
+            public BuildingPlacementColumn(
+                CellCoordinate representativeCell,
+                SurfaceHeightData surface)
+            {
+                RepresentativeCell = representativeCell;
+                AnchorRepresentative = representativeCell;
+                Surface = surface;
+            }
+
+            public void SetBuildingTarget(
+                int height,
+                CellCoordinate representativeCell)
+            {
+                if (HasBuildingTarget
+                    && BuildingTargetHeight <= height)
+                {
+                    return;
+                }
+
+                HasBuildingTarget = true;
+                BuildingTargetHeight = height;
+                RepresentativeCell = representativeCell;
+            }
+
+            public void RequireAnchorHeight(
+                int height,
+                CellCoordinate representativeCell)
+            {
+                if (MinimumAnchorHeight >= height)
+                {
+                    return;
+                }
+
+                MinimumAnchorHeight = height;
+                AnchorRepresentative = representativeCell;
+            }
+        }
 
         private readonly struct BuildingCellState
         {

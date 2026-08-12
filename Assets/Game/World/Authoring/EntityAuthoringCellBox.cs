@@ -5,7 +5,7 @@ namespace MiniCivilization.World.Authoring
 {
     [ExecuteAlways]
     [DisallowMultipleComponent]
-    public sealed class EntityAuthoringCellBox : MonoBehaviour
+    public class EntityAuthoringCellBox : MonoBehaviour
     {
         [SerializeField]
         [Range(0, WorldGrid.HeightStepsPerCell)]
@@ -31,8 +31,8 @@ namespace MiniCivilization.World.Authoring
             : 1f;
         public float TerrainSurfaceHeight =>
             terrainHeight * (CellSize / WorldGrid.HeightStepsPerCell);
-        public Color WireColor => wireColor;
-        public Color TerrainColor => terrainColor;
+        public virtual Color WireColor => wireColor;
+        public virtual Color TerrainColor => terrainColor;
         public Vector3Int LocalOffset => localOffset;
         public EntityAuthoringSystem AuthoringSystem => authoringSystem;
 
@@ -62,7 +62,18 @@ namespace MiniCivilization.World.Authoring
             return true;
         }
 
-        private void OnValidate()
+        internal virtual bool CopyAuthoringValuesFrom(
+            EntityAuthoringCellBox source)
+        {
+            if (source == null)
+            {
+                throw new System.ArgumentNullException(nameof(source));
+            }
+
+            return SetTerrainHeight(source.TerrainHeight);
+        }
+
+        protected virtual void OnValidate()
         {
             SetTerrainHeight(terrainHeight);
         }

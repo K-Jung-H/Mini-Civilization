@@ -4,6 +4,7 @@ using MiniCivilization.World.Domain;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace MiniCivilization.World.Editing
@@ -34,42 +35,10 @@ namespace MiniCivilization.World.Editing
         }
     }
 
-    [Serializable]
-    public sealed class WorldEditToolbarGroup
-    {
-        [SerializeField] private Button expandButton;
-        [SerializeField] private RectTransform content;
-        [SerializeField] private bool startExpanded;
-
-        private bool isExpanded;
-
-        public Button ExpandButton => expandButton;
-        public RectTransform Content => content;
-        public bool IsExpanded => isExpanded;
-
-        public void Initialize()
-        {
-            isExpanded = startExpanded;
-        }
-
-        public void Toggle()
-        {
-            isExpanded = !isExpanded;
-        }
-
-        public void RefreshVisibility(bool toolbarExpanded)
-        {
-            if (content != null)
-            {
-                content.gameObject.SetActive(toolbarExpanded && isExpanded);
-            }
-        }
-    }
-
     [DisallowMultipleComponent]
     public sealed class WorldEditToolbarView : MonoBehaviour
     {
-        public const int CurrentLayoutVersion = 9;
+        public const int CurrentLayoutVersion = 12;
 
         [SerializeField, HideInInspector] private int layoutVersion;
 
@@ -85,11 +54,12 @@ namespace MiniCivilization.World.Editing
 
         [Header("Group Expansion")]
         [SerializeField] private WorldEditToolbarGroup selectModeGroup;
-        [SerializeField] private RectTransform modeEntityDivider;
+        [SerializeField] private WorldEditToolbarGroup terrainGroup;
         [SerializeField] private WorldEditToolbarGroup entityGroup;
-        [SerializeField] private RectTransform entityPropertyDivider;
-        [SerializeField] private WorldEditToolbarGroup propertyGroup;
-        [SerializeField] private RectTransform mainPropertyDivider;
+        [SerializeField]
+        [FormerlySerializedAs("propertyGroup")]
+        private WorldEditToolbarGroup environmentGroup;
+        [SerializeField] private RectTransform[] dividers;
 
         [Header("History")]
         [SerializeField] private RectTransform historyPanel;
@@ -116,9 +86,11 @@ namespace MiniCivilization.World.Editing
             editActionListeners = new();
 
         public event Action SelectionChanged;
+        public event Action StructureChanged;
         public event Action<bool> ExpandedChanged;
         public event Action<bool> EntityGroupExpandedChanged;
-        public event Action<WorldEditAction> EditActionRequested;
+        public event Action<WorldEditAction> EditActionSelected;
+        public event Action PropertyCategorySelected;
         public event Action UndoRequested;
         public event Action RedoRequested;
 
@@ -147,8 +119,9 @@ namespace MiniCivilization.World.Editing
         private void OnEnable()
         {
             selectModeGroup?.Initialize();
+            terrainGroup?.Initialize();
             entityGroup?.Initialize();
-            propertyGroup?.Initialize();
+            environmentGroup?.Initialize();
             BindEvents();
             SetExpanded(startExpanded);
         }
@@ -244,8 +217,6 @@ namespace MiniCivilization.World.Editing
             sectionIndex = -1;
             detailIndex = -1;
             if (!isExpanded
-                || propertyGroup == null
-                || !propertyGroup.IsExpanded
                 || propertySections == null)
             {
                 return false;
@@ -255,7 +226,8 @@ namespace MiniCivilization.World.Editing
             {
                 var propertySection = propertySections[section];
                 if (propertySection?.CategoryToggle == null
-                    || !propertySection.CategoryToggle.isOn)
+                    || !propertySection.CategoryToggle.isOn
+                    || !IsSectionGroupExpanded(section))
                 {
                     continue;
                 }
@@ -275,6 +247,18 @@ namespace MiniCivilization.World.Editing
             }
 
             return false;
+        }
+
+        public bool TryGetSelectedEditAction(out WorldEditAction action)
+        {
+            action = default;
+            return TryGetSelectedProperty(
+                    out var sectionIndex,
+                    out var detailIndex)
+                && TryCreateEditAction(
+                    sectionIndex,
+                    detailIndex,
+                    out action);
         }
 
         public void SetActiveEditAction(WorldEditAction action)
@@ -329,9 +313,54 @@ namespace MiniCivilization.World.Editing
             }
         }
 
+        public void SetEntityToolActive(EntityCategory? category)
+        {
+            var entityToolActive = category.HasValue;
+            if (areaSelectionToggle != null)
+            {
+                areaSelectionToggle.interactable = !entityToolActive;
+            }
+
+            var building = category == EntityCategory.Building;
+            if (brushToggle != null)
+            {
+                brushToggle.interactable = !building;
+            }
+
+            if (entityToolActive
+                && (areaSelectionToggle != null
+                    && areaSelectionToggle.isOn
+                    || building
+                    && brushToggle != null
+                    && brushToggle.isOn)
+                && singleSelectionToggle != null)
+            {
+                singleSelectionToggle.SetIsOnWithoutNotify(true);
+            }
+
+            RefreshBrushSizePanel();
+            SelectionChanged?.Invoke();
+        }
+
+        public void EnsureSelectModeGroupExpanded()
+        {
+            if (!isExpanded
+                || selectModeGroup == null
+                || !selectModeGroup.SetExpanded(true))
+            {
+                return;
+            }
+
+            RefreshGroupLayout();
+            RefreshPropertyDetailPanels();
+            SelectionChanged?.Invoke();
+            StructureChanged?.Invoke();
+        }
+
         private void ToggleExpanded()
         {
             SetExpanded(!isExpanded);
+            StructureChanged?.Invoke();
         }
 
         private void ToggleSelectModeGroup()
@@ -344,9 +373,14 @@ namespace MiniCivilization.World.Editing
             ToggleGroup(entityGroup, true);
         }
 
-        private void TogglePropertyGroup()
+        private void ToggleTerrainGroup()
         {
-            ToggleGroup(propertyGroup, false);
+            ToggleGroup(terrainGroup, false);
+        }
+
+        private void ToggleEnvironmentGroup()
+        {
+            ToggleGroup(environmentGroup, false);
         }
 
         private void ToggleGroup(
@@ -362,6 +396,7 @@ namespace MiniCivilization.World.Editing
             RefreshGroupLayout();
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
+            StructureChanged?.Invoke();
             if (isEntityGroup)
             {
                 EntityGroupExpandedChanged?.Invoke(IsEntityGroupExpanded);
@@ -389,8 +424,9 @@ namespace MiniCivilization.World.Editing
             }
 
             BindGroupButton(selectModeGroup, ToggleSelectModeGroup);
+            BindGroupButton(terrainGroup, ToggleTerrainGroup);
             BindGroupButton(entityGroup, ToggleEntityGroup);
-            BindGroupButton(propertyGroup, TogglePropertyGroup);
+            BindGroupButton(environmentGroup, ToggleEnvironmentGroup);
 
             BindToggle(singleSelectionToggle);
             BindToggle(areaSelectionToggle);
@@ -455,8 +491,9 @@ namespace MiniCivilization.World.Editing
             }
 
             UnbindGroupButton(selectModeGroup, ToggleSelectModeGroup);
+            UnbindGroupButton(terrainGroup, ToggleTerrainGroup);
             UnbindGroupButton(entityGroup, ToggleEntityGroup);
-            UnbindGroupButton(propertyGroup, TogglePropertyGroup);
+            UnbindGroupButton(environmentGroup, ToggleEnvironmentGroup);
 
             UnbindToggle(singleSelectionToggle);
             UnbindToggle(areaSelectionToggle);
@@ -494,10 +531,20 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private void OnPropertySelectionChanged(bool _)
+        private void OnPropertySelectionChanged(bool isOn)
         {
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
+            if (!isOn)
+            {
+                return;
+            }
+
+            PropertyCategorySelected?.Invoke();
+            if (TryGetSelectedEditAction(out var action))
+            {
+                EditActionSelected?.Invoke(action);
+            }
         }
 
         private void RequestUndo()
@@ -594,8 +641,7 @@ namespace MiniCivilization.World.Editing
             int detailIndex,
             bool isOn)
         {
-            if (!isOn
-                && HasAnotherActiveDetail(sectionIndex, source))
+            if (!isOn)
             {
                 return;
             }
@@ -608,29 +654,7 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            EditActionRequested?.Invoke(action);
-        }
-
-        private bool HasAnotherActiveDetail(
-            int sectionIndex,
-            Toggle source)
-        {
-            if (propertySections == null
-                || (uint)sectionIndex >= propertySections.Length
-                || propertySections[sectionIndex] == null)
-            {
-                return false;
-            }
-
-            foreach (var toggle in propertySections[sectionIndex].DetailToggles)
-            {
-                if (toggle != null && toggle != source && toggle.isOn)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            EditActionSelected?.Invoke(action);
         }
 
         private static bool TryCreateEditAction(
@@ -656,6 +680,14 @@ namespace MiniCivilization.World.Editing
                 return true;
             }
 
+            if (sectionIndex == 3
+                && (uint)detailIndex <= (uint)RoadEditOperation.Remove)
+            {
+                action = WorldEditAction.Road(
+                    (RoadEditOperation)detailIndex);
+                return true;
+            }
+
             return false;
         }
 
@@ -676,6 +708,10 @@ namespace MiniCivilization.World.Editing
                     when action.Biome > BiomeType.None:
                     sectionIndex = 1;
                     detailIndex = (int)action.Biome - 1;
+                    break;
+                case WorldEditPropertyGroup.Road:
+                    sectionIndex = 3;
+                    detailIndex = (int)action.RoadOperation;
                     break;
                 default:
                     return false;
@@ -709,8 +745,8 @@ namespace MiniCivilization.World.Editing
                 }
 
                 var selected = isExpanded
-                    && propertyGroup != null
-                    && propertyGroup.IsExpanded
+                    && IsSectionGroupExpanded(
+                        Array.IndexOf(propertySections, section))
                     && section.CategoryToggle != null
                     && section.CategoryToggle.isOn;
                 section.DetailPanel.gameObject.SetActive(selected);
@@ -738,8 +774,9 @@ namespace MiniCivilization.World.Editing
             }
 
             selectModeGroup?.RefreshVisibility(isExpanded);
+            terrainGroup?.RefreshVisibility(isExpanded);
             entityGroup?.RefreshVisibility(isExpanded);
-            propertyGroup?.RefreshVisibility(isExpanded);
+            environmentGroup?.RefreshVisibility(isExpanded);
 
             if (!isExpanded)
             {
@@ -748,11 +785,13 @@ namespace MiniCivilization.World.Editing
             }
 
             var cursor = 8f;
-            LayoutGroup(propertyGroup, ref cursor);
-            LayoutDivider(entityPropertyDivider, ref cursor);
-            LayoutGroup(entityGroup, ref cursor);
-            LayoutDivider(modeEntityDivider, ref cursor);
             LayoutGroup(selectModeGroup, ref cursor);
+            LayoutDivider(GetDivider(1), ref cursor);
+            LayoutGroup(terrainGroup, ref cursor);
+            LayoutDivider(GetDivider(2), ref cursor);
+            LayoutGroup(entityGroup, ref cursor);
+            LayoutDivider(GetDivider(3), ref cursor);
+            LayoutGroup(environmentGroup, ref cursor);
 
             var expandedWidth = cursor + 8f;
             expandedContent.sizeDelta = new Vector2(expandedWidth, 84f);
@@ -783,7 +822,9 @@ namespace MiniCivilization.World.Editing
             }
 
             cursor += 8f;
-            PlaceRight(group.Content, cursor, 10f);
+            PlaceInsideGroup(
+                group.Content,
+                buttonRect.sizeDelta.x + 8f);
             cursor += group.Content.sizeDelta.x;
         }
 
@@ -803,15 +844,32 @@ namespace MiniCivilization.World.Editing
 
         private void LayoutMainDivider()
         {
-            if (mainPropertyDivider == null)
+            var mainSelectDivider = GetDivider(0);
+            if (mainSelectDivider == null)
             {
                 return;
             }
 
-            mainPropertyDivider.anchorMin = new Vector2(1f, 0f);
-            mainPropertyDivider.anchorMax = new Vector2(1f, 0f);
-            mainPropertyDivider.pivot = new Vector2(1f, 0f);
-            mainPropertyDivider.anchoredPosition = new Vector2(0f, 20f);
+            mainSelectDivider.anchorMin = new Vector2(1f, 0f);
+            mainSelectDivider.anchorMax = new Vector2(1f, 0f);
+            mainSelectDivider.pivot = new Vector2(1f, 0f);
+            mainSelectDivider.anchoredPosition = new Vector2(0f, 20f);
+        }
+
+        private RectTransform GetDivider(int index) =>
+            dividers != null && (uint)index < dividers.Length
+                ? dividers[index]
+                : null;
+
+        private bool IsSectionGroupExpanded(int sectionIndex)
+        {
+            return sectionIndex switch
+            {
+                0 or 2 => terrainGroup != null && terrainGroup.IsExpanded,
+                1 or 3 => environmentGroup != null
+                    && environmentGroup.IsExpanded,
+                _ => false
+            };
         }
 
         private static void PlaceRight(
@@ -823,6 +881,16 @@ namespace MiniCivilization.World.Editing
             rect.anchorMax = new Vector2(1f, 0f);
             rect.pivot = new Vector2(1f, 0f);
             rect.anchoredPosition = new Vector2(-rightOffset, y);
+        }
+
+        private static void PlaceInsideGroup(
+            RectTransform content,
+            float rightOffset)
+        {
+            content.anchorMin = new Vector2(1f, 0f);
+            content.anchorMax = new Vector2(1f, 0f);
+            content.pivot = new Vector2(1f, 0f);
+            content.anchoredPosition = new Vector2(-rightOffset, 0f);
         }
     }
 }

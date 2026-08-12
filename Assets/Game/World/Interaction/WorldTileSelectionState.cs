@@ -10,11 +10,15 @@ namespace MiniCivilization.World.Interaction
         public TilePickResult? Selected { get; private set; }
         public IWorldCellSelection EditHovered { get; private set; }
         public IWorldCellSelection EditSelected { get; private set; }
+        public IWorldCellSelection EditPrimaryPreview { get; private set; }
+        public IWorldCellSelection EditSecondaryPreview { get; private set; }
+        public IWorldCellSelection EditInvalidPreview { get; private set; }
 
         public event Action<TilePickResult?> HoverChanged;
         public event Action<TilePickResult?> SelectionChanged;
         public event Action<IWorldCellSelection> EditHoverChanged;
         public event Action<IWorldCellSelection> EditSelectionChanged;
+        public event Action EditPreviewChanged;
 
         public void SetHovered(TilePickResult? next)
         {
@@ -84,12 +88,34 @@ namespace MiniCivilization.World.Interaction
             ReplaceEditSelected(null);
         }
 
+        public void ReplaceEditPreview(
+            IWorldCellSelection primary,
+            IWorldCellSelection secondary,
+            IWorldCellSelection invalid)
+        {
+            if (ReferenceEquals(EditPrimaryPreview, primary)
+                && ReferenceEquals(EditSecondaryPreview, secondary)
+                && ReferenceEquals(EditInvalidPreview, invalid))
+            {
+                return;
+            }
+
+            EditPrimaryPreview = primary;
+            EditSecondaryPreview = secondary;
+            EditInvalidPreview = invalid;
+            EditPreviewChanged?.Invoke();
+        }
+
+        public void ClearEditPreview() =>
+            ReplaceEditPreview(null, null, null);
+
         public void Clear()
         {
             SetHovered(null);
             SetSelected(null);
             ClearEditHovered();
             ClearEditSelected();
+            ClearEditPreview();
         }
     }
 }

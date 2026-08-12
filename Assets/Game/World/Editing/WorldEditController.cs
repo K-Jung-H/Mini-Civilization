@@ -86,6 +86,12 @@ namespace MiniCivilization.World.Editing
             return Commit(transaction, true);
         }
 
+        internal WorldChangeSet CommitWithoutHistory(
+            WorldEditTransaction transaction)
+        {
+            return Commit(transaction, false);
+        }
+
         public void Rollback(WorldEditTransaction transaction)
         {
             EnsureActiveTransaction(transaction);

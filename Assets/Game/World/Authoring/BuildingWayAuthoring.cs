@@ -41,6 +41,23 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
+            if (authoringSystem.CellBoxPrefab
+                is not BuildingEntityAuthoringCellBox)
+            {
+                error = "Building Authoring requires a Building Entity Authoring Cell Box Prefab.";
+                return false;
+            }
+
+            if (!TryCollectBuildingCells(
+                    out var buildingCells,
+                    out var terrainAnchorCells,
+                    out error))
+            {
+                return false;
+            }
+
+            var buildingCellSet = new HashSet<Vector3Int>(buildingCells);
+
             var markers = markerContainer.GetComponentsInChildren<
                 BuildingWayPointMarker>(true);
             Array.Sort(markers, CompareHierarchy);
@@ -56,7 +73,12 @@ namespace MiniCivilization.World.Authoring
                     return false;
                 }
 
-                if (!TryBakePoint(marker, out points[index], out error))
+                if (!TryBakePoint(
+                        marker,
+                        buildingCells,
+                        buildingCellSet,
+                        out points[index],
+                        out error))
                 {
                     return false;
                 }
@@ -122,13 +144,81 @@ namespace MiniCivilization.World.Authoring
                 }
             }
 
-            targetController.SetBakedWays(points, bakedLinks.ToArray());
+            targetController.SetBakedLayout(
+                buildingCells,
+                terrainAnchorCells,
+                points,
+                bakedLinks.ToArray());
+            error = string.Empty;
+            return true;
+        }
+
+        private bool TryCollectBuildingCells(
+            out Vector3Int[] buildingCells,
+            out Vector3Int[] terrainAnchorCells,
+            out string error)
+        {
+            var cells = new List<Vector3Int>();
+            var anchors = new List<Vector3Int>();
+            var usedOffsets = new HashSet<Vector3Int>();
+            var pooledCells = authoringSystem.PooledCells;
+            for (var index = 0; index < pooledCells.Count; index++)
+            {
+                if (pooledCells[index]
+                        is not BuildingEntityAuthoringCellBox cell
+                    || !cell.gameObject.activeSelf
+                    || cell.AuthoringSystem != authoringSystem
+                    || cell.BuildingRole == BuildingCellRole.None)
+                {
+                    continue;
+                }
+
+                if (!usedOffsets.Add(cell.LocalOffset))
+                {
+                    buildingCells = null;
+                    terrainAnchorCells = null;
+                    error = $"Entity Authoring contains duplicated Cell {cell.LocalOffset}.";
+                    return false;
+                }
+
+                if (cell.BuildingRole == BuildingCellRole.Building)
+                {
+                    cells.Add(cell.LocalOffset);
+                }
+                else
+                {
+                    anchors.Add(cell.LocalOffset);
+                }
+            }
+
+            if (cells.Count == 0)
+            {
+                buildingCells = null;
+                terrainAnchorCells = null;
+                error = "Building Authoring requires at least one Building Cell.";
+                return false;
+            }
+
+            if (!cells.Contains(Vector3Int.zero))
+            {
+                buildingCells = null;
+                terrainAnchorCells = null;
+                error = "Building Authoring Center Cell (0, 0, 0) must have the Building role.";
+                return false;
+            }
+
+            cells.Sort(CompareOffset);
+            anchors.Sort(CompareOffset);
+            buildingCells = cells.ToArray();
+            terrainAnchorCells = anchors.ToArray();
             error = string.Empty;
             return true;
         }
 
         private bool TryBakePoint(
             BuildingWayPointMarker marker,
+            IReadOnlyList<Vector3Int> buildingCells,
+            ISet<Vector3Int> buildingCellSet,
             out BuildingWayPointBakeData point,
             out string error)
         {
@@ -142,10 +232,46 @@ namespace MiniCivilization.World.Authoring
 
             var local = authoringSystem.transform.InverseTransformPoint(
                 marker.transform.position) / cellSize;
-            var offset = new Vector3Int(
-                Mathf.FloorToInt(local.x + 0.5f),
-                Mathf.FloorToInt(local.y + 0.0001f),
-                Mathf.FloorToInt(local.z + 0.5f));
+            var offset = default(Vector3Int);
+            var nearest = default(Vector3);
+            var nearestDistance = float.PositiveInfinity;
+            for (var index = 0; index < buildingCells.Count; index++)
+            {
+                var candidateOffset = buildingCells[index];
+                var candidate = ClampToCell(local, candidateOffset);
+                var distance = (candidate - local).sqrMagnitude;
+                if (distance >= nearestDistance)
+                {
+                    continue;
+                }
+
+                offset = candidateOffset;
+                nearest = candidate;
+                nearestDistance = distance;
+            }
+
+            const float positionTolerance = 0.000001f;
+            if (nearestDistance > positionTolerance * positionTolerance)
+            {
+                var previous = marker.transform.position;
+                var snapped = authoringSystem.transform.TransformPoint(
+                    nearest * cellSize);
+#if UNITY_EDITOR
+                UnityEditor.Undo.RecordObject(
+                    marker.transform,
+                    "Snap Building Way Marker");
+#endif
+                marker.transform.position = snapped;
+#if UNITY_EDITOR
+                UnityEditor.EditorUtility.SetDirty(marker.transform);
+#endif
+                Debug.Log(
+                    $"Way Marker '{marker.name}' was moved into nearest Building Cell {offset}: "
+                    + $"{previous} -> {snapped}.",
+                    marker);
+                local = nearest;
+            }
+
             var position = local - (Vector3)offset;
             const float boundsTolerance = 0.0001f;
             if (position.x < -0.5f - boundsTolerance
@@ -165,7 +291,9 @@ namespace MiniCivilization.World.Authoring
             position.z = Mathf.Clamp(position.z, -0.5f, 0.5f);
             if (!IsOnExternalBoundary(
                     marker.ExternalDirection,
-                    position))
+                    offset,
+                    position,
+                    buildingCellSet))
             {
                 point = default;
                 error = $"External Way Marker '{marker.name}' is not on its selected Cell boundary.";
@@ -184,22 +312,56 @@ namespace MiniCivilization.World.Authoring
 
         private static bool IsOnExternalBoundary(
             BuildingWayPointDirection direction,
-            Vector3 position)
+            Vector3Int cellOffset,
+            Vector3 position,
+            ISet<Vector3Int> buildingCells)
         {
             const float tolerance = 0.001f;
             return direction switch
             {
                 BuildingWayPointDirection.None => true,
                 BuildingWayPointDirection.North =>
-                    Mathf.Abs(position.z - 0.5f) <= tolerance,
+                    Mathf.Abs(position.z - 0.5f) <= tolerance
+                    && !buildingCells.Contains(cellOffset + Vector3Int.forward),
                 BuildingWayPointDirection.East =>
-                    Mathf.Abs(position.x - 0.5f) <= tolerance,
+                    Mathf.Abs(position.x - 0.5f) <= tolerance
+                    && !buildingCells.Contains(cellOffset + Vector3Int.right),
                 BuildingWayPointDirection.South =>
-                    Mathf.Abs(position.z + 0.5f) <= tolerance,
+                    Mathf.Abs(position.z + 0.5f) <= tolerance
+                    && !buildingCells.Contains(cellOffset + Vector3Int.back),
                 BuildingWayPointDirection.West =>
-                    Mathf.Abs(position.x + 0.5f) <= tolerance,
+                    Mathf.Abs(position.x + 0.5f) <= tolerance
+                    && !buildingCells.Contains(cellOffset + Vector3Int.left),
                 _ => false
             };
+        }
+
+        private static Vector3 ClampToCell(
+            Vector3 position,
+            Vector3Int cellOffset) => new(
+                Mathf.Clamp(
+                    position.x,
+                    cellOffset.x - 0.5f,
+                    cellOffset.x + 0.5f),
+                Mathf.Clamp(
+                    position.y,
+                    cellOffset.y,
+                    cellOffset.y + 1f),
+                Mathf.Clamp(
+                    position.z,
+                    cellOffset.z - 0.5f,
+                    cellOffset.z + 0.5f));
+
+        private static int CompareOffset(Vector3Int left, Vector3Int right)
+        {
+            var y = left.y.CompareTo(right.y);
+            if (y != 0)
+            {
+                return y;
+            }
+
+            var z = left.z.CompareTo(right.z);
+            return z != 0 ? z : left.x.CompareTo(right.x);
         }
 
         private static int CompareHierarchy(

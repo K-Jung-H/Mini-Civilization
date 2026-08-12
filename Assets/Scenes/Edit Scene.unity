@@ -119,69 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1001 &111149095
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 949497048}
-    m_Modifications:
-    - target: {fileID: 6005959175367953584, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_Name
-      value: Entity Town
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects: []
-    m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
---- !u!4 &111149096 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-  m_PrefabInstance: {fileID: 111149095}
-  m_PrefabAsset: {fileID: 0}
---- !u!1001 &317906303
+--- !u!1001 &236939873
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -189,75 +127,79 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 2034307141}
     m_Modifications:
-    - target: {fileID: 1917149175544682579, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 2513882431927307066, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_Name
       value: Cell (0, 0, 0)
       objectReference: {fileID: 0}
-    - target: {fileID: 3171990239387630850, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
-      propertyPath: authoringSystem
-      value: 
-      objectReference: {fileID: 2034307140}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalPosition.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalPosition.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalRotation.w
       value: 1
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalRotation.x
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalRotation.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalRotation.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: buildingRole
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: authoringSystem
+      value: 
+      objectReference: {fileID: 2034307140}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
-  m_SourcePrefab: {fileID: 100100000, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
---- !u!114 &317906304 stripped
+  m_SourcePrefab: {fileID: 100100000, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+--- !u!4 &236939874 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+  m_PrefabInstance: {fileID: 236939873}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &236939875 stripped
 MonoBehaviour:
-  m_CorrespondingSourceObject: {fileID: 3171990239387630850, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
-  m_PrefabInstance: {fileID: 317906303}
+  m_CorrespondingSourceObject: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+  m_PrefabInstance: {fileID: 236939873}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fc45f6b1ab2f40bd8c663f476bd30db2, type: 3}
+  m_Script: {fileID: 11500000, guid: 6cbd3e55abf44a27b7c1bd7b14de1310, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.EntityAuthoringCellBox
---- !u!4 &317906305 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 5274859082806994878, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
-  m_PrefabInstance: {fileID: 317906303}
-  m_PrefabAsset: {fileID: 0}
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingEntityAuthoringCellBox
 --- !u!1 &583223955
 GameObject:
   m_ObjectHideFlags: 0
@@ -385,6 +327,79 @@ MonoBehaviour:
   m_ShadowLayerMask: 1
   m_RenderingLayers: 1
   m_ShadowRenderingLayers: 1
+--- !u!1001 &757545135
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 1209628327}
+    m_Modifications:
+    - target: {fileID: 6005959175367953584, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_Name
+      value: Entity Town
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+--- !u!114 &757545136 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 65519540242368161, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+  m_PrefabInstance: {fileID: 757545135}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 80b0c73121d74341bd9208c5e6ab58d0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.BuildingEntityController
+--- !u!4 &757545137 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 6413065801031434837, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+  m_PrefabInstance: {fileID: 757545135}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &935816370
 GameObject:
   m_ObjectHideFlags: 0
@@ -396,6 +411,7 @@ GameObject:
   - component: {fileID: 935816373}
   - component: {fileID: 935816372}
   - component: {fileID: 935816371}
+  - component: {fileID: 935816374}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -477,6 +493,50 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &935816374
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 935816370}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Universal.Runtime::UnityEngine.Rendering.Universal.UniversalAdditionalCameraData
+  m_RenderShadows: 1
+  m_RequiresDepthTextureOption: 2
+  m_RequiresOpaqueTextureOption: 2
+  m_CameraType: 0
+  m_Cameras: []
+  m_RendererIndex: -1
+  m_VolumeLayerMask:
+    serializedVersion: 2
+    m_Bits: 1
+  m_VolumeTrigger: {fileID: 0}
+  m_VolumeFrameworkUpdateModeOption: 2
+  m_RenderPostProcessing: 0
+  m_Antialiasing: 0
+  m_AntialiasingQuality: 2
+  m_StopNaN: 0
+  m_Dithering: 0
+  m_ClearDepth: 1
+  m_AllowXRRendering: 1
+  m_AllowHDROutput: 1
+  m_UseScreenCoordOverride: 0
+  m_ScreenSizeOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_ScreenCoordScaleBias: {x: 0, y: 0, z: 0, w: 0}
+  m_RequiresDepthTexture: 0
+  m_RequiresColorTexture: 0
+  m_TaaSettings:
+    m_Quality: 3
+    m_FrameInfluence: 0.1
+    m_JitterScale: 1
+    m_MipBias: 0
+    m_VarianceClampScale: 0.9
+    m_ContrastAdaptiveSharpening: 0
+  m_Version: 2
 --- !u!1 &949090245
 GameObject:
   m_ObjectHideFlags: 0
@@ -507,6 +567,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayPointMarker
   externalDirection: 0
+  connections:
+  - target: {fileID: 1336792409}
+    oneWay: 0
 --- !u!4 &949090247
 Transform:
   m_ObjectHideFlags: 0
@@ -516,7 +579,7 @@ Transform:
   m_GameObject: {fileID: 949090245}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1.121, y: 0, z: 0}
+  m_LocalPosition: {x: 2.5, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -552,18 +615,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayAuthoring
   authoringSystem: {fileID: 2034307140}
-  markerContainer: {fileID: 111149096}
-  targetController: {fileID: 65519540242368161, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
-  links:
-  - pointA: {fileID: 1126967117}
-    pointB: {fileID: 949090246}
-    oneWay: 0
-  - pointA: {fileID: 1126967117}
-    pointB: {fileID: 949090246}
-    oneWay: 0
-  - pointA: {fileID: 1126967117}
-    pointB: {fileID: 949090246}
-    oneWay: 0
+  markerContainer: {fileID: 1958006581}
 --- !u!4 &949497048
 Transform:
   m_ObjectHideFlags: 0
@@ -578,7 +630,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2034307141}
-  - {fileID: 111149096}
   - {fileID: 1958006581}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -608,7 +659,7 @@ Transform:
   m_GameObject: {fileID: 975913540}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: -2.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -627,6 +678,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayPointMarker
   externalDirection: 0
+  connections:
+  - target: {fileID: 1336792409}
+    oneWay: 0
 --- !u!1 &1052142024
 GameObject:
   m_ObjectHideFlags: 0
@@ -653,7 +707,7 @@ Transform:
   m_GameObject: {fileID: 1052142024}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalPosition: {x: -2.5, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -672,6 +726,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayPointMarker
   externalDirection: 0
+  connections:
+  - target: {fileID: 1336792409}
+    oneWay: 0
 --- !u!1 &1126967115
 GameObject:
   m_ObjectHideFlags: 0
@@ -698,7 +755,7 @@ Transform:
   m_GameObject: {fileID: 1126967115}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.653, y: 0, z: 0}
+  m_LocalPosition: {x: 0, y: 0, z: 2.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -717,6 +774,176 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayPointMarker
   externalDirection: 0
+  connections:
+  - target: {fileID: 1336792409}
+    oneWay: 0
+--- !u!1 &1209628326
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1209628327}
+  m_Layer: 0
+  m_Name: Entity Preview
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1209628327
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1209628326}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 10, y: 10, z: 10}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 757545137}
+  m_Father: {fileID: 2034307141}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1336792407
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1336792408}
+  - component: {fileID: 1336792409}
+  m_Layer: 0
+  m_Name: WayPoint Marker (4)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1336792408
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1336792407}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1958006581}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1336792409
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1336792407}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3364b58785a10d488927366c2b66e8e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayPointMarker
+  externalDirection: 0
+  connections: []
+--- !u!1001 &1898169254
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 2034307141}
+    m_Modifications:
+    - target: {fileID: 2513882431927307066, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_Name
+      value: Cell (0, -1, 0)
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: -10
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: buildingRole
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: localOffset.y
+      value: -1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: terrainHeight
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+      propertyPath: authoringSystem
+      value: 
+      objectReference: {fileID: 2034307140}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+--- !u!4 &1898169255 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 5971415559820240286, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+  m_PrefabInstance: {fileID: 1898169254}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1898169256 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
+  m_PrefabInstance: {fileID: 1898169254}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6cbd3e55abf44a27b7c1bd7b14de1310, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingEntityAuthoringCellBox
 --- !u!1 &1958006580
 GameObject:
   m_ObjectHideFlags: 0
@@ -750,6 +977,7 @@ Transform:
   - {fileID: 949090247}
   - {fileID: 975913541}
   - {fileID: 1052142025}
+  - {fileID: 1336792408}
   m_Father: {fileID: 949497048}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2034307139
@@ -781,12 +1009,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b8bd6bb1cb9e45319b10247dc0de949c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.EntityAuthoringSystem
-  cellBoxPrefab: {fileID: 3171990239387630850, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+  cellBoxPrefab: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
   worldSettings: {fileID: 11400000, guid: b6f6b194b8934c81a7e9b7e0ca000001, type: 2}
-  gridSize: {x: 1, y: 1, z: 1}
-  pooledPrefab: {fileID: 3171990239387630850, guid: 5d124ff1e959ff74fb4e11094ad2e647, type: 3}
+  entityPrefab: {fileID: 65519540242368161, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+  gridSize: {x: 1, y: 2, z: 1}
+  pooledPrefab: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
   pooledCells:
-  - {fileID: 317906304}
+  - {fileID: 1898169256}
+  - {fileID: 236939875}
+  previewPrefab: {fileID: 65519540242368161, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+  previewScaleRoot: {fileID: 1209628327}
+  previewInstance: {fileID: 757545136}
 --- !u!4 &2034307141
 Transform:
   m_ObjectHideFlags: 0
@@ -800,7 +1033,9 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 317906305}
+  - {fileID: 1898169255}
+  - {fileID: 236939874}
+  - {fileID: 1209628327}
   m_Father: {fileID: 949497048}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &5320541361567119651

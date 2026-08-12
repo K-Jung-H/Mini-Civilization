@@ -2,7 +2,6 @@ using System;
 using MiniCivilization.World.Definitions;
 using TMPro;
 using UnityEngine;
-using UnityEngine.Events;
 using UnityEngine.UI;
 
 namespace MiniCivilization.World.Editing
@@ -13,15 +12,17 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private Toggle selectionToggle;
         [SerializeField] private Image thumbnailImage;
         [SerializeField] private TMP_Text nameLabel;
-        [SerializeField] private Button addButton;
 
         private EntityDefinition definition;
         private Action<EntityDefinition, bool> selectionChanged;
-        private Action<EntityDefinition> addRequested;
-        private UnityAction<bool> selectionListener;
-        private UnityAction addListener;
+        private UnityEngine.Events.UnityAction<bool> selectionListener;
 
         public EntityDefinition Definition => definition;
+
+        public void SetSelectedWithoutNotify(bool selected)
+        {
+            selectionToggle?.SetIsOnWithoutNotify(selected);
+        }
 
         private void OnDestroy()
         {
@@ -31,8 +32,7 @@ namespace MiniCivilization.World.Editing
         public void Bind(
             EntityDefinition nextDefinition,
             ToggleGroup toggleGroup,
-            Action<EntityDefinition, bool> onSelectionChanged,
-            Action<EntityDefinition> onAddRequested)
+            Action<EntityDefinition, bool> onSelectionChanged)
         {
             if (nextDefinition == null)
             {
@@ -42,7 +42,6 @@ namespace MiniCivilization.World.Editing
             Clear();
             definition = nextDefinition;
             selectionChanged = onSelectionChanged;
-            addRequested = onAddRequested;
             gameObject.name = nextDefinition.DisplayName;
 
             if (thumbnailImage != null)
@@ -61,14 +60,10 @@ namespace MiniCivilization.World.Editing
                 selectionToggle.group = toggleGroup;
                 selectionToggle.SetIsOnWithoutNotify(false);
                 selectionListener = isOn =>
+                {
                     selectionChanged?.Invoke(definition, isOn);
+                };
                 selectionToggle.onValueChanged.AddListener(selectionListener);
-            }
-
-            if (addButton != null)
-            {
-                addListener = () => addRequested?.Invoke(definition);
-                addButton.onClick.AddListener(addListener);
             }
         }
 
@@ -79,24 +74,9 @@ namespace MiniCivilization.World.Editing
                 selectionToggle.onValueChanged.RemoveListener(selectionListener);
             }
 
-            if (addButton != null && addListener != null)
-            {
-                addButton.onClick.RemoveListener(addListener);
-            }
-
             definition = null;
             selectionChanged = null;
-            addRequested = null;
             selectionListener = null;
-            addListener = null;
-        }
-
-        public void SetAddInteractable(bool interactable)
-        {
-            if (addButton != null)
-            {
-                addButton.interactable = interactable;
-            }
         }
     }
 }

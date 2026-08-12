@@ -66,9 +66,9 @@ WorldRuntime
 
 ```text
 BuildingLayout
-├─ OccupiedCells[]
+├─ BuildingCells[]
 │  └─ LocalOffset
-├─ TerrainAnchorOffsets[]
+├─ TerrainAnchorCells[]
 ├─ LocalWayPoints[]
 │  ├─ LocalCellOffset
 │  ├─ LocalPosition
@@ -80,9 +80,9 @@ BuildingLayout
 └─ ValidatePlacement(context)
 ```
 
-### OccupiedCells와 내부 Way
+### BuildingCells와 내부 Way
 
-`OccupiedCells`는 건물 자체가 존재하는 셀이다. 다른 건물의 점유 셀과 중첩될 수 없지만, 나무·동물·사람 같은 일반 엔티티와는 공존할 수 있다.
+`BuildingCells`는 건물 자체가 존재하는 셀이다. 다른 건물의 Building Cell과 중첩될 수 없지만, 나무·동물·사람 같은 일반 엔티티와는 공존할 수 있다. Building의 로컬 중심 Cell은 항상 `(0,0,0)`이며 `BuildingCells`에 포함되어야 한다.
 
 Building 내부 이동은 Cell 중심을 연결하는 `WalkLinks`로 표현하지 않는다. Prefab에 Bake된 `LocalWayPoints`와 `LocalWays`가 진입 위치, 내부 동선, 대기 위치와 퇴장 위치를 정의한다. WayPoint는 Cell 중심을 통과할 필요가 없으며, 하나의 Building이 차지하는 여러 Cell에 자유롭게 배치할 수 있다.
 
@@ -94,7 +94,7 @@ Building 내부 이동은 Cell 중심을 연결하는 `WalkLinks`로 표현하�
 
 Building의 월드 WayPoint 위치는 `AnchorCell`, `Direction`, `CellSize`와 Prefab의 로컬 좌표를 조합해 런타임에 계산한다. 내부 WayPoint와 Way 구성은 Prefab에 고정되지만, Road·다른 Building과의 외부 연결은 주변 상태에 따라 런타임에 구성한다.
 
-### TerrainAnchorOffsets
+### TerrainAnchorCells
 
 Terrain Anchor는 건물 부피에 포함되지 않는 외부 지형 셀이다. 건물을 유지하기 위해 보존해야 하는 지형을 뜻한다.
 
@@ -103,18 +103,54 @@ Terrain Anchor는 건물 부피에 포함되지 않는 외부 지형 셀이다. 
 - 건물 렌더링·점유 충돌·이동 경로 대상은 아니다.
 - Terrain Anchor도 건물끼리 중첩되지 않는다.
 
+### Entity Authoring Cell 다형성과 Building 역할
+
+`EntityAuthoringCellBox`는 로컬 Cell 좌표·지형 높이·Editor 시각화만 공통으로 관리한다. Entity 계열별 Cell 제약은 파생 타입이 소유한다.
+
+```text
+EntityAuthoringCellBox
+├─ BuildingEntityAuthoringCellBox
+│  └─ BuildingRole
+├─ AnimalEntityAuthoringCellBox      // 필요할 때 추가
+└─ NatureEntityAuthoringCellBox      // 필요할 때 추가
+```
+
+Building Authoring은 `EntityAuthoringSystem.CellBoxPrefab`에 `BuildingEntityAuthoringCellBox` Prefab을 연결해야 한다. 각 Building Cell Box에서 역할을 직접 지정한다.
+
+```text
+BuildingRole
+├─ None
+├─ Building
+└─ TerrainAnchor
+```
+
+- 역할은 자동 할당하지 않는다.
+- `Building`으로 지정한 Cell Box만 `BuildingCells`로 Bake한다.
+- `TerrainAnchor`로 지정한 Cell Box만 `TerrainAnchorCells`로 Bake한다.
+- Center Cell `(0,0,0)`이 `Building`이 아니면 Bake를 거부한다.
+
 집은 아래 지면을, 절벽 건물은 옆 절벽을, 다리는 양 끝 지면을 Terrain Anchor로 사용할 수 있다.
+
+### 배치 높이와 지형 보정
+
+- Building의 로컬 `(0,0,0)` Cell이 대응하는 월드 지면의 실제 `GroundHeight`를 Center 기준 높이로 사용한다.
+- 같은 로컬 Y 층의 Building Cell 지면은 Center 기준 높이와 동일하게 맞춘다. 한 XZ 열에 Building Cell이 여러 개면 최하단 Cell만 지형 보정에 참여하고, 위 Cell은 건물 영역으로만 사용한다.
+- 지형은 Center 기준 높이에 맞춰 상승하거나 하강할 수 있다.
+- 각 열의 현재 지면 높이와 목표 높이 차이가 `BuildingEntityController.MaxTerrainCorrectionSteps`를 넘으면 배치할 수 없다.
+- Terrain Anchor는 건물의 바닥을 뜻하지 않는다. 아래·옆·위 어느 위치에도 둘 수 있으며, 배치 결과에서 지정된 Cell이 완전히 Filled 상태여야 한다.
+- 지형 보정, Road 제거와 Building 추가는 배치 가능 판정이 끝난 뒤에만 적용한다. 호버 미리보기는 같은 판정 결과를 사용하지만 월드 데이터는 변경하지 않는다.
+- Building이 차지하는 XZ 열의 Road는 배치 시 World Edit 경로로 제거한다. `EntityRuntime`은 Road를 직접 수정하지 않는다.
 
 ### ValidatePlacement
 
 `ValidatePlacement(context)`는 설치 시점의 월드 상태를 검사한다.
 
-- 점유 셀과 Terrain Anchor의 중첩 여부
+- Building Cell과 Terrain Anchor의 중첩 여부
 - 평지·절벽·지형 높이 조건
 - 특정 상대 위치의 물 존재 여부
 - 타입별 특수 설치 조건
 
-물·절벽을 확인하는 좌표는 점유 셀이나 Terrain Anchor일 필요가 없다. 검증 로직이 필요한 월드 셀·방향을 직접 조회한다.
+물·절벽을 확인하는 좌표는 Building Cell이나 Terrain Anchor일 필요가 없다. 검증 로직이 필요한 월드 셀·방향을 직접 조회한다.
 
 ## Road와 공통 Way 구조
 
@@ -354,6 +390,7 @@ BuildingWayAuthoring
 - Marker Transform은 위치만 표현하고 Cell Offset과 Cell 내부 위치를 사람이 중복 입력하지 않는다.
 - Marker의 외부 연결 방향은 `None`, `North`, `East`, `South`, `West` 중 하나로 명시한다.
 - Bake 시 Marker 위치를 `EntityAuthoringSystem` 기준으로 변환해 `LocalCellOffset`과 CellSize에 독립적인 정규화 `LocalPosition`을 계산한다.
+- Marker가 `BuildingCells` 영역 밖에 있으면 가장 가까운 Building Cell의 내부 또는 경계로 재배치하고, 이동 전·후 위치와 대상 Cell을 로그로 남긴다.
 - Connection은 출발 Marker에서 Target Marker를 직접 참조하며 위치 근접으로 자동 추론하지 않는다.
 - 기본 Connection은 양방향이므로 한쪽 Marker에만 등록한다. 특수한 경우에만 `OneWay=true`로 설정하며, 이때 현재 Marker가 From이다.
 - Link 선은 Editor `Handles`로만 시각화하고 `LineRenderer`나 런타임 GameObject를 만들지 않는다.

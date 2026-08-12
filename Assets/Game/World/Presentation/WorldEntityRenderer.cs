@@ -20,6 +20,8 @@ namespace MiniCivilization.World.Presentation
         private readonly List<DynamicEntity> movingEntities = new();
         private readonly HashSet<WorldEntityId> pendingEntityIds = new();
         private readonly HashSet<WorldEntityId> interactionEntityIds = new();
+        private readonly List<EntityController> placementPreviewViews = new();
+        private EntityDefinition placementPreviewDefinition;
         private WorldRuntime runtime;
         private EntityCatalog catalog;
 
@@ -104,6 +106,7 @@ namespace MiniCivilization.World.Presentation
 
         public void Unbind()
         {
+            ClearPlacementPreviewViews();
             if (runtime != null)
             {
                 runtime.Entities.Changed -= OnEntitiesChanged;
@@ -137,6 +140,98 @@ namespace MiniCivilization.World.Presentation
             movingEntities.Clear();
             pendingEntityIds.Clear();
             interactionEntityIds.Clear();
+        }
+
+        public void ShowPlacementPreview(
+            EntityDefinition definition,
+            IReadOnlyList<CellCoordinate> anchors)
+        {
+            if (runtime == null
+                || definition?.Prefab == null
+                || anchors == null
+                || anchors.Count == 0)
+            {
+                HidePlacementPreview();
+                return;
+            }
+
+            if (!ReferenceEquals(placementPreviewDefinition, definition))
+            {
+                ClearPlacementPreviewViews();
+                placementPreviewDefinition = definition;
+            }
+
+            EnsurePlacementPreviewCount(definition, anchors.Count);
+            for (var index = 0; index < placementPreviewViews.Count; index++)
+            {
+                var view = placementPreviewViews[index];
+                if (view == null)
+                {
+                    continue;
+                }
+
+                var active = index < anchors.Count;
+                view.gameObject.SetActive(active);
+                if (!active)
+                {
+                    continue;
+                }
+
+                view.PreparePlacementPreview(runtime.Data.CellSize);
+                view.ApplyRenderPose(
+                    ResolveCellPosition(
+                        anchors[index],
+                        EntityVisualMotionProfile.RenderHeightBasis.GroundSurface),
+                    EntityDirection.North);
+            }
+        }
+
+        public void HidePlacementPreview()
+        {
+            for (var index = 0; index < placementPreviewViews.Count; index++)
+            {
+                if (placementPreviewViews[index] != null)
+                {
+                    placementPreviewViews[index].gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private void EnsurePlacementPreviewCount(
+            EntityDefinition definition,
+            int count)
+        {
+            var parent = entityRoot != null ? entityRoot : transform;
+            while (placementPreviewViews.Count < count)
+            {
+                var view = Instantiate(definition.Prefab, parent, false);
+                view.name = $"{definition.DisplayName} [Placement Preview]";
+                placementPreviewViews.Add(view);
+            }
+        }
+
+        private void ClearPlacementPreviewViews()
+        {
+            for (var index = 0; index < placementPreviewViews.Count; index++)
+            {
+                var view = placementPreviewViews[index];
+                if (view == null)
+                {
+                    continue;
+                }
+
+                if (Application.isPlaying)
+                {
+                    Destroy(view.gameObject);
+                }
+                else
+                {
+                    DestroyImmediate(view.gameObject);
+                }
+            }
+
+            placementPreviewViews.Clear();
+            placementPreviewDefinition = null;
         }
 
         private void OnPresentationChanged(WorldEntityId id)

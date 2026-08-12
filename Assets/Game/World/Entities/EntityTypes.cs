@@ -483,6 +483,7 @@ namespace MiniCivilization.World.Entities
         }
 
         public abstract BuildingLayout Layout { get; }
+        public abstract int MaxTerrainCorrectionSteps { get; }
 
         public abstract bool ValidatePlacement(
             in BuildingPlacementContext context);

@@ -41,14 +41,19 @@ namespace MiniCivilization.World.Editing
         private EntityCategory? selectedCategory;
         private EntityDefinition selectedDefinition;
         private bool isSubscribed;
-        private bool isCreating;
 
         public EntityCatalog Catalog => entityCatalog;
         public EntityCategory? SelectedCategory => selectedCategory;
+        public EntityCategory? ActiveCategory =>
+            toolbarView == null
+            || (toolbarView.IsExpanded
+                && toolbarView.IsEntityGroupExpanded)
+                ? selectedCategory
+                : null;
         public EntityDefinition SelectedDefinition => selectedDefinition;
 
+        public event Action<EntityCategory?> ActiveCategoryChanged;
         public event Action<EntityDefinition> DefinitionSelected;
-        public event Action<EntityDefinition> CreationRequested;
 
         private void OnEnable()
         {
@@ -73,6 +78,10 @@ namespace MiniCivilization.World.Editing
             Unsubscribe();
             entityCatalog = catalog;
             toolbarView = toolbar;
+            if (definitionToggleGroup != null)
+            {
+                definitionToggleGroup.allowSwitchOff = true;
+            }
 
             if (Application.isPlaying && isActiveAndEnabled)
             {
@@ -145,11 +154,18 @@ namespace MiniCivilization.World.Editing
         private void OnToolbarExpandedChanged(bool _)
         {
             RefreshVisibility();
+            ActiveCategoryChanged?.Invoke(ActiveCategory);
         }
 
-        private void OnEntityGroupExpandedChanged(bool _)
+        private void OnEntityGroupExpandedChanged(bool expanded)
         {
+            if (!expanded)
+            {
+                ClearSelectedDefinition();
+            }
+
             RefreshVisibility();
+            ActiveCategoryChanged?.Invoke(ActiveCategory);
         }
 
         private void OnCategoryChanged()
@@ -162,19 +178,21 @@ namespace MiniCivilization.World.Editing
             }
 
             selectedCategory = nextCategory;
-            selectedDefinition = null;
+            ClearSelectedDefinition();
             RebuildDefinitionList();
             RefreshDetails();
             RefreshVisibility();
+            ActiveCategoryChanged?.Invoke(ActiveCategory);
         }
 
         private void Refresh()
         {
             selectedCategory = ReadSelectedCategory();
-            selectedDefinition = null;
+            ClearSelectedDefinition();
             RebuildDefinitionList();
             RefreshDetails();
             RefreshVisibility();
+            ActiveCategoryChanged?.Invoke(ActiveCategory);
         }
 
         private EntityCategory? ReadSelectedCategory()
@@ -260,8 +278,7 @@ namespace MiniCivilization.World.Editing
             item.Bind(
                 definition,
                 definitionToggleGroup,
-                OnDefinitionSelectionChanged,
-                RequestCreation);
+                OnDefinitionSelectionChanged);
         }
 
         private EntityDefinitionItemView GetOrCreateDefinitionItem(int index)
@@ -307,32 +324,24 @@ namespace MiniCivilization.World.Editing
             DefinitionSelected?.Invoke(selectedDefinition);
         }
 
-        private void RequestCreation(EntityDefinition definition)
+        public void ClearSelectedDefinition()
         {
-            if (isCreating || definition == null)
+            if (selectedDefinition == null)
             {
                 return;
             }
 
-            isCreating = true;
-            SetDefinitionItemsInteractable(false);
-            try
+            for (var index = 0; index < activeDefinitionItemCount; index++)
             {
-                CreationRequested?.Invoke(definition);
+                var item = definitionItems[index];
+                if (item?.Definition == selectedDefinition)
+                {
+                    item.SetSelectedWithoutNotify(false);
+                    break;
+                }
             }
-            finally
-            {
-                isCreating = false;
-                SetDefinitionItemsInteractable(true);
-            }
-        }
 
-        private void SetDefinitionItemsInteractable(bool interactable)
-        {
-            for (var index = 0; index < definitionItems.Count; index++)
-            {
-                definitionItems[index]?.SetAddInteractable(interactable);
-            }
+            SetSelectedDefinition(null);
         }
 
         private void RefreshDetails()

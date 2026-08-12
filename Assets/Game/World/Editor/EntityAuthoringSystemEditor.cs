@@ -197,6 +197,21 @@ namespace MiniCivilization.World.Editor
             return changed;
         }
 
+        internal static void RebuildPreview(EntityAuthoringSystem system)
+        {
+            if (system == null
+                || EditorApplication.isPlayingOrWillChangePlaymode
+                || EditorUtility.IsPersistent(system))
+            {
+                return;
+            }
+
+            ClearPreview(system);
+            system.PreviewPrefab = system.EntityPrefab;
+            SynchronizePreview(system);
+            MarkChanged(system);
+        }
+
         private static EntityController FindExistingPreview(
             EntityAuthoringSystem system)
         {
@@ -418,7 +433,7 @@ namespace MiniCivilization.World.Editor
             }
 
             if (coordinateChanged
-                && cell.SetTerrainHeight(system.CellBoxPrefab.TerrainHeight))
+                && cell.CopyAuthoringValuesFrom(system.CellBoxPrefab))
             {
                 EditorUtility.SetDirty(cell);
                 PrefabUtility.RecordPrefabInstancePropertyModifications(cell);

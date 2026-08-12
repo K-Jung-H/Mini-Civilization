@@ -3,14 +3,14 @@ using UnityEditor;
 
 namespace MiniCivilization.World.Editor
 {
-    [CustomEditor(typeof(EntityAuthoringCellBox))]
-    public sealed class EntityAuthoringCellBoxEditor : UnityEditor.Editor
+    [CustomEditor(typeof(EntityAuthoringCellBox), true)]
+    public class EntityAuthoringCellBoxEditor : UnityEditor.Editor
     {
         private SerializedProperty terrainHeight;
         private SerializedProperty wireColor;
         private SerializedProperty terrainColor;
 
-        private void OnEnable()
+        protected virtual void OnEnable()
         {
             terrainHeight = serializedObject.FindProperty("terrainHeight");
             wireColor = serializedObject.FindProperty("wireColor");
@@ -34,6 +34,7 @@ namespace MiniCivilization.World.Editor
                     "Local Offset",
                     cellBox.LocalOffset.ToString());
                 EditorGUILayout.PropertyField(terrainHeight);
+                DrawAdditionalProperties(cellBox);
 
                 using (new EditorGUI.DisabledScope(true))
                 {
@@ -43,6 +44,30 @@ namespace MiniCivilization.World.Editor
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        protected virtual void DrawAdditionalProperties(
+            EntityAuthoringCellBox cellBox)
+        {
+        }
+    }
+
+    [CustomEditor(typeof(BuildingEntityAuthoringCellBox))]
+    public sealed class BuildingEntityAuthoringCellBoxEditor
+        : EntityAuthoringCellBoxEditor
+    {
+        private SerializedProperty buildingRole;
+
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            buildingRole = serializedObject.FindProperty("buildingRole");
+        }
+
+        protected override void DrawAdditionalProperties(
+            EntityAuthoringCellBox cellBox)
+        {
+            EditorGUILayout.PropertyField(buildingRole);
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Interaction;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 
 namespace MiniCivilization.World.Editing
@@ -9,13 +10,18 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditApplyController : MonoBehaviour
     {
-        [Header("References")]
         private WorldEditController editController;
         private WorldTileSelectionState selectionState;
         private WorldEditToolbarView toolbarView;
+        private WorldEditToolState toolState;
+        private WorldEditInputController inputController;
+        private EntityEditController entityEditController;
+        private EntityManager entityManager;
 
         private readonly List<CellCoordinate> selectedCells = new();
         private readonly List<CellCoordinate> remappedCells = new();
+        private readonly List<CellCoordinate> validCells = new();
+        private readonly List<CellCoordinate> invalidCells = new();
         private readonly HashSet<int> selectedColumns = new();
         private readonly HashSet<int> selectedTerrainCells = new();
         private readonly Dictionary<int, int> shiftedColumnBottoms = new();
@@ -35,12 +41,20 @@ namespace MiniCivilization.World.Editing
         public void Configure(
             WorldEditController controller,
             WorldTileSelectionState selections,
-            WorldEditToolbarView toolbar)
+            WorldEditToolbarView toolbar,
+            WorldEditToolState tools = null,
+            WorldEditInputController input = null,
+            EntityEditController entityEditor = null,
+            EntityManager entities = null)
         {
             Unsubscribe();
             editController = controller;
             selectionState = selections;
             toolbarView = toolbar;
+            toolState = tools;
+            inputController = input;
+            entityEditController = entityEditor;
+            entityManager = entities;
             Subscribe();
         }
 
@@ -51,13 +65,25 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            toolbarView.EditActionRequested += OnEditActionRequested;
             toolbarView.ExpandedChanged += OnExpandedChanged;
             toolbarView.UndoRequested += OnUndoRequested;
             toolbarView.RedoRequested += OnRedoRequested;
             if (editController != null)
             {
                 editController.HistoryChanged += RefreshHistoryButtons;
+            }
+
+            if (selectionState != null)
+            {
+                selectionState.EditHoverChanged += OnEditHoverChanged;
+            }
+
+            if (inputController != null)
+            {
+                inputController.PendingSelectionChanged +=
+                    OnPendingSelectionChanged;
+                inputController.ExecutionRequested += OnExecutionRequested;
+                inputController.PendingCancelled += ClearPreview;
             }
 
             isSubscribed = true;
@@ -73,7 +99,6 @@ namespace MiniCivilization.World.Editing
 
             if (toolbarView != null)
             {
-                toolbarView.EditActionRequested -= OnEditActionRequested;
                 toolbarView.ExpandedChanged -= OnExpandedChanged;
                 toolbarView.UndoRequested -= OnUndoRequested;
                 toolbarView.RedoRequested -= OnRedoRequested;
@@ -82,6 +107,19 @@ namespace MiniCivilization.World.Editing
             if (editController != null)
             {
                 editController.HistoryChanged -= RefreshHistoryButtons;
+            }
+
+            if (selectionState != null)
+            {
+                selectionState.EditHoverChanged -= OnEditHoverChanged;
+            }
+
+            if (inputController != null)
+            {
+                inputController.PendingSelectionChanged -=
+                    OnPendingSelectionChanged;
+                inputController.ExecutionRequested -= OnExecutionRequested;
+                inputController.PendingCancelled -= ClearPreview;
             }
 
             isSubscribed = false;
@@ -94,19 +132,20 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            selectionState?.ClearEditSelected();
-            editController?.ClearHistory();
-            RefreshHistoryButtons();
+            inputController?.CancelPending();
+            ClearPreview();
         }
 
         private void OnUndoRequested()
         {
+            inputController?.CancelPending();
             editController?.Undo();
             RefreshHistoryButtons();
         }
 
         private void OnRedoRequested()
         {
+            inputController?.CancelPending();
             editController?.Redo();
             RefreshHistoryButtons();
         }
@@ -118,38 +157,327 @@ namespace MiniCivilization.World.Editing
                 editController != null && editController.CanRedo);
         }
 
-        private void OnEditActionRequested(WorldEditAction action)
+        private void OnEditHoverChanged(IWorldCellSelection selection)
         {
-            var selection = selectionState != null
-                ? selectionState.EditSelected
-                : null;
-            var world = editController != null
-                ? editController.BoundWorld
-                : null;
-            if (!action.IsSupported || selection == null || world == null)
+            if (inputController != null && inputController.IsPending)
             {
-                toolbarView?.ClearActiveEditAction();
                 return;
+            }
+
+            RefreshPreview(selection, toolState?.Current ?? default);
+        }
+
+        private void OnPendingSelectionChanged(
+            IWorldCellSelection selection,
+            WorldEditToolSnapshot tool)
+        {
+            var executable = RefreshPreview(selection, tool);
+            inputController?.SetPendingExecutable(executable);
+        }
+
+        private void OnExecutionRequested(
+            IWorldCellSelection selection,
+            WorldEditToolSnapshot tool)
+        {
+            if (!RefreshPreview(selection, tool))
+            {
+                inputController?.SetPendingExecutable(false);
+                return;
+            }
+
+            var applied = tool.IsEntityTool
+                ? entityEditController != null
+                    && entityEditController.Apply(
+                        tool.EntityDefinition,
+                        selection)
+                : ApplyAction(selection, tool.Action);
+            if (!applied)
+            {
+                var executable = RefreshPreview(selection, tool);
+                inputController?.SetPendingExecutable(executable);
+                return;
+            }
+
+            ClearPreview();
+            inputController?.CompletePendingExecution();
+        }
+
+        private bool RefreshPreview(
+            IWorldCellSelection selection,
+            WorldEditToolSnapshot tool)
+        {
+            var world = editController?.BoundWorld;
+            if (selection == null || world == null || !tool.IsReady)
+            {
+                ClearPreview();
+                return false;
+            }
+
+            if (tool.IsEntityTool)
+            {
+                var preview = entityEditController?.Evaluate(
+                    tool.EntityDefinition,
+                    selection);
+                if (preview == null)
+                {
+                    ClearPreview();
+                    return false;
+                }
+
+                selectionState.ReplaceEditPreview(
+                    CreateSelection(world, preview.PrimaryCells),
+                    CreateSelection(world, preview.SecondaryCells),
+                    CreateSelection(world, preview.InvalidCells));
+                entityEditController.ShowPreview(
+                    tool.EntityDefinition,
+                    preview);
+                return preview.CanExecute;
+            }
+
+            entityEditController?.ClearPreview();
+            if (tool.Action.PropertyGroup == WorldEditPropertyGroup.Road)
+            {
+                return RefreshRoadPreview(
+                    world,
+                    selection,
+                    tool.Action.RoadOperation);
+            }
+
+            selectedCells.Clear();
+            selection.CopyCellsTo(selectedCells, world);
+            selectionState.ReplaceEditPreview(
+                CreateSelection(world, selectedCells),
+                null,
+                null);
+            return tool.Action.IsSupported && selectedCells.Count != 0;
+        }
+
+        private bool ApplyAction(
+            IWorldCellSelection selection,
+            WorldEditAction action)
+        {
+            var world = editController?.BoundWorld;
+            if (world == null || !action.IsSupported)
+            {
+                return false;
             }
 
             selectedCells.Clear();
             selection.CopyCellsTo(selectedCells, world);
             if (selectedCells.Count == 0)
             {
-                toolbarView?.ClearActiveEditAction();
-                return;
+                return false;
             }
 
-            toolbarView.SetActiveEditAction(action);
             switch (action.PropertyGroup)
             {
                 case WorldEditPropertyGroup.Terrain:
                     ApplyTerrain(world, action.TerrainOperation);
-                    break;
+                    return true;
                 case WorldEditPropertyGroup.Biome:
                     ApplyBiome(world, action.Biome);
-                    break;
+                    return true;
+                case WorldEditPropertyGroup.Road:
+                    return ApplyRoad(
+                        world,
+                        action.RoadOperation);
+                default:
+                    return false;
             }
+        }
+
+        private bool RefreshRoadPreview(
+            WorldData world,
+            IWorldCellSelection selection,
+            RoadEditOperation operation)
+        {
+            selectedCells.Clear();
+            validCells.Clear();
+            invalidCells.Clear();
+            selection.CopyCellsTo(selectedCells, world);
+            var entities = entityManager?.Entities;
+            for (var index = 0; index < selectedCells.Count; index++)
+            {
+                var coordinate = selectedCells[index];
+                var cell = world.GetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z);
+                if (operation == RoadEditOperation.Remove)
+                {
+                    if (cell.HasRoad)
+                    {
+                        validCells.Add(coordinate);
+                    }
+
+                    continue;
+                }
+
+                if (IsTopGroundSurface(
+                        entityManager?.Runtime,
+                        world,
+                        coordinate)
+                    && (entities == null
+                        || !entities.HasBuildingInColumn(
+                            coordinate.X,
+                            coordinate.Z)))
+                {
+                    validCells.Add(coordinate);
+                }
+                else
+                {
+                    invalidCells.Add(coordinate);
+                }
+            }
+
+            selectionState.ReplaceEditPreview(
+                CreateSelection(world, validCells),
+                null,
+                CreateSelection(world, invalidCells));
+            return validCells.Count != 0;
+        }
+
+        private bool ApplyRoad(
+            WorldData world,
+            RoadEditOperation operation)
+        {
+            var transaction = editController.BeginTransaction();
+            var changed = false;
+            var eligible = false;
+            try
+            {
+                var entities = entityManager?.Entities;
+                for (var index = 0; index < selectedCells.Count; index++)
+                {
+                    var coordinate = selectedCells[index];
+                    var cell = world.GetCell(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z);
+                    if (operation == RoadEditOperation.Remove)
+                    {
+                        if (cell.HasRoad)
+                        {
+                            eligible = true;
+                            changed |= transaction.SetRoad(
+                                coordinate.X,
+                                coordinate.Z,
+                                default);
+                        }
+
+                        continue;
+                    }
+
+                    if (!IsTopGroundSurface(
+                            entityManager?.Runtime,
+                            world,
+                            coordinate)
+                        || entities != null
+                        && entities.HasBuildingInColumn(
+                            coordinate.X,
+                            coordinate.Z))
+                    {
+                        continue;
+                    }
+
+                    eligible = true;
+                    changed |= transaction.SetRoad(
+                        coordinate.X,
+                        coordinate.Z,
+                        new RoadData
+                        {
+                            Type = RoadType.Basic,
+                            CrossesCenter = true
+                        });
+                }
+
+                if (changed)
+                {
+                    transaction.Commit();
+                }
+                else
+                {
+                    transaction.Rollback();
+                }
+
+                return eligible;
+            }
+            catch
+            {
+                if (!transaction.IsCompleted)
+                {
+                    transaction.Rollback();
+                }
+
+                throw;
+            }
+        }
+
+        private void ClearPreview()
+        {
+            selectionState?.ClearEditPreview();
+            entityEditController?.ClearPreview();
+        }
+
+        private static IWorldCellSelection CreateSelection(
+            WorldData world,
+            IReadOnlyList<CellCoordinate> cells)
+        {
+            if (world == null || cells == null || cells.Count == 0)
+            {
+                return null;
+            }
+
+            var validCount = 0;
+            for (var index = 0; index < cells.Count; index++)
+            {
+                var cell = cells[index];
+                if (world.Contains(cell.X, cell.Y, cell.Z))
+                {
+                    validCount++;
+                }
+            }
+
+            return validCount == 0
+                ? null
+                : WorldCellSetSelection.Create(world, cells);
+        }
+
+        private static bool IsTopGroundSurface(
+            WorldRuntime runtime,
+            WorldData world,
+            CellCoordinate coordinate)
+        {
+            if (!world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z,
+                    out var cell)
+                || !cell.HasTerrain)
+            {
+                return false;
+            }
+
+            if (runtime != null && ReferenceEquals(runtime.Data, world))
+            {
+                var surface = runtime.SurfaceCache.GetSurfaceHeight(
+                    coordinate.X,
+                    coordinate.Z);
+                return surface.HasGround
+                    && !surface.HasWater
+                    && surface.GroundCellY == coordinate.Y;
+            }
+
+            for (var y = coordinate.Y + 1; y < world.Height; y++)
+            {
+                var above = world.GetCell(coordinate.X, y, coordinate.Z);
+                if (above.HasTerrain || above.HasWater)
+                {
+                    return false;
+                }
+            }
+
+            return !cell.HasWater;
         }
 
         private void ApplyTerrain(

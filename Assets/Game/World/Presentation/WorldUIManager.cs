@@ -10,6 +10,7 @@ namespace MiniCivilization.World.Presentation
     {
         [Header("Runtime Systems")]
         [SerializeField] private WorldEditToolState editToolState;
+        [SerializeField] private WorldEditInputController editInputController;
         [SerializeField] private WorldEditApplyController editApplyController;
         [SerializeField] private EntityEditController entityEditController;
         [SerializeField] private WorldTileSelectionState selectionState;
@@ -18,6 +19,7 @@ namespace MiniCivilization.World.Presentation
         [Header("World UI")]
         [SerializeField] private WorldEditToolbarView toolbarView;
         [SerializeField] private WorldEntityCatalogView entityCatalogView;
+        [SerializeField] private WorldEditConfirmationView editConfirmationView;
         [SerializeField] private WorldOperationProgressView operationProgressView;
         [SerializeField] private WorldTileInfoPresenter tileInfoPresenter;
         [SerializeField] private WorldTileInfoPanel tileInfoPanel;
@@ -47,15 +49,6 @@ namespace MiniCivilization.World.Presentation
 
             worldManager = manager;
             operationProgressView?.SetWorldManager(manager);
-            if (toolbarView != null)
-            {
-                editToolState?.Configure(toolbarView);
-                editApplyController?.Configure(
-                    manager.EditController,
-                    selectionState,
-                    toolbarView);
-            }
-
             if (entityCatalogView != null)
             {
                 entityCatalogView.Initialize(
@@ -63,8 +56,26 @@ namespace MiniCivilization.World.Presentation
                     toolbarView);
                 entityEditController?.Configure(
                     manager.EntityManager,
+                    manager.EditController);
+            }
+
+            if (toolbarView != null)
+            {
+                editToolState?.Configure(toolbarView, entityCatalogView);
+                editInputController?.Configure(
+                    manager,
+                    editToolState,
                     selectionState,
-                    entityCatalogView);
+                    editConfirmationView,
+                    toolbarView);
+                editApplyController?.Configure(
+                    manager.EditController,
+                    selectionState,
+                    toolbarView,
+                    editToolState,
+                    editInputController,
+                    entityEditController,
+                    manager.EntityManager);
             }
 
             if (tileInfoPresenter != null && tileInfoPanel != null)

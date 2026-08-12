@@ -3,6 +3,7 @@ using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using MiniCivilization.World.Entities.Building;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Presentation
 {
@@ -31,18 +32,20 @@ namespace MiniCivilization.World.Presentation
     public sealed class BuildingEntityController : AnimatedEntityController
     {
         [SerializeField] private BuildingEntityType entityType;
-        [SerializeField] private Vector3Int[] occupiedCells =
-        {
-            new(0, 1, 0)
-        };
-        [SerializeField] private Vector3Int[] terrainAnchorOffsets =
-        {
-            Vector3Int.zero
-        };
+        [SerializeField]
+        [FormerlySerializedAs("occupiedCells")]
+        private Vector3Int[] buildingCells = Array.Empty<Vector3Int>();
+        [SerializeField]
+        [FormerlySerializedAs("terrainAnchorOffsets")]
+        private Vector3Int[] terrainAnchorCells = Array.Empty<Vector3Int>();
         [SerializeField] private BuildingWayPointBakeData[] localWayPoints =
             Array.Empty<BuildingWayPointBakeData>();
         [SerializeField] private BuildingWayBakeData[] localWays =
             Array.Empty<BuildingWayBakeData>();
+        [SerializeField, Min(0)]
+        [Tooltip("배치 시 허용하는 지형 상승·하강 최대 단계입니다. 한 단계는 Cell 높이의 1/5입니다.")]
+        [InspectorName("최대 지형 보정 단계")]
+        private int maxTerrainCorrectionSteps;
 
         private BuildingLayout cachedLayout;
 
@@ -52,22 +55,30 @@ namespace MiniCivilization.World.Presentation
         public override string EntityTypeName => entityType.ToString();
         public override bool HasValidEntityType =>
             entityType is BuildingEntityType.House;
+        public int MaxTerrainCorrectionSteps => maxTerrainCorrectionSteps;
 
         public override Entity CreateStateMachine(EntityData data)
         {
             var layout = GetLayout();
             return entityType switch
             {
-                BuildingEntityType.House => new HouseEntity(data, layout),
+                BuildingEntityType.House => new HouseEntity(
+                    data,
+                    layout,
+                    maxTerrainCorrectionSteps),
                 _ => throw new InvalidOperationException(
                     $"Unsupported Building Entity type: {entityType}.")
             };
         }
 
-        internal void SetBakedWays(
+        internal void SetBakedLayout(
+            Vector3Int[] cells,
+            Vector3Int[] anchors,
             BuildingWayPointBakeData[] points,
             BuildingWayBakeData[] ways)
         {
+            buildingCells = cells ?? Array.Empty<Vector3Int>();
+            terrainAnchorCells = anchors ?? Array.Empty<Vector3Int>();
             localWayPoints = points ?? Array.Empty<BuildingWayPointBakeData>();
             localWays = ways ?? Array.Empty<BuildingWayBakeData>();
             cachedLayout = null;
@@ -80,17 +91,17 @@ namespace MiniCivilization.World.Presentation
                 return cachedLayout;
             }
 
-            var occupied = new BuildingOccupiedCell[occupiedCells?.Length ?? 0];
-            for (var index = 0; index < occupied.Length; index++)
+            var cells = new BuildingCell[buildingCells?.Length ?? 0];
+            for (var index = 0; index < cells.Length; index++)
             {
-                occupied[index] = new BuildingOccupiedCell(
-                    ToOffset(occupiedCells[index]));
+                cells[index] = new BuildingCell(
+                    ToOffset(buildingCells[index]));
             }
 
-            var anchors = new CellOffset[terrainAnchorOffsets?.Length ?? 0];
+            var anchors = new CellOffset[terrainAnchorCells?.Length ?? 0];
             for (var index = 0; index < anchors.Length; index++)
             {
-                anchors[index] = ToOffset(terrainAnchorOffsets[index]);
+                anchors[index] = ToOffset(terrainAnchorCells[index]);
             }
 
             var points = new BuildingWayPoint[localWayPoints?.Length ?? 0];
@@ -114,7 +125,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             cachedLayout = new BuildingLayout(
-                occupied,
+                cells,
                 anchors,
                 points,
                 ways);
@@ -123,6 +134,9 @@ namespace MiniCivilization.World.Presentation
 
         private void OnValidate()
         {
+            maxTerrainCorrectionSteps = Math.Max(
+                0,
+                maxTerrainCorrectionSteps);
             cachedLayout = null;
         }
 

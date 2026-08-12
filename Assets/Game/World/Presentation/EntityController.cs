@@ -150,6 +150,22 @@ namespace MiniCivilization.World.Presentation
             transform.localRotation = localRotation;
         }
 
+        public void PreparePlacementPreview(float cellScale)
+        {
+            if (!HasValidVisualRoot)
+            {
+                throw new InvalidOperationException(
+                    $"Entity Controller '{name}' requires a CellScaleRoot with VisualRoot below it.");
+            }
+
+            cellScaleRoot.localScale = Vector3.one * cellScale;
+            if (localMotionRoot != null)
+            {
+                localMotionRoot.localPosition = Vector3.zero;
+                localMotionRoot.localRotation = Quaternion.identity;
+            }
+        }
+
         public void SetWayConstrained(bool constrained)
         {
             if (wayConstrained == constrained)

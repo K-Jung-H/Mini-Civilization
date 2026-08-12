@@ -15,11 +15,11 @@ namespace MiniCivilization.World.Entities
         West = 4
     }
 
-    public readonly struct BuildingOccupiedCell
+    public readonly struct BuildingCell
     {
         public CellOffset LocalOffset { get; }
 
-        public BuildingOccupiedCell(CellOffset localOffset)
+        public BuildingCell(CellOffset localOffset)
         {
             LocalOffset = localOffset;
         }
@@ -119,52 +119,51 @@ namespace MiniCivilization.World.Entities
 
     public sealed class BuildingLayout
     {
-        private readonly BuildingOccupiedCell[] occupiedCells;
-        private readonly CellOffset[] terrainAnchorOffsets;
+        private readonly BuildingCell[] buildingCells;
+        private readonly CellOffset[] terrainAnchorCells;
         private readonly BuildingWayPoint[] wayPoints;
         private readonly BuildingWay[] ways;
 
-        public IReadOnlyList<BuildingOccupiedCell> OccupiedCells =>
-            occupiedCells;
-        public IReadOnlyList<CellOffset> TerrainAnchorOffsets =>
-            terrainAnchorOffsets;
+        public IReadOnlyList<BuildingCell> BuildingCells => buildingCells;
+        public IReadOnlyList<CellOffset> TerrainAnchorCells =>
+            terrainAnchorCells;
         public IReadOnlyList<BuildingWayPoint> WayPoints => wayPoints;
         public IReadOnlyList<BuildingWay> Ways => ways;
 
         public BuildingLayout(
-            IReadOnlyList<BuildingOccupiedCell> occupiedCells,
-            IReadOnlyList<CellOffset> terrainAnchorOffsets,
+            IReadOnlyList<BuildingCell> buildingCells,
+            IReadOnlyList<CellOffset> terrainAnchorCells,
             IReadOnlyList<BuildingWayPoint> wayPoints = null,
             IReadOnlyList<BuildingWay> ways = null)
         {
-            if (occupiedCells == null || occupiedCells.Count == 0)
+            if (buildingCells == null || buildingCells.Count == 0)
             {
                 throw new ArgumentException(
-                    "A building layout requires at least one occupied Cell.",
-                    nameof(occupiedCells));
+                    "A building layout requires at least one Building Cell.",
+                    nameof(buildingCells));
             }
 
-            this.occupiedCells = new BuildingOccupiedCell[occupiedCells.Count];
-            var occupiedOffsets = new HashSet<CellOffset>();
-            for (var index = 0; index < occupiedCells.Count; index++)
+            this.buildingCells = new BuildingCell[buildingCells.Count];
+            var buildingOffsets = new HashSet<CellOffset>();
+            for (var index = 0; index < buildingCells.Count; index++)
             {
-                var cell = occupiedCells[index];
-                if (!occupiedOffsets.Add(cell.LocalOffset))
+                var cell = buildingCells[index];
+                if (!buildingOffsets.Add(cell.LocalOffset))
                 {
                     throw new ArgumentException(
-                        "Building occupied Cells cannot overlap.",
-                        nameof(occupiedCells));
+                        "Building Cells cannot overlap.",
+                        nameof(buildingCells));
                 }
 
-                this.occupiedCells[index] = cell;
+                this.buildingCells[index] = cell;
             }
 
-            this.terrainAnchorOffsets = CopyAnchors(
-                terrainAnchorOffsets,
-                occupiedOffsets);
+            this.terrainAnchorCells = CopyAnchors(
+                terrainAnchorCells,
+                buildingOffsets);
             this.wayPoints = CopyWayPoints(
                 wayPoints,
-                occupiedOffsets);
+                buildingOffsets);
             this.ways = CopyWays(ways, this.wayPoints.Length);
         }
 
@@ -225,7 +224,7 @@ namespace MiniCivilization.World.Entities
 
         private static CellOffset[] CopyAnchors(
             IReadOnlyList<CellOffset> source,
-            ISet<CellOffset> occupiedOffsets)
+            ISet<CellOffset> buildingOffsets)
         {
             if (source == null || source.Count == 0)
             {
@@ -237,10 +236,10 @@ namespace MiniCivilization.World.Entities
             for (var index = 0; index < source.Count; index++)
             {
                 var offset = source[index];
-                if (!anchors.Add(offset) || occupiedOffsets.Contains(offset))
+                if (!anchors.Add(offset) || buildingOffsets.Contains(offset))
                 {
                     throw new ArgumentException(
-                        "Building Terrain Anchors cannot overlap occupied or anchor Cells.",
+                        "Terrain Anchor Cells cannot overlap Building or other Terrain Anchor Cells.",
                         nameof(source));
                 }
 
@@ -252,7 +251,7 @@ namespace MiniCivilization.World.Entities
 
         private static BuildingWayPoint[] CopyWayPoints(
             IReadOnlyList<BuildingWayPoint> source,
-            ISet<CellOffset> occupiedOffsets)
+            ISet<CellOffset> buildingOffsets)
         {
             if (source == null || source.Count == 0)
             {
@@ -262,10 +261,10 @@ namespace MiniCivilization.World.Entities
             var result = new BuildingWayPoint[source.Count];
             for (var index = 0; index < source.Count; index++)
             {
-                if (!occupiedOffsets.Contains(source[index].LocalCellOffset))
+                if (!buildingOffsets.Contains(source[index].LocalCellOffset))
                 {
                     throw new ArgumentException(
-                        "Building WayPoints must belong to an occupied Cell.",
+                        "Building WayPoints must belong to a Building Cell.",
                         nameof(source));
                 }
 
@@ -352,6 +351,66 @@ namespace MiniCivilization.World.Entities
                     position.x),
                 _ => throw new ArgumentOutOfRangeException(nameof(direction))
             };
+    }
+
+    public readonly struct BuildingTerrainCorrection
+    {
+        public int X { get; }
+        public int Z { get; }
+        public int CurrentHeightSteps { get; }
+        public int TargetHeightSteps { get; }
+        public SurfaceType Surface { get; }
+
+        internal BuildingTerrainCorrection(
+            int x,
+            int z,
+            int currentHeightSteps,
+            int targetHeightSteps,
+            SurfaceType surface)
+        {
+            X = x;
+            Z = z;
+            CurrentHeightSteps = currentHeightSteps;
+            TargetHeightSteps = targetHeightSteps;
+            Surface = surface;
+        }
+    }
+
+    public sealed class BuildingPlacementResult
+    {
+        private readonly CellCoordinate[] buildingCells;
+        private readonly CellCoordinate[] terrainAnchorCells;
+        private readonly BuildingTerrainCorrection[] terrainCorrections;
+        private readonly CellCoordinate[] roadCells;
+        private readonly CellCoordinate[] invalidCells;
+
+        public bool CanPlace => invalidCells.Length == 0;
+        public IReadOnlyList<CellCoordinate> BuildingCells => buildingCells;
+        public IReadOnlyList<CellCoordinate> TerrainAnchorCells =>
+            terrainAnchorCells;
+        public IReadOnlyList<BuildingTerrainCorrection> TerrainCorrections =>
+            terrainCorrections;
+        public IReadOnlyList<CellCoordinate> RoadCells => roadCells;
+        public IReadOnlyList<CellCoordinate> InvalidCells => invalidCells;
+
+        internal BuildingPlacementResult(
+            CellCoordinate[] buildingCells,
+            CellCoordinate[] terrainAnchorCells,
+            BuildingTerrainCorrection[] terrainCorrections,
+            CellCoordinate[] roadCells,
+            CellCoordinate[] invalidCells)
+        {
+            this.buildingCells = buildingCells
+                ?? throw new ArgumentNullException(nameof(buildingCells));
+            this.terrainAnchorCells = terrainAnchorCells
+                ?? throw new ArgumentNullException(nameof(terrainAnchorCells));
+            this.terrainCorrections = terrainCorrections
+                ?? throw new ArgumentNullException(nameof(terrainCorrections));
+            this.roadCells = roadCells
+                ?? throw new ArgumentNullException(nameof(roadCells));
+            this.invalidCells = invalidCells
+                ?? throw new ArgumentNullException(nameof(invalidCells));
+        }
     }
 
     public readonly struct BuildingPlacementContext

@@ -17,6 +17,7 @@ namespace MiniCivilization.World.Runtime
         private EntityRuntime entities;
 
         public EntityCatalog Catalog => entityCatalog;
+        public WorldEntityRenderer Renderer => entityRenderer;
         public WorldRuntime Runtime => runtime;
         public EntityRuntime Entities => entities;
 
