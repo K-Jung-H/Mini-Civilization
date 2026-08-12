@@ -729,11 +729,6 @@ namespace MiniCivilization.World.Meshing
             var connectedTopMask = ExpandConnected(
                 sourceBit,
                 occupancy.TopMask);
-            if (CountBits((byte)(occupancy.AboveMask
-                    & ~connectedTopMask)) >= 3)
-            {
-                return currentHeight + 1;
-            }
 
             var resolvedHeight = currentHeight - 1;
             var exteriorBoundaryCount = 0;
@@ -1263,18 +1258,6 @@ namespace MiniCivilization.World.Meshing
             }
 
             return connected;
-        }
-
-        private static int CountBits(byte mask)
-        {
-            var count = 0;
-            while (mask != 0)
-            {
-                count += mask & 1;
-                mask >>= 1;
-            }
-
-            return count;
         }
 
         private static void GetWaterBoundaryCorners(
