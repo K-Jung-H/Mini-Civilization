@@ -152,10 +152,6 @@ namespace MiniCivilization.World.WaterFlow
         }
     }
 
-    /// <summary>
-    /// Calculates one atomic water wave over one or more frames. The current
-    /// wave is persisted in WorldData; staged Cells are never visible or saved.
-    /// </summary>
     internal sealed class WaterFlowResolver
     {
         private static readonly (int x, int z)[] HorizontalDirections =
@@ -262,11 +258,6 @@ namespace MiniCivilization.World.WaterFlow
             ReplaceActiveWave(world, state, restartWave);
         }
 
-        /// <summary>
-        /// Returns true only when the current wave was fully calculated and
-        /// committed. A false result means the same atomic wave continues next
-        /// frame and WorldData remains unchanged.
-        /// </summary>
         public bool Step(
             WorldData world,
             WaterFlowState state,
@@ -689,12 +680,6 @@ namespace MiniCivilization.World.WaterFlow
                 belowWater);
         }
 
-        /// <summary>
-        /// A horizontal flow entering this Cell crosses a ledge even when the
-        /// Cell below is already filled by the lower water surface. This is a
-        /// render and branching condition, distinct from whether the lower
-        /// Cell can accept more water.
-        /// </summary>
         private static bool HasVerticalDropBelow(
             WorldData world,
             CellCoordinate coordinate)

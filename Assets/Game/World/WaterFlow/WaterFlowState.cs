@@ -4,10 +4,6 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.WaterFlow
 {
-    /// <summary>
-    /// Runtime overlay used only while a queued water recalculation is in
-    /// progress. Stable water state remains authoritative in CellData.Water.
-    /// </summary>
     public sealed class WaterFlowState
     {
         private readonly WorldData world;

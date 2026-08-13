@@ -3,11 +3,6 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.WaterFlow
 {
-    /// <summary>
-    /// Pure terrain and amount predicates shared by runtime flow and
-    /// generation-time water planning. Callers remain responsible for reading
-    /// the appropriate persistent or preview state.
-    /// </summary>
     internal static class WaterFlowReachability
     {
         public static int GetMaximumHorizontalSpreadCount(

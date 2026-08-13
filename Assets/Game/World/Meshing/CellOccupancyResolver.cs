@@ -35,12 +35,6 @@ namespace MiniCivilization.World.Meshing
         public bool IsValid => TopUnits > BottomUnits;
     }
 
-    /// <summary>
-    /// Describes the eight Solid occupancy samples incident to one quantized
-    /// world corner. Each bit represents one of the four XZ quadrants around
-    /// the corner. Below and Above are sampled on the two sides of the
-    /// horizontal plane at <see cref="HeightUnits"/>.
-    /// </summary>
     internal readonly struct SolidCornerOccupancy
     {
         public readonly int CornerX;
@@ -253,7 +247,6 @@ namespace MiniCivilization.World.Meshing
         {
             if (y <= 0)
             {
-                // The world floor is a closed boundary and is never visible.
                 return false;
             }
 

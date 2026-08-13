@@ -101,11 +101,6 @@ namespace MiniCivilization.World.Meshing
             return buffers;
         }
 
-        /// <summary>
-        /// Raw Cell exposure is resolved before flow-shaped vertices lower a
-        /// water boundary. Include the one-Cell shell behind that boundary so
-        /// newly revealed side and corner faces can still be emitted.
-        /// </summary>
         private static void ExpandRenderCandidates(
             WorldData world,
             int startX,

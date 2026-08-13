@@ -8,10 +8,10 @@ namespace MiniCivilization.World.Persistence
 {
     public static class WorldSaveCodec
     {
-        private const uint Magic = 0x3257434D; // "MCW2"
-        private const uint Footer = 0x444E454D; // "MEND"
-        private const uint WaterFlowScheduleMarker = 0x31534657; // "WFS1"
-        private const uint EntitiesMarker = 0x31544E45; // "ENT1"
+        private const uint Magic = 0x3257434D;
+        private const uint Footer = 0x444E454D;
+        private const uint WaterFlowScheduleMarker = 0x31534657;
+        private const uint EntitiesMarker = 0x31544E45;
         private const ushort CurrentVersion = 10;
         private const int CellByteSize = 16;
         private const int EnvironmentByteSize = 5;

@@ -40,11 +40,6 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    /// <summary>
-    /// Applies a water feature plan to an isolated height-and-water preview and
-    /// runs the production wave resolver to completion. The source world and
-    /// plan remain untouched.
-    /// </summary>
     internal static class WaterPlanValidator
     {
         public static WaterPlanValidationContext CreateContext(

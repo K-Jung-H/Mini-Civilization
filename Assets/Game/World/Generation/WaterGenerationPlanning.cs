@@ -45,10 +45,6 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    /// <summary>
-    /// Read-only-to-consumers hydrology analysis storage. It contains terrain
-    /// facts and drainage results only; it never places water in WorldData.
-    /// </summary>
     internal sealed class HydrologyMap
     {
         private readonly int[] terrainHeightUnits;

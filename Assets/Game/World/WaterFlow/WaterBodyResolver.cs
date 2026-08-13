@@ -57,8 +57,6 @@ namespace MiniCivilization.World.WaterFlow
                             continue;
                         }
 
-                        // Adjacent surface-water columns belong to one body even if their
-                        // quantized heights create a vertical flow between Cell layers.
                         visited[nextIndex] = true;
                         queue.Enqueue((nextX, nextZ));
                     }

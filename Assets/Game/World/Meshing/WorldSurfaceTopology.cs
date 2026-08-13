@@ -73,11 +73,6 @@ namespace MiniCivilization.World.Meshing
         }
     }
 
-    /// <summary>
-    /// Resolves the polygon required to close two perpendicular Cell sides.
-    /// The caller supplies independent top and coverage profiles, so terrain
-    /// and water share the same closure rule without sharing height logic.
-    /// </summary>
     internal static class SurfaceBoundaryClosure
     {
         private const float Epsilon = 0.0001f;
@@ -283,11 +278,6 @@ namespace MiniCivilization.World.Meshing
 
     }
 
-    /// <summary>
-    /// Owns every render boundary derived from the authoritative Cell data.
-    /// Terrain and water builders only consume these profiles; they never
-    /// infer a shared Edge or Corner independently.
-    /// </summary>
     internal sealed partial class WorldSurfaceQuery
     {
         private const int HorizontalDependencyRadius = 1;
@@ -370,9 +360,6 @@ namespace MiniCivilization.World.Meshing
                 return;
             }
 
-            // Solid profiles can scan vertically through connected columns.
-            // Invalidate every Y only in the affected XZ neighborhood so a
-            // lower edit cannot leave a cached upper cliff profile stale.
             for (var y = 0; y < world.Height; y++)
             for (var z = minimumZ; z <= maximumZ; z++)
             for (var x = minimumX; x <= maximumX; x++)
@@ -382,9 +369,6 @@ namespace MiniCivilization.World.Meshing
                 waterProfiles.Remove(cellIndex);
             }
 
-            // Each water profile consumes the four grid corners surrounding
-            // its Cell. Remove the corners owned by the same invalidated
-            // neighborhood, including the positive outer boundary.
             for (var y = 0; y < world.Height; y++)
             for (var z = minimumZ; z <= maximumZ + 1; z++)
             for (var x = minimumX; x <= maximumX + 1; x++)
@@ -942,9 +926,6 @@ namespace MiniCivilization.World.Meshing
             }
             else if (supportWeight > 0f)
             {
-                // A stable or non-downstream surface owns the shared Corner.
-                // Downward flow can lower it only when every participating
-                // WaterCell treats this Corner as an unsupported outlet.
                 height = Math.Clamp(
                     supportWeightedHeight / supportWeight,
                     highestWaterBottom,

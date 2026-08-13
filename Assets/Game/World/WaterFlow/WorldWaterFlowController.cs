@@ -83,8 +83,6 @@ namespace MiniCivilization.World.WaterFlow
                     result.ChangedColumnIndices);
             }
 
-            // Completing a wave changes the persisted frontier even when no
-            // Cell changes, so it must still advance the world change state.
             CommitResolvedChanges(result);
 
             if (result.HasTopologyChanges
