@@ -7,6 +7,8 @@ namespace MiniCivilization.World.Editor
 {
     internal static class EntityAuthoringCellBoxGizmo
     {
+        private const float TerrainCoreSizeRatio = 0.6f;
+
         [DrawGizmo(GizmoType.Selected | GizmoType.NonSelected | GizmoType.Pickable)]
         private static void DrawCellBox(
             EntityAuthoringCellBox cellBox,
@@ -55,6 +57,8 @@ namespace MiniCivilization.World.Editor
                 color,
                 noOutline);
 
+            DrawTerrainCore(cellBox, topY, color);
+
             if (topY <= 0f)
             {
                 return;
@@ -99,6 +103,39 @@ namespace MiniCivilization.World.Editor
                 topFrontRight,
                 bottomFrontRight,
                 color);
+        }
+
+        private static void DrawTerrainCore(
+            EntityAuthoringCellBox cellBox,
+            float surfaceHeight,
+            Color terrainColor)
+        {
+            if (terrainColor.a <= 0f)
+            {
+                return;
+            }
+
+            var halfCoreSize = cellBox.CellSize * TerrainCoreSizeRatio * 0.5f;
+            var surfaceOffset = Mathf.Max(cellBox.CellSize * 0.0001f, 0.0001f);
+            var y = surfaceHeight + surfaceOffset;
+            var fillColor = new Color(
+                terrainColor.r * 0.65f,
+                terrainColor.g * 0.65f,
+                terrainColor.b * 0.65f,
+                Mathf.Clamp01(terrainColor.a + 0.2f));
+            var outlineColor = cellBox.WireColor;
+            outlineColor.a = 1f;
+
+            Handles.DrawSolidRectangleWithOutline(
+                new[]
+                {
+                    new Vector3(-halfCoreSize, y, -halfCoreSize),
+                    new Vector3(-halfCoreSize, y, halfCoreSize),
+                    new Vector3(halfCoreSize, y, halfCoreSize),
+                    new Vector3(halfCoreSize, y, -halfCoreSize)
+                },
+                fillColor,
+                outlineColor);
         }
 
         private static void DrawFace(

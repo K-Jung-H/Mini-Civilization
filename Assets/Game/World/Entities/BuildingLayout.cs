@@ -25,6 +25,26 @@ namespace MiniCivilization.World.Entities
         }
     }
 
+    public readonly struct TerrainAnchorCell
+    {
+        public CellOffset LocalOffset { get; }
+        public int MaxTerrainCorrectionSteps { get; }
+
+        public TerrainAnchorCell(
+            CellOffset localOffset,
+            int maxTerrainCorrectionSteps)
+        {
+            if (maxTerrainCorrectionSteps < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxTerrainCorrectionSteps));
+            }
+
+            LocalOffset = localOffset;
+            MaxTerrainCorrectionSteps = maxTerrainCorrectionSteps;
+        }
+    }
+
     public readonly struct BuildingWayPoint
     {
         public CellOffset LocalCellOffset { get; }
@@ -120,19 +140,19 @@ namespace MiniCivilization.World.Entities
     public sealed class BuildingLayout
     {
         private readonly BuildingCell[] buildingCells;
-        private readonly CellOffset[] terrainAnchorCells;
+        private readonly TerrainAnchorCell[] terrainAnchorCells;
         private readonly BuildingWayPoint[] wayPoints;
         private readonly BuildingWay[] ways;
 
         public IReadOnlyList<BuildingCell> BuildingCells => buildingCells;
-        public IReadOnlyList<CellOffset> TerrainAnchorCells =>
+        public IReadOnlyList<TerrainAnchorCell> TerrainAnchorCells =>
             terrainAnchorCells;
         public IReadOnlyList<BuildingWayPoint> WayPoints => wayPoints;
         public IReadOnlyList<BuildingWay> Ways => ways;
 
         public BuildingLayout(
             IReadOnlyList<BuildingCell> buildingCells,
-            IReadOnlyList<CellOffset> terrainAnchorCells,
+            IReadOnlyList<TerrainAnchorCell> terrainAnchorCells,
             IReadOnlyList<BuildingWayPoint> wayPoints = null,
             IReadOnlyList<BuildingWay> ways = null)
         {
@@ -222,20 +242,21 @@ namespace MiniCivilization.World.Entities
             return (BuildingWayPointDirection)(value + 1);
         }
 
-        private static CellOffset[] CopyAnchors(
-            IReadOnlyList<CellOffset> source,
+        private static TerrainAnchorCell[] CopyAnchors(
+            IReadOnlyList<TerrainAnchorCell> source,
             ISet<CellOffset> buildingOffsets)
         {
             if (source == null || source.Count == 0)
             {
-                return Array.Empty<CellOffset>();
+                return Array.Empty<TerrainAnchorCell>();
             }
 
-            var result = new CellOffset[source.Count];
+            var result = new TerrainAnchorCell[source.Count];
             var anchors = new HashSet<CellOffset>();
             for (var index = 0; index < source.Count; index++)
             {
-                var offset = source[index];
+                var anchor = source[index];
+                var offset = anchor.LocalOffset;
                 if (!anchors.Add(offset) || buildingOffsets.Contains(offset))
                 {
                     throw new ArgumentException(
@@ -243,7 +264,7 @@ namespace MiniCivilization.World.Entities
                         nameof(source));
                 }
 
-                result[index] = offset;
+                result[index] = anchor;
             }
 
             return result;

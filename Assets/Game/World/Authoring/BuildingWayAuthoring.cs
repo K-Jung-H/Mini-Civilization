@@ -50,7 +50,7 @@ namespace MiniCivilization.World.Authoring
 
             if (!TryCollectBuildingCells(
                     out var buildingCells,
-                    out var terrainAnchorCells,
+                    out var terrainAnchors,
                     out error))
             {
                 return false;
@@ -146,7 +146,7 @@ namespace MiniCivilization.World.Authoring
 
             targetController.SetBakedLayout(
                 buildingCells,
-                terrainAnchorCells,
+                terrainAnchors,
                 points,
                 bakedLinks.ToArray());
             error = string.Empty;
@@ -155,11 +155,11 @@ namespace MiniCivilization.World.Authoring
 
         private bool TryCollectBuildingCells(
             out Vector3Int[] buildingCells,
-            out Vector3Int[] terrainAnchorCells,
+            out TerrainAnchorBakeData[] terrainAnchors,
             out string error)
         {
             var cells = new List<Vector3Int>();
-            var anchors = new List<Vector3Int>();
+            var anchors = new List<TerrainAnchorBakeData>();
             var usedOffsets = new HashSet<Vector3Int>();
             var pooledCells = authoringSystem.PooledCells;
             for (var index = 0; index < pooledCells.Count; index++)
@@ -176,7 +176,7 @@ namespace MiniCivilization.World.Authoring
                 if (!usedOffsets.Add(cell.LocalOffset))
                 {
                     buildingCells = null;
-                    terrainAnchorCells = null;
+                    terrainAnchors = null;
                     error = $"Entity Authoring contains duplicated Cell {cell.LocalOffset}.";
                     return false;
                 }
@@ -187,14 +187,19 @@ namespace MiniCivilization.World.Authoring
                 }
                 else
                 {
-                    anchors.Add(cell.LocalOffset);
+                    anchors.Add(new TerrainAnchorBakeData
+                    {
+                        LocalOffset = cell.LocalOffset,
+                        MaxTerrainCorrectionSteps =
+                            cell.MaxTerrainCorrectionSteps
+                    });
                 }
             }
 
             if (cells.Count == 0)
             {
                 buildingCells = null;
-                terrainAnchorCells = null;
+                terrainAnchors = null;
                 error = "Building Authoring requires at least one Building Cell.";
                 return false;
             }
@@ -202,15 +207,17 @@ namespace MiniCivilization.World.Authoring
             if (!cells.Contains(Vector3Int.zero))
             {
                 buildingCells = null;
-                terrainAnchorCells = null;
+                terrainAnchors = null;
                 error = "Building Authoring Center Cell (0, 0, 0) must have the Building role.";
                 return false;
             }
 
             cells.Sort(CompareOffset);
-            anchors.Sort(CompareOffset);
+            anchors.Sort((left, right) => CompareOffset(
+                left.LocalOffset,
+                right.LocalOffset));
             buildingCells = cells.ToArray();
-            terrainAnchorCells = anchors.ToArray();
+            terrainAnchors = anchors.ToArray();
             error = string.Empty;
             return true;
         }

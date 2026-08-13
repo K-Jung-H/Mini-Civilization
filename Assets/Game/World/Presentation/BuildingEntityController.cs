@@ -22,6 +22,13 @@ namespace MiniCivilization.World.Presentation
     }
 
     [Serializable]
+    public struct TerrainAnchorBakeData
+    {
+        public Vector3Int LocalOffset;
+        [Min(0)] public int MaxTerrainCorrectionSteps;
+    }
+
+    [Serializable]
     public struct BuildingWayBakeData
     {
         [Min(0)] public int PointA;
@@ -35,17 +42,12 @@ namespace MiniCivilization.World.Presentation
         [SerializeField]
         [FormerlySerializedAs("occupiedCells")]
         private Vector3Int[] buildingCells = Array.Empty<Vector3Int>();
-        [SerializeField]
-        [FormerlySerializedAs("terrainAnchorOffsets")]
-        private Vector3Int[] terrainAnchorCells = Array.Empty<Vector3Int>();
+        [SerializeField] private TerrainAnchorBakeData[] terrainAnchors =
+            Array.Empty<TerrainAnchorBakeData>();
         [SerializeField] private BuildingWayPointBakeData[] localWayPoints =
             Array.Empty<BuildingWayPointBakeData>();
         [SerializeField] private BuildingWayBakeData[] localWays =
             Array.Empty<BuildingWayBakeData>();
-        [SerializeField, Min(0)]
-        [Tooltip("배치 시 허용하는 지형 상승·하강 최대 단계입니다. 한 단계는 Cell 높이의 1/5입니다.")]
-        [InspectorName("최대 지형 보정 단계")]
-        private int maxTerrainCorrectionSteps;
 
         private BuildingLayout cachedLayout;
 
@@ -55,17 +57,13 @@ namespace MiniCivilization.World.Presentation
         public override string EntityTypeName => entityType.ToString();
         public override bool HasValidEntityType =>
             entityType is BuildingEntityType.House;
-        public int MaxTerrainCorrectionSteps => maxTerrainCorrectionSteps;
 
         public override Entity CreateStateMachine(EntityData data)
         {
             var layout = GetLayout();
             return entityType switch
             {
-                BuildingEntityType.House => new HouseEntity(
-                    data,
-                    layout,
-                    maxTerrainCorrectionSteps),
+                BuildingEntityType.House => new HouseEntity(data, layout),
                 _ => throw new InvalidOperationException(
                     $"Unsupported Building Entity type: {entityType}.")
             };
@@ -73,12 +71,12 @@ namespace MiniCivilization.World.Presentation
 
         internal void SetBakedLayout(
             Vector3Int[] cells,
-            Vector3Int[] anchors,
+            TerrainAnchorBakeData[] anchors,
             BuildingWayPointBakeData[] points,
             BuildingWayBakeData[] ways)
         {
             buildingCells = cells ?? Array.Empty<Vector3Int>();
-            terrainAnchorCells = anchors ?? Array.Empty<Vector3Int>();
+            terrainAnchors = anchors ?? Array.Empty<TerrainAnchorBakeData>();
             localWayPoints = points ?? Array.Empty<BuildingWayPointBakeData>();
             localWays = ways ?? Array.Empty<BuildingWayBakeData>();
             cachedLayout = null;
@@ -98,10 +96,14 @@ namespace MiniCivilization.World.Presentation
                     ToOffset(buildingCells[index]));
             }
 
-            var anchors = new CellOffset[terrainAnchorCells?.Length ?? 0];
+            var anchors = new TerrainAnchorCell[
+                terrainAnchors?.Length ?? 0];
             for (var index = 0; index < anchors.Length; index++)
             {
-                anchors[index] = ToOffset(terrainAnchorCells[index]);
+                var anchor = terrainAnchors[index];
+                anchors[index] = new TerrainAnchorCell(
+                    ToOffset(anchor.LocalOffset),
+                    Mathf.Max(0, anchor.MaxTerrainCorrectionSteps));
             }
 
             var points = new BuildingWayPoint[localWayPoints?.Length ?? 0];
@@ -134,9 +136,17 @@ namespace MiniCivilization.World.Presentation
 
         private void OnValidate()
         {
-            maxTerrainCorrectionSteps = Math.Max(
-                0,
-                maxTerrainCorrectionSteps);
+            for (var index = 0;
+                 index < terrainAnchors?.Length;
+                 index++)
+            {
+                var anchor = terrainAnchors[index];
+                anchor.MaxTerrainCorrectionSteps = Math.Max(
+                    0,
+                    anchor.MaxTerrainCorrectionSteps);
+                terrainAnchors[index] = anchor;
+            }
+
             cachedLayout = null;
         }
 

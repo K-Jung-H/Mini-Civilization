@@ -120,8 +120,9 @@ MonoBehaviour:
   entityType: 1
   buildingCells:
   - {x: 0, y: 0, z: 0}
-  terrainAnchorCells:
-  - {x: 0, y: -1, z: 0}
+  terrainAnchors:
+  - LocalOffset: {x: 0, y: -1, z: 0}
+    MaxTerrainCorrectionSteps: 0
   localWayPoints:
   - LocalCellOffset: {x: 0, y: 0, z: 0}
     LocalPosition: {x: 0, y: 0, z: 0.25}
@@ -151,7 +152,6 @@ MonoBehaviour:
   - PointA: 3
     PointB: 4
     OneWay: 0
-  maxTerrainCorrectionSteps: 0
 --- !u!1001 &2406229398729578690
 PrefabInstance:
   m_ObjectHideFlags: 0

@@ -11,6 +11,17 @@ namespace MiniCivilization.World.Interaction
         Water
     }
 
+    public enum CellSurfaceFace : byte
+    {
+        None = 0,
+        Top = 1,
+        Bottom = 2,
+        NegativeX = 3,
+        PositiveX = 4,
+        NegativeZ = 5,
+        PositiveZ = 6
+    }
+
     public static class WorldCellIndex
     {
         public static int Encode(WorldData world, int x, int y, int z)
@@ -194,6 +205,7 @@ namespace MiniCivilization.World.Interaction
         public readonly CellCoordinate Cell;
         public readonly int CellIndex;
         public readonly SurfaceInteractionType SurfaceType;
+        public readonly CellSurfaceFace Face;
         public readonly Vector3 HitPoint;
         public readonly Vector3 HitNormal;
         public readonly float Distance;
@@ -202,6 +214,7 @@ namespace MiniCivilization.World.Interaction
             CellCoordinate cell,
             int cellIndex,
             SurfaceInteractionType surfaceType,
+            CellSurfaceFace face,
             Vector3 hitPoint,
             Vector3 hitNormal,
             float distance = 0f)
@@ -209,6 +222,7 @@ namespace MiniCivilization.World.Interaction
             Cell = cell;
             CellIndex = cellIndex;
             SurfaceType = surfaceType;
+            Face = face;
             HitPoint = hitPoint;
             HitNormal = hitNormal;
             Distance = distance;
@@ -217,7 +231,8 @@ namespace MiniCivilization.World.Interaction
         public bool Equals(TilePickResult other)
         {
             return CellIndex == other.CellIndex
-                && SurfaceType == other.SurfaceType;
+                && SurfaceType == other.SurfaceType
+                && Face == other.Face;
         }
 
         public override bool Equals(object obj)
@@ -227,12 +242,12 @@ namespace MiniCivilization.World.Interaction
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(CellIndex, SurfaceType);
+            return HashCode.Combine(CellIndex, SurfaceType, Face);
         }
 
         public override string ToString()
         {
-            return $"{SurfaceType} Cell {Cell}";
+            return $"{SurfaceType} {Face} Cell {Cell}";
         }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Entities;
 using MiniCivilization.World.Interaction;
 using MiniCivilization.World.Runtime;
 using UnityEngine;
@@ -89,7 +90,7 @@ namespace MiniCivilization.World.Editing
             for (var index = 0; index < selectedCells.Count; index++)
             {
                 var coordinate = selectedCells[index];
-                if (IsTopGroundSurface(runtime, coordinate))
+                if (HasGroundPlacementSupport(runtime.Data, coordinate))
                 {
                     validCells.Add(coordinate);
                 }
@@ -138,7 +139,7 @@ namespace MiniCivilization.World.Editing
             for (var index = 0; index < selectedCells.Count; index++)
             {
                 var coordinate = selectedCells[index];
-                if (!IsTopGroundSurface(runtime, coordinate))
+                if (!HasGroundPlacementSupport(runtime.Data, coordinate))
                 {
                     continue;
                 }
@@ -172,11 +173,31 @@ namespace MiniCivilization.World.Editing
                 typeKey,
                 centerCell);
             var placement = entities.EvaluateBuildingPlacement(data);
+            validCells.Clear();
+            invalidCells.Clear();
+            for (var index = 0;
+                 index < placement.InvalidCells.Count;
+                 index++)
+            {
+                invalidCells.Add(placement.InvalidCells[index]);
+            }
+
+            for (var index = 0;
+                 index < placement.TerrainAnchorCells.Count;
+                 index++)
+            {
+                var terrainAnchor = placement.TerrainAnchorCells[index];
+                if (!invalidCells.Contains(terrainAnchor))
+                {
+                    validCells.Add(terrainAnchor);
+                }
+            }
+
             return new EntityPlacementPreview(
                 placement.CanPlace,
                 Copy(placement.BuildingCells),
-                Copy(placement.TerrainAnchorCells),
-                Copy(placement.InvalidCells),
+                Copy(validCells),
+                Copy(invalidCells),
                 new[] { centerCell });
         }
 
@@ -282,26 +303,21 @@ namespace MiniCivilization.World.Editing
             return copy;
         }
 
-        private static bool IsTopGroundSurface(
-            WorldRuntime runtime,
+        private static bool HasGroundPlacementSupport(
+            WorldData world,
             CellCoordinate coordinate)
         {
-            if (!runtime.Data.TryGetCell(
+            return world != null
+                && world.TryGetCell(
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z,
                     out var cell)
-                || !cell.HasTerrain)
-            {
-                return false;
-            }
-
-            var surface = runtime.SurfaceCache.GetSurfaceHeight(
-                coordinate.X,
-                coordinate.Z);
-            return surface.HasGround
-                && !surface.HasWater
-                && surface.GroundCellY == coordinate.Y;
+                && !cell.HasWater
+                && EntityGroundSupport.TryResolve(
+                    world,
+                    coordinate,
+                    out _);
         }
     }
 }

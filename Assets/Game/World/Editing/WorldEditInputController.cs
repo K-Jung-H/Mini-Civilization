@@ -288,7 +288,7 @@ namespace MiniCivilization.World.Editing
         private void BeginDrag(TilePickResult pick)
         {
             dragTool = toolState.Current;
-            if (!TryResolveToolPick(pick, dragTool, out pick))
+            if (!TryResolveToolCell(pick, dragTool, out _))
             {
                 selectionState?.ClearEditHovered();
                 return;
@@ -319,13 +319,13 @@ namespace MiniCivilization.World.Editing
 
         private void UpdateDrag(TilePickResult pick)
         {
-            if (!TryResolveToolPick(pick, dragTool, out pick))
+            if (!TryResolveToolCell(pick, dragTool, out _))
             {
                 selectionState?.ClearEditHovered();
                 return;
             }
 
-            if (pick.Cell.Equals(dragCurrent.Cell))
+            if (pick.Equals(dragCurrent))
             {
                 return;
             }
@@ -393,10 +393,28 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            var bounds = new WorldEditDragSnapshot(
-                dragTool,
-                dragStart,
-                dragCurrent).Bounds;
+            if (!TryResolveToolCell(
+                    dragStart,
+                    dragTool,
+                    out var startCell)
+                || !TryResolveToolCell(
+                    dragCurrent,
+                    dragTool,
+                    out var currentCell))
+            {
+                selectionState?.ClearEditHovered();
+                return;
+            }
+
+            var bounds = new CellBounds(
+                new CellCoordinate(
+                    Math.Min(startCell.X, currentCell.X),
+                    Math.Min(startCell.Y, currentCell.Y),
+                    Math.Min(startCell.Z, currentCell.Z)),
+                new CellCoordinate(
+                    Math.Max(startCell.X, currentCell.X),
+                    Math.Max(startCell.Y, currentCell.Y),
+                    Math.Max(startCell.Z, currentCell.Z)));
             selectionState.ReplaceEditHovered(
                 WorldCellBoxSelection.Create(
                     worldManager.CurrentWorldData,
@@ -416,7 +434,19 @@ namespace MiniCivilization.World.Editing
 
             brushCellIndices.Clear();
             brushCells.Clear();
-            AddBrushFootprint(hovered.Cell, size);
+            if (!TryResolveToolCell(
+                    hovered,
+                    toolState.Current,
+                    out var placementCell))
+            {
+                selectionState?.ClearEditHovered();
+                return;
+            }
+
+            AddBrushFootprint(
+                placementCell,
+                size,
+                toolState.Current.CellSelectionPolicy);
             RefreshBrushStrokePreview();
             idlePreviewAnchor = hovered;
             brushPreviewSize = size;
@@ -437,29 +467,36 @@ namespace MiniCivilization.World.Editing
             TilePickResult from,
             TilePickResult to)
         {
+            if (!TryResolveToolCell(from, dragTool, out var fromCell)
+                || !TryResolveToolCell(to, dragTool, out var toCell))
+            {
+                return;
+            }
+
             var world = worldManager.CurrentWorldData;
-            var deltaX = to.Cell.X - from.Cell.X;
-            var deltaZ = to.Cell.Z - from.Cell.Z;
+            var deltaX = toCell.X - fromCell.X;
+            var deltaZ = toCell.Z - fromCell.Z;
             var steps = Mathf.Max(Mathf.Abs(deltaX), Mathf.Abs(deltaZ));
             steps = Mathf.Max(1, steps);
             for (var step = 0; step <= steps; step++)
             {
                 var t = step / (float)steps;
                 var x = Mathf.RoundToInt(Mathf.Lerp(
-                    from.Cell.X,
-                    to.Cell.X,
+                    fromCell.X,
+                    toCell.X,
                     t));
                 var z = Mathf.RoundToInt(Mathf.Lerp(
-                    from.Cell.Z,
-                    to.Cell.Z,
+                    fromCell.Z,
+                    toCell.Z,
                     t));
                 var fallbackY = Mathf.RoundToInt(Mathf.Lerp(
-                    from.Cell.Y,
-                    to.Cell.Y,
+                    fromCell.Y,
+                    toCell.Y,
                     t));
                 AddBrushFootprint(
                     new CellCoordinate(x, fallbackY, z),
-                    Mathf.Clamp(dragTool.BrushSize, 1, 3));
+                    Mathf.Clamp(dragTool.BrushSize, 1, 3),
+                    dragTool.CellSelectionPolicy);
             }
         }
 
@@ -475,112 +512,46 @@ namespace MiniCivilization.World.Editing
             }
 
             var tool = isDragging ? dragTool : toolState.Current;
-            if (!TryResolveToolPick(pick, tool, out pick))
+            if (worldManager == null
+                || !worldManager.HasWorld
+                || selectionState == null)
             {
-                selectionState?.ClearEditHovered();
                 return;
             }
 
-            if (worldManager == null
-                || !worldManager.HasWorld
-                || selectionState == null
-                || !worldManager.CurrentWorldData.Contains(
-                    pick.Cell.X,
-                    pick.Cell.Y,
-                    pick.Cell.Z))
+            if (!TryResolveToolCell(pick, tool, out var selectedCell))
             {
+                selectionState.ClearEditHovered();
                 return;
             }
 
             selectionState.ReplaceEditHovered(
                 WorldCellSetSelection.Create(
                     worldManager.CurrentWorldData,
-                    new[] { pick.Cell }));
+                    new[] { selectedCell }));
             if (!isDragging)
             {
                 idlePreviewAnchor = source;
             }
         }
 
-        private bool TryResolveToolPick(
-            TilePickResult source,
+        private bool TryResolveToolCell(
+            TilePickResult pick,
             WorldEditToolSnapshot tool,
-            out TilePickResult resolved)
+            out CellCoordinate cell)
         {
-            resolved = source;
-            if (!tool.IsEntityTool
-                || tool.EntityDefinition.Prefab.Category
-                    != EntityCategory.Building)
-            {
-                return true;
-            }
-
             var world = worldManager?.CurrentWorldData;
-            if (world == null)
-            {
-                return false;
-            }
-
-            var normal = source.HitNormal;
-            var rendererTransform = worldManager.Renderer != null
-                ? worldManager.Renderer.RenderRoot
-                : null;
-            if (rendererTransform != null)
-            {
-                normal = rendererTransform.InverseTransformDirection(normal);
-            }
-
-            var absoluteX = Mathf.Abs(normal.x);
-            var absoluteY = Mathf.Abs(normal.y);
-            var absoluteZ = Mathf.Abs(normal.z);
-            var offsetX = 0;
-            var offsetY = 0;
-            var offsetZ = 0;
-            if (absoluteY >= absoluteX && absoluteY >= absoluteZ)
-            {
-                offsetY = normal.y >= 0f ? 1 : -1;
-            }
-            else if (absoluteX >= absoluteZ)
-            {
-                offsetX = normal.x >= 0f ? 1 : -1;
-            }
-            else
-            {
-                offsetZ = normal.z >= 0f ? 1 : -1;
-            }
-
-            var target = new CellCoordinate(
-                source.Cell.X + offsetX,
-                source.Cell.Y + offsetY,
-                source.Cell.Z + offsetZ);
-            if (!world.TryGetCell(
-                    target.X,
-                    target.Y,
-                    target.Z,
-                    out var targetCell)
-                || targetCell.HasTerrain
-                || targetCell.HasWater)
-            {
-                return false;
-            }
-
-            resolved = new TilePickResult(
-                target,
-                WorldCellIndex.Encode(
-                    world,
-                    target.X,
-                    target.Y,
-                    target.Z),
-                source.SurfaceType,
-                source.HitPoint,
-                source.HitNormal,
-                source.Distance);
-            return true;
+            return WorldEditCellSelectionResolver.TryResolve(
+                world,
+                pick,
+                tool.CellSelectionPolicy,
+                out cell);
         }
 
         private void AddBrushFootprint(
             CellCoordinate anchor,
-            int size)
+            int size,
+            WorldEditCellSelectionPolicy policy)
         {
             var world = worldManager.CurrentWorldData;
             var minimumOffset = -(size / 2);
@@ -592,7 +563,9 @@ namespace MiniCivilization.World.Editing
                  x++)
             {
                 if (!world.TryGetCell(x, anchor.Y, z, out var cell)
-                    || (!cell.HasTerrain && !cell.HasWater))
+                    || (policy == WorldEditCellSelectionPolicy.SurfaceCell
+                        && !cell.HasTerrain
+                        && !cell.HasWater))
                 {
                     continue;
                 }

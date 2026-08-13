@@ -1,3 +1,4 @@
+using MiniCivilization.World.Domain;
 using UnityEngine;
 
 namespace MiniCivilization.World.Authoring
@@ -28,20 +29,43 @@ namespace MiniCivilization.World.Authoring
             0f,
             0f,
             0.24f);
+        private static readonly Color InvalidTerrainAnchorWireColor = new(
+            1f,
+            0.05f,
+            0.05f,
+            1f);
+        private static readonly Color InvalidTerrainAnchorTerrainColor = new(
+            1f,
+            0f,
+            0f,
+            0.42f);
 
         [SerializeField]
         private BuildingCellRole buildingRole;
 
+        [SerializeField, Min(0)]
+        private int maxTerrainCorrectionSteps;
+
         public BuildingCellRole BuildingRole => buildingRole;
+        public int MaxTerrainCorrectionSteps => maxTerrainCorrectionSteps;
+        public bool HasValidTerrainAnchor =>
+            buildingRole != BuildingCellRole.TerrainAnchor
+            || TerrainHeight == WorldGrid.HeightStepsPerCell;
         public override Color WireColor => buildingRole switch
         {
             BuildingCellRole.None => NoneWireColor,
+            BuildingCellRole.TerrainAnchor
+                when !HasValidTerrainAnchor =>
+                InvalidTerrainAnchorWireColor,
             BuildingCellRole.TerrainAnchor => TerrainAnchorWireColor,
             _ => base.WireColor
         };
         public override Color TerrainColor => buildingRole switch
         {
             BuildingCellRole.None => Color.clear,
+            BuildingCellRole.TerrainAnchor
+                when !HasValidTerrainAnchor =>
+                InvalidTerrainAnchorTerrainColor,
             BuildingCellRole.TerrainAnchor => TerrainAnchorTerrainColor,
             _ => base.TerrainColor
         };
@@ -59,7 +83,25 @@ namespace MiniCivilization.World.Authoring
                 changed = true;
             }
 
+            var sourceCorrectionSteps =
+                source is BuildingEntityAuthoringCellBox sourceBuilding
+                    ? sourceBuilding.MaxTerrainCorrectionSteps
+                    : 0;
+            if (maxTerrainCorrectionSteps != sourceCorrectionSteps)
+            {
+                maxTerrainCorrectionSteps = sourceCorrectionSteps;
+                changed = true;
+            }
+
             return changed;
+        }
+
+        protected override void OnValidate()
+        {
+            base.OnValidate();
+            maxTerrainCorrectionSteps = Mathf.Max(
+                0,
+                maxTerrainCorrectionSteps);
         }
     }
 }

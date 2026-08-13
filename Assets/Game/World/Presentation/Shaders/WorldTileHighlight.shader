@@ -4,6 +4,8 @@ Shader "Mini Civilization/World Tile Highlight"
     {
         _BaseColor("Base Color", Color) = (0.1, 0.9, 1.0, 0.35)
         [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("Depth Test", Float) = 4
+        [Enum(UnityEngine.Rendering.CompareFunction)] _StencilComparison("Stencil Comparison", Float) = 6
+        [Enum(UnityEngine.Rendering.StencilOp)] _StencilPass("Stencil Pass", Float) = 2
     }
 
     SubShader
@@ -31,8 +33,8 @@ Shader "Mini Civilization/World Tile Highlight"
                 Ref 64
                 ReadMask 64
                 WriteMask 64
-                Comp NotEqual
-                Pass Replace
+                Comp [_StencilComparison]
+                Pass [_StencilPass]
             }
 
             HLSLPROGRAM

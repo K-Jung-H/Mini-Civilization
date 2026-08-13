@@ -138,6 +138,7 @@ namespace MiniCivilization.World.Interaction
                             coordinate,
                             cellIndex,
                             surfaceHit.SurfaceType,
+                            surfaceHit.Face,
                             worldPoint,
                             worldNormal,
                             worldDistance);

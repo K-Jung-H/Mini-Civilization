@@ -57,17 +57,25 @@ namespace MiniCivilization.World.Editor
         : EntityAuthoringCellBoxEditor
     {
         private SerializedProperty buildingRole;
+        private SerializedProperty maxTerrainCorrectionSteps;
 
         protected override void OnEnable()
         {
             base.OnEnable();
             buildingRole = serializedObject.FindProperty("buildingRole");
+            maxTerrainCorrectionSteps = serializedObject.FindProperty(
+                "maxTerrainCorrectionSteps");
         }
 
         protected override void DrawAdditionalProperties(
             EntityAuthoringCellBox cellBox)
         {
             EditorGUILayout.PropertyField(buildingRole);
+            if ((BuildingCellRole)buildingRole.enumValueIndex
+                == BuildingCellRole.TerrainAnchor)
+            {
+                EditorGUILayout.PropertyField(maxTerrainCorrectionSteps);
+            }
         }
     }
 }

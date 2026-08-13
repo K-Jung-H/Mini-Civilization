@@ -18,6 +18,7 @@ MonoBehaviour:
   worldChunkCountXZ: 16
   worldChunkCountY: 4
   renderChunksPerPatch: 1
+  roadMaxHeightSteps: 1
   terrainScale: 0.09
   terrainLayers: 3
   terrainSpacing: 2

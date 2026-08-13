@@ -523,8 +523,13 @@ namespace MiniCivilization.World.Presentation
                     $"Entity render Cell {coordinate} is outside the world.");
             }
 
-            var heightUnits = coordinate.Y * WorldGrid.HeightStepsPerCell
-                + cell.Terrain.SolidHeight;
+            var heightUnits = EntityGroundSupport.TryResolve(
+                runtime.Data,
+                coordinate,
+                out var groundSupport)
+                ? groundSupport.SurfaceHeightUnits
+                : coordinate.Y * WorldGrid.HeightStepsPerCell
+                    + cell.Terrain.SolidHeight;
             if (heightBasis
                     == EntityVisualMotionProfile.RenderHeightBasis.WaterSurface)
             {

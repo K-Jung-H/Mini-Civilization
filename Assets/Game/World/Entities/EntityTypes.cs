@@ -163,9 +163,13 @@ namespace MiniCivilization.World.Entities
                 return surface.WaterHeight * runtime.Data.HeightStep;
             }
 
-            if (surface.HasGround && surface.GroundCellY == cell.Y)
+            if (EntityGroundSupport.TryResolve(
+                    runtime.Data,
+                    cell,
+                    out var groundSupport))
             {
-                return surface.GroundHeight * runtime.Data.HeightStep;
+                return groundSupport.SurfaceHeightUnits
+                    * runtime.Data.HeightStep;
             }
 
             if (!runtime.Data.TryGetCell(
@@ -315,9 +319,12 @@ namespace MiniCivilization.World.Entities
                 return false;
             }
 
+            var groundSupport = default(EntityGroundSupport);
             if (!entersWater
-                && (!surface.HasGround
-                    || surface.GroundCellY != nextCell.Y))
+                && !EntityGroundSupport.TryResolve(
+                    runtime.Data,
+                    nextCell,
+                    out groundSupport))
             {
                 return false;
             }
@@ -327,7 +334,8 @@ namespace MiniCivilization.World.Entities
                 currentCell);
             var nextHeight = (entersWater
                 ? surface.WaterHeight
-                : surface.GroundHeight) * runtime.Data.HeightStep;
+                : groundSupport.SurfaceHeightUnits)
+                * runtime.Data.HeightStep;
             return movementRules.Allows(
                     currentCell,
                     currentHeight,
@@ -381,12 +389,25 @@ namespace MiniCivilization.World.Entities
                     continue;
                 }
 
-                var candidate = new CellCoordinate(
-                    x,
-                    surface.HasWater
-                        ? surface.WaterCellY
-                        : surface.GroundCellY,
-                    z);
+                CellCoordinate candidate;
+                if (surface.HasWater)
+                {
+                    candidate = new CellCoordinate(
+                        x,
+                        surface.WaterCellY,
+                        z);
+                }
+                else if (!EntityGroundSupport.TryResolveTopPlacementCell(
+                             worldRuntime.Data,
+                             new CellCoordinate(
+                                 x,
+                                 surface.GroundCellY,
+                                 z),
+                             out candidate))
+                {
+                    continue;
+                }
+
                 if (!runtime.CanEnter(this, AnchorCell, candidate))
                 {
                     continue;
@@ -483,7 +504,6 @@ namespace MiniCivilization.World.Entities
         }
 
         public abstract BuildingLayout Layout { get; }
-        public abstract int MaxTerrainCorrectionSteps { get; }
 
         public abstract bool ValidatePlacement(
             in BuildingPlacementContext context);

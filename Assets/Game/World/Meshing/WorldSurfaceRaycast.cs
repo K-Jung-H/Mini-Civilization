@@ -8,17 +8,20 @@ namespace MiniCivilization.World.Meshing
     internal readonly struct WorldSurfaceRaycastHit
     {
         public readonly SurfaceInteractionType SurfaceType;
+        public readonly CellSurfaceFace Face;
         public readonly float Distance;
         public readonly Vector3 Point;
         public readonly Vector3 Normal;
 
         public WorldSurfaceRaycastHit(
             SurfaceInteractionType surfaceType,
+            CellSurfaceFace face,
             float distance,
             Vector3 point,
             Vector3 normal)
         {
             SurfaceType = surfaceType;
+            Face = face;
             Distance = distance;
             Point = point;
             Normal = normal;
@@ -37,6 +40,8 @@ namespace MiniCivilization.World.Meshing
             public float MinimumDistance;
             public float BestDistance;
             public SurfaceInteractionType BestType;
+            public CellSurfaceFace CurrentFace;
+            public CellSurfaceFace BestFace;
             public Vector3 BestNormal;
             public bool HasHit;
 
@@ -107,6 +112,7 @@ namespace MiniCivilization.World.Meshing
                 HasHit = true;
                 BestDistance = distance;
                 BestType = type;
+                BestFace = CurrentFace;
                 BestNormal = normal.normalized;
             }
         }
@@ -179,6 +185,7 @@ namespace MiniCivilization.World.Meshing
 
             hit = new WorldSurfaceRaycastHit(
                 accumulator.BestType,
+                accumulator.BestFace,
                 accumulator.BestDistance,
                 localRay.GetPoint(accumulator.BestDistance),
                 accumulator.BestNormal);
@@ -197,20 +204,26 @@ namespace MiniCivilization.World.Meshing
             if ((exposure & CellExposureFlags.SolidTop) != 0)
             {
                 topProfile = ResolveSolid(x, y, z);
+                accumulator.CurrentFace = CellSurfaceFace.Top;
                 RaycastSolidTop(x, z, topProfile, ref accumulator);
             }
 
+            accumulator.CurrentFace = CellSurfaceFace.NegativeX;
             RaycastSolidSide(x, y, z, cell, exposure, topProfile,
                 -1, 0, CellExposureFlags.SolidNegativeX, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.PositiveX;
             RaycastSolidSide(x, y, z, cell, exposure, topProfile,
                 1, 0, CellExposureFlags.SolidPositiveX, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.NegativeZ;
             RaycastSolidSide(x, y, z, cell, exposure, topProfile,
                 0, -1, CellExposureFlags.SolidNegativeZ, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.PositiveZ;
             RaycastSolidSide(x, y, z, cell, exposure, topProfile,
                 0, 1, CellExposureFlags.SolidPositiveZ, ref accumulator);
 
             if ((exposure & CellExposureFlags.SolidTop) != 0)
             {
+                accumulator.CurrentFace = CellSurfaceFace.None;
                 RaycastSolidCornerClosure(
                     x, y, z, cell, topProfile, -1, -1, ref accumulator);
                 RaycastSolidCornerClosure(
@@ -223,6 +236,7 @@ namespace MiniCivilization.World.Meshing
 
             if ((exposure & CellExposureFlags.SolidBottom) != 0)
             {
+                accumulator.CurrentFace = CellSurfaceFace.Bottom;
                 var height = y * WorldGrid.HeightStepsPerCell;
                 accumulator.TestQuad(
                     Point(x, z, 0f, 0f, height),
@@ -513,13 +527,19 @@ namespace MiniCivilization.World.Meshing
         {
             if (profile.TopExposed)
             {
+                accumulator.CurrentFace = CellSurfaceFace.Top;
                 RaycastWaterTop(x, z, profile, ref accumulator);
             }
 
+            accumulator.CurrentFace = CellSurfaceFace.NegativeX;
             RaycastWaterSide(x, y, z, profile, -1, 0, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.PositiveX;
             RaycastWaterSide(x, y, z, profile, 1, 0, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.NegativeZ;
             RaycastWaterSide(x, y, z, profile, 0, -1, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.PositiveZ;
             RaycastWaterSide(x, y, z, profile, 0, 1, ref accumulator);
+            accumulator.CurrentFace = CellSurfaceFace.None;
             RaycastWaterCornerClosure(
                 x, y, z, profile, -1, -1, ref accumulator);
             RaycastWaterCornerClosure(
@@ -531,6 +551,7 @@ namespace MiniCivilization.World.Meshing
 
             if (IsWaterBottomExposed(x, y, z, cell, profile))
             {
+                accumulator.CurrentFace = CellSurfaceFace.Bottom;
                 var height = profile.Interval.BottomUnits;
                 accumulator.TestQuad(
                     Point(x, z, 0f, 0f, height),

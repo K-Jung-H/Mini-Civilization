@@ -11,6 +11,10 @@ namespace MiniCivilization.World.Interaction
     {
         private const int MaxInstancesPerDraw = 1023;
         private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+        private static readonly int StencilComparisonId =
+            Shader.PropertyToID("_StencilComparison");
+        private static readonly int StencilPassId =
+            Shader.PropertyToID("_StencilPass");
 
         [Header("References")]
         [SerializeField] private WorldManager worldManager;
@@ -38,12 +42,20 @@ namespace MiniCivilization.World.Interaction
         private readonly List<Matrix4x4> primaryMatrices = new();
         private readonly List<Matrix4x4> secondaryMatrices = new();
         private readonly List<Matrix4x4> invalidMatrices = new();
+        private readonly List<Vector3> outlineVertices = new();
+        private readonly List<int> outlineIndices = new();
+        private readonly HashSet<CellEdge> outlineEdges = new();
 
         private WorldTileSelectionState subscribedState;
         private WorldManager subscribedManager;
         private Mesh unitCubeMesh;
+        private Mesh primaryOutlineMesh;
+        private Mesh secondaryOutlineMesh;
+        private Mesh invalidOutlineMesh;
         private Material runtimeMaterial;
         private Material runtimeMaterialSource;
+        private Material runtimeOutlineMaterial;
+        private Material runtimeOutlineMaterialSource;
         private MaterialPropertyBlock propertyBlock;
         private Bounds instanceBounds;
         private Color activeColor;
@@ -150,6 +162,8 @@ namespace MiniCivilization.World.Interaction
                 return;
             }
 
+            EnsureOutlineMeshes();
+
             if (selectionState?.EditPrimaryPreview != null
                 || selectionState?.EditSecondaryPreview != null
                 || selectionState?.EditInvalidPreview != null)
@@ -166,6 +180,18 @@ namespace MiniCivilization.World.Interaction
                     selectionState.EditInvalidPreview,
                     world,
                     invalidMatrices);
+                RebuildSelectionOutline(
+                    selectionState.EditPrimaryPreview,
+                    world,
+                    primaryOutlineMesh);
+                RebuildSelectionOutline(
+                    selectionState.EditSecondaryPreview,
+                    world,
+                    secondaryOutlineMesh);
+                RebuildSelectionOutline(
+                    selectionState.EditInvalidPreview,
+                    world,
+                    invalidOutlineMesh);
                 activeColor = editSelectedColor;
             }
             else if (selectionState?.EditHovered != null)
@@ -175,6 +201,10 @@ namespace MiniCivilization.World.Interaction
                     selectionState.EditHovered,
                     world,
                     primaryMatrices);
+                RebuildSelectionOutline(
+                    selectionState.EditHovered,
+                    world,
+                    primaryOutlineMesh);
             }
             else if (selectionState?.EditSelected != null)
             {
@@ -183,6 +213,10 @@ namespace MiniCivilization.World.Interaction
                     selectionState.EditSelected,
                     world,
                     primaryMatrices);
+                RebuildSelectionOutline(
+                    selectionState.EditSelected,
+                    world,
+                    primaryOutlineMesh);
             }
             else if (selectionState?.Selected != null)
             {
@@ -191,6 +225,10 @@ namespace MiniCivilization.World.Interaction
                     selectionState.Selected.Value.Cell,
                     world.CellSize,
                     primaryMatrices);
+                RebuildCellOutline(
+                    selectionState.Selected.Value.Cell,
+                    world.CellSize,
+                    primaryOutlineMesh);
             }
             else if (selectionState?.Hovered != null)
             {
@@ -199,6 +237,10 @@ namespace MiniCivilization.World.Interaction
                     selectionState.Hovered.Value.Cell,
                     world.CellSize,
                     primaryMatrices);
+                RebuildCellOutline(
+                    selectionState.Hovered.Value.Cell,
+                    world.CellSize,
+                    primaryOutlineMesh);
             }
 
             RecalculateInstanceBounds();
@@ -264,35 +306,180 @@ namespace MiniCivilization.World.Interaction
             Vector3 size,
             List<Matrix4x4> target)
         {
-            var rootMatrix = Matrix4x4.identity;
-            if (worldManager?.Renderer?.RenderRoot != null)
-            {
-                rootMatrix = worldManager.Renderer.RenderRoot.localToWorldMatrix;
-            }
-
             var paddedSize = size + Vector3.one * (cellPadding * 2f);
             target.Add(
-                rootMatrix * Matrix4x4.TRS(
+                GetRenderRootMatrix() * Matrix4x4.TRS(
                     center,
                     Quaternion.identity,
                     paddedSize));
         }
 
-        private void RenderInstances()
+        private void RebuildSelectionOutline(
+            IWorldCellSelection selection,
+            WorldData world,
+            Mesh target)
         {
-            if ((primaryMatrices.Count == 0
-                && secondaryMatrices.Count == 0
-                && invalidMatrices.Count == 0)
-                || !EnsureRuntimeMaterial()
-                || !Application.isPlaying)
+            if (target == null)
             {
                 return;
             }
 
-            EnsureUnitCube();
-            RenderBatch(primaryMatrices, activeColor);
-            RenderBatch(secondaryMatrices, editSecondaryColor);
-            RenderBatch(invalidMatrices, editInvalidColor);
+            selectedCells.Clear();
+            selection?.CopyCellsTo(selectedCells, world);
+            RebuildOutlineMesh(selectedCells, world.CellSize, target);
+        }
+
+        private void RebuildCellOutline(
+            CellCoordinate coordinate,
+            float cellSize,
+            Mesh target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            selectedCells.Clear();
+            selectedCells.Add(coordinate);
+            RebuildOutlineMesh(selectedCells, cellSize, target);
+        }
+
+        private void RebuildOutlineMesh(
+            List<CellCoordinate> cells,
+            float cellSize,
+            Mesh target)
+        {
+            outlineEdges.Clear();
+            outlineVertices.Clear();
+            outlineIndices.Clear();
+
+            for (var index = 0; index < cells.Count; index++)
+            {
+                AddCellOutlineEdges(cells[index]);
+            }
+
+            var rootMatrix = GetRenderRootMatrix();
+            foreach (var edge in outlineEdges)
+            {
+                AddOutlineVertex(edge.First, cellSize, rootMatrix);
+                AddOutlineVertex(edge.Second, cellSize, rootMatrix);
+            }
+
+            target.Clear();
+            if (outlineVertices.Count == 0)
+            {
+                return;
+            }
+
+            target.SetVertices(outlineVertices);
+            target.SetIndices(outlineIndices, MeshTopology.Lines, 0, false);
+            target.RecalculateBounds();
+        }
+
+        private void AddCellOutlineEdges(CellCoordinate coordinate)
+        {
+            var minimum = new Vector3Int(
+                coordinate.X,
+                coordinate.Y,
+                coordinate.Z);
+            var maximum = minimum + Vector3Int.one;
+            var bottomBackLeft = minimum;
+            var bottomBackRight = new Vector3Int(maximum.x, minimum.y, minimum.z);
+            var bottomFrontLeft = new Vector3Int(minimum.x, minimum.y, maximum.z);
+            var bottomFrontRight = new Vector3Int(maximum.x, minimum.y, maximum.z);
+            var topBackLeft = new Vector3Int(minimum.x, maximum.y, minimum.z);
+            var topBackRight = new Vector3Int(maximum.x, maximum.y, minimum.z);
+            var topFrontLeft = new Vector3Int(minimum.x, maximum.y, maximum.z);
+            var topFrontRight = maximum;
+
+            AddOutlineEdge(bottomBackLeft, bottomBackRight);
+            AddOutlineEdge(bottomBackRight, bottomFrontRight);
+            AddOutlineEdge(bottomFrontRight, bottomFrontLeft);
+            AddOutlineEdge(bottomFrontLeft, bottomBackLeft);
+            AddOutlineEdge(topBackLeft, topBackRight);
+            AddOutlineEdge(topBackRight, topFrontRight);
+            AddOutlineEdge(topFrontRight, topFrontLeft);
+            AddOutlineEdge(topFrontLeft, topBackLeft);
+            AddOutlineEdge(bottomBackLeft, topBackLeft);
+            AddOutlineEdge(bottomBackRight, topBackRight);
+            AddOutlineEdge(bottomFrontRight, topFrontRight);
+            AddOutlineEdge(bottomFrontLeft, topFrontLeft);
+        }
+
+        private void AddOutlineEdge(Vector3Int first, Vector3Int second)
+        {
+            outlineEdges.Add(new CellEdge(first, second));
+        }
+
+        private void AddOutlineVertex(
+            Vector3Int point,
+            float cellSize,
+            Matrix4x4 rootMatrix)
+        {
+            outlineVertices.Add(rootMatrix.MultiplyPoint3x4(
+                new Vector3(point.x * cellSize, point.y * cellSize, point.z * cellSize)));
+            outlineIndices.Add(outlineIndices.Count);
+        }
+
+        private Matrix4x4 GetRenderRootMatrix()
+        {
+            return worldManager?.Renderer?.RenderRoot != null
+                ? worldManager.Renderer.RenderRoot.localToWorldMatrix
+                : Matrix4x4.identity;
+        }
+
+        private void RenderInstances()
+        {
+            if (!Application.isPlaying || !EnsureRuntimeMaterial())
+            {
+                return;
+            }
+
+            if (primaryMatrices.Count > 0
+                || secondaryMatrices.Count > 0
+                || invalidMatrices.Count > 0)
+            {
+                EnsureUnitCube();
+                RenderBatch(primaryMatrices, activeColor);
+                RenderBatch(secondaryMatrices, editSecondaryColor);
+                RenderBatch(invalidMatrices, editInvalidColor);
+            }
+
+            RenderOutlines();
+        }
+
+        private void RenderOutlines()
+        {
+            if (!EnsureRuntimeOutlineMaterial())
+            {
+                return;
+            }
+
+            RenderOutline(primaryOutlineMesh, activeColor);
+            RenderOutline(secondaryOutlineMesh, editSecondaryColor);
+            RenderOutline(invalidOutlineMesh, editInvalidColor);
+        }
+
+        private void RenderOutline(Mesh mesh, Color color)
+        {
+            if (mesh == null || mesh.vertexCount == 0)
+            {
+                return;
+            }
+
+            propertyBlock ??= new MaterialPropertyBlock();
+            propertyBlock.Clear();
+            color.a = 1f;
+            propertyBlock.SetColor(BaseColorId, color);
+            var renderParams = new RenderParams(runtimeOutlineMaterial)
+            {
+                layer = gameObject.layer,
+                matProps = propertyBlock,
+                worldBounds = mesh.bounds,
+                shadowCastingMode = ShadowCastingMode.Off,
+                receiveShadows = false
+            };
+            Graphics.RenderMesh(renderParams, mesh, 0, Matrix4x4.identity);
         }
 
         private void RenderBatch(List<Matrix4x4> matrices, Color color)
@@ -385,6 +572,39 @@ namespace MiniCivilization.World.Interaction
             primaryMatrices.Clear();
             secondaryMatrices.Clear();
             invalidMatrices.Clear();
+            ClearOutlineMeshes();
+        }
+
+        private void EnsureOutlineMeshes()
+        {
+            primaryOutlineMesh ??= CreateOutlineMesh("World Highlight Primary Outline");
+            secondaryOutlineMesh ??= CreateOutlineMesh("World Highlight Secondary Outline");
+            invalidOutlineMesh ??= CreateOutlineMesh("World Highlight Invalid Outline");
+        }
+
+        private static Mesh CreateOutlineMesh(string name)
+        {
+            return new Mesh
+            {
+                name = name,
+                indexFormat = IndexFormat.UInt32,
+                hideFlags = HideFlags.DontSave
+            };
+        }
+
+        private void ClearOutlineMeshes()
+        {
+            ClearOutlineMesh(primaryOutlineMesh);
+            ClearOutlineMesh(secondaryOutlineMesh);
+            ClearOutlineMesh(invalidOutlineMesh);
+        }
+
+        private static void ClearOutlineMesh(Mesh mesh)
+        {
+            if (mesh != null)
+            {
+                mesh.Clear();
+            }
         }
 
         private bool TryGetWorld(out WorldData world)
@@ -473,6 +693,39 @@ namespace MiniCivilization.World.Interaction
             return true;
         }
 
+        private bool EnsureRuntimeOutlineMaterial()
+        {
+            if (highlightMaterial == null)
+            {
+                return false;
+            }
+
+            if (runtimeOutlineMaterial != null
+                && runtimeOutlineMaterialSource == highlightMaterial)
+            {
+                return true;
+            }
+
+            if (runtimeOutlineMaterial != null)
+            {
+                Destroy(runtimeOutlineMaterial);
+            }
+
+            runtimeOutlineMaterialSource = highlightMaterial;
+            runtimeOutlineMaterial = new Material(highlightMaterial)
+            {
+                name = $"{highlightMaterial.name} (Runtime Outline)",
+                hideFlags = HideFlags.DontSave
+            };
+            runtimeOutlineMaterial.SetFloat(
+                StencilComparisonId,
+                (float)CompareFunction.Always);
+            runtimeOutlineMaterial.SetFloat(
+                StencilPassId,
+                (float)StencilOp.Keep);
+            return true;
+        }
+
         private static void AddFace(
             List<Vector3> vertices,
             List<int> triangles,
@@ -494,6 +747,56 @@ namespace MiniCivilization.World.Interaction
             triangles.Add(start + 2);
         }
 
+        private readonly struct CellEdge : System.IEquatable<CellEdge>
+        {
+            public CellEdge(Vector3Int first, Vector3Int second)
+            {
+                if (Compare(first, second) <= 0)
+                {
+                    First = first;
+                    Second = second;
+                }
+                else
+                {
+                    First = second;
+                    Second = first;
+                }
+            }
+
+            public Vector3Int First { get; }
+            public Vector3Int Second { get; }
+
+            public bool Equals(CellEdge other)
+            {
+                return First == other.First && Second == other.Second;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is CellEdge other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    return (First.GetHashCode() * 397) ^ Second.GetHashCode();
+                }
+            }
+
+            private static int Compare(Vector3Int first, Vector3Int second)
+            {
+                var x = first.x.CompareTo(second.x);
+                if (x != 0)
+                {
+                    return x;
+                }
+
+                var y = first.y.CompareTo(second.y);
+                return y != 0 ? y : first.z.CompareTo(second.z);
+            }
+        }
+
         private void OnDestroy()
         {
             Unsubscribe();
@@ -509,6 +812,28 @@ namespace MiniCivilization.World.Interaction
                 runtimeMaterial = null;
                 runtimeMaterialSource = null;
             }
+
+            DestroyOutlineMesh(ref primaryOutlineMesh);
+            DestroyOutlineMesh(ref secondaryOutlineMesh);
+            DestroyOutlineMesh(ref invalidOutlineMesh);
+
+            if (runtimeOutlineMaterial != null)
+            {
+                Destroy(runtimeOutlineMaterial);
+                runtimeOutlineMaterial = null;
+                runtimeOutlineMaterialSource = null;
+            }
+        }
+
+        private static void DestroyOutlineMesh(ref Mesh mesh)
+        {
+            if (mesh == null)
+            {
+                return;
+            }
+
+            Destroy(mesh);
+            mesh = null;
         }
     }
 }

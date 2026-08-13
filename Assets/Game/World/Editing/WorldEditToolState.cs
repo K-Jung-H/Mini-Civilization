@@ -13,6 +13,12 @@ namespace MiniCivilization.World.Editing
         Brush = 3
     }
 
+    public enum WorldEditCellSelectionPolicy : byte
+    {
+        SurfaceCell = 0,
+        EntityPlacementCell = 1
+    }
+
     public enum WorldEditPropertyGroup : byte
     {
         None,
@@ -107,6 +113,10 @@ namespace MiniCivilization.World.Editing
         public readonly int BrushSize;
 
         public WorldEditPropertyGroup PropertyGroup => Action.PropertyGroup;
+        public WorldEditCellSelectionPolicy CellSelectionPolicy =>
+            IsEntityTool
+                ? WorldEditCellSelectionPolicy.EntityPlacementCell
+                : WorldEditCellSelectionPolicy.SurfaceCell;
         public bool CapturesPointer => Mode != WorldEditMode.None;
         public bool IsEntityTool => EntityDefinition != null;
         public bool IsReady =>

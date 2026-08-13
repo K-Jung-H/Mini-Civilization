@@ -315,9 +315,10 @@ namespace MiniCivilization.World.Runtime
                  index < layout.TerrainAnchorCells.Count;
                  index++)
             {
+                var terrainAnchor = layout.TerrainAnchorCells[index];
                 var coordinate = layout.ToWorld(
                     data,
-                    layout.TerrainAnchorCells[index]);
+                    terrainAnchor.LocalOffset);
                 anchorWorldCells[index] = coordinate;
                 if (!world.Contains(
                         coordinate.X,
@@ -341,18 +342,10 @@ namespace MiniCivilization.World.Runtime
                     checked((coordinate.Y + 1)
                         * WorldGrid.HeightStepsPerCell),
                     coordinate);
-                var currentCell = world.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if (WorldGrid.HeightStepsPerCell
-                        - currentCell.Terrain.SolidHeight
-                    > building.MaxTerrainCorrectionSteps)
-                {
-                    invalidCells.Add(coordinate);
-                }
-
-                if (currentCell.Terrain.SolidHeight
+                if (world.GetCell(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z).Terrain.SolidHeight
                     < WorldGrid.HeightStepsPerCell)
                 {
                     column.RequiresRebuild = true;
@@ -382,10 +375,7 @@ namespace MiniCivilization.World.Runtime
 
                 if (targetHeight <= 0
                     || targetHeight
-                        > world.Height * WorldGrid.HeightStepsPerCell
-                    || Math.Abs(
-                        targetHeight - column.Surface.GroundHeight)
-                        > building.MaxTerrainCorrectionSteps)
+                        > world.Height * WorldGrid.HeightStepsPerCell)
                 {
                     invalidCells.Add(column.RepresentativeCell);
                 }
@@ -408,6 +398,33 @@ namespace MiniCivilization.World.Runtime
                         column.Surface.GroundHeight,
                         targetHeight,
                         ResolveSurfaceType(column)));
+                }
+            }
+
+            for (var index = 0;
+                 index < layout.TerrainAnchorCells.Count;
+                 index++)
+            {
+                var coordinate = anchorWorldCells[index];
+                if (!world.Contains(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z))
+                {
+                    continue;
+                }
+
+                var column = columns[WorldIndex.EncodeColumn(
+                    world,
+                    coordinate.X,
+                    coordinate.Z)];
+                var correctionSteps = Math.Abs(
+                    column.TargetHeight - column.Surface.GroundHeight);
+                if (correctionSteps
+                    > layout.TerrainAnchorCells[index]
+                        .MaxTerrainCorrectionSteps)
+                {
+                    invalidCells.Add(coordinate);
                 }
             }
 
@@ -917,7 +934,7 @@ namespace MiniCivilization.World.Runtime
             {
                 var coordinate = layout.ToWorld(
                     building.Data,
-                    layout.TerrainAnchorCells[index]);
+                    layout.TerrainAnchorCells[index].LocalOffset);
                 var cellIndex = RequireWorldCell(coordinate, building.Id);
                 if (buildingCells.ContainsKey(cellIndex)
                     || terrainAnchorCells.Contains(cellIndex))
@@ -1036,7 +1053,7 @@ namespace MiniCivilization.World.Runtime
             {
                 var coordinate = layout.ToWorld(
                     building.Data,
-                    layout.TerrainAnchorCells[index]);
+                    layout.TerrainAnchorCells[index].LocalOffset);
                 var cellIndex = WorldIndex.EncodeCell(
                     world,
                     coordinate.X,
