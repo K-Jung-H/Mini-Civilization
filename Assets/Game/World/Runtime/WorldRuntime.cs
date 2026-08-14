@@ -24,6 +24,7 @@ namespace MiniCivilization.World.Runtime
         public WorldChangeId CurrentChangeId { get; private set; }
         public RuntimeChangeApplier ChangeApplier { get; internal set; }
         public EntityRuntime Entities { get; private set; }
+        internal WorldRoadTopology RoadTopology { get; private set; }
         public WorldWayPointGraph WayPointGraph { get; private set; }
 
         public static WorldRuntime CreatePrepared(WorldData data)
@@ -56,7 +57,8 @@ namespace MiniCivilization.World.Runtime
 
         internal void RebuildWayPointGraph()
         {
-            WayPointGraph = WorldWayPointGraph.Build(this, Entities);
+            RoadTopology = WorldRoadTopology.Build(this, Entities);
+            WayPointGraph = WorldWayPointGraph.Build(this, Entities, RoadTopology);
             Entities.RestoreBuildingWayLocations(WayPointGraph);
         }
 

@@ -10,6 +10,13 @@ namespace MiniCivilization.World.Presentation
 {
     public sealed class WorldChunkView : MonoBehaviour
     {
+        private static readonly int RoadPatchMapProperty = Shader.PropertyToID(
+            "_RoadPatchMap");
+        private static readonly int RoadPortOffsetMapProperty = Shader.PropertyToID(
+            "_RoadPortOffsetMap");
+        private static readonly int RoadPatchParametersProperty = Shader.PropertyToID(
+            "_RoadPatchParameters");
+
         [SerializeField, HideInInspector] private int patchX;
         [SerializeField, HideInInspector] private int patchZ;
         [SerializeField, HideInInspector] private int patchSize;
@@ -19,8 +26,11 @@ namespace MiniCivilization.World.Presentation
         private MeshRenderer terrainRenderer;
         private MeshFilter waterFilter;
         private MeshRenderer waterRenderer;
-        private MeshFilter roadFilter;
-        private MeshRenderer roadRenderer;
+        private Texture2D roadPatchMap;
+        private Texture2D roadPortOffsetMap;
+        private Color[] roadPatchPixels;
+        private Color[] roadPortOffsetPixels;
+        private MaterialPropertyBlock terrainProperties;
 
         public int PatchX => patchX;
         public int PatchZ => patchZ;
@@ -33,12 +43,12 @@ namespace MiniCivilization.World.Presentation
             int patchZ,
             int patchSize,
             WorldSurfaceCatalog catalog,
+            WorldRoadTopology roadTopology,
+            RoadVisualCatalog roadVisualCatalog,
             Material terrainMaterial,
             Material waterMaterial,
             WorldSurfaceQuery surfaceQuery,
             WorldExposureCache exposureCache,
-            WorldWayPointGraph wayPointGraph,
-            float roadWidthRatio,
             WorldMeshBuildScratch scratch)
         {
             this.patchX = patchX;
@@ -53,6 +63,7 @@ namespace MiniCivilization.World.Presentation
             transform.localScale = Vector3.one;
 
             EnsureChildren();
+            RemoveLegacyRoadChild();
             if (catalog != null)
             {
                 catalog.ApplyToMaterials(
@@ -78,23 +89,7 @@ namespace MiniCivilization.World.Presentation
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
             terrainRenderer.enabled = !terrainBuffers.IsEmpty;
-
-            var roadBuffers = RoadChunkMeshBuilder.Build(
-                world,
-                wayPointGraph,
-                patchX,
-                patchZ,
-                patchSize,
-                roadWidthRatio,
-                catalog,
-                scratch.Road);
-            roadFilter.sharedMesh = roadBuffers.CreateMesh(
-                $"Road [{patchX}, {patchZ}]",
-                replacePreparedMeshes ? null : roadFilter.sharedMesh);
-            roadRenderer.sharedMaterial = terrainMaterial;
-            roadRenderer.shadowCastingMode = ShadowCastingMode.Off;
-            roadRenderer.receiveShadows = true;
-            roadRenderer.enabled = !roadBuffers.IsEmpty;
+            RebuildRoad(world, roadTopology, roadVisualCatalog);
 
             var waterBuffers = WaterChunkMeshBuilder.Build(
                 world,
@@ -189,39 +184,77 @@ namespace MiniCivilization.World.Presentation
 
         internal void RebuildRoad(
             WorldData world,
-            WorldWayPointGraph wayPointGraph,
-            float roadWidthRatio,
-            WorldSurfaceCatalog catalog,
-            Material terrainMaterial,
-            WorldMeshBuildScratch scratch)
+            WorldRoadTopology roadTopology,
+            RoadVisualCatalog catalog)
         {
-            if (preparedReadOnly)
+            EnsureChildren();
+            if (world == null
+                || roadTopology == null
+                || catalog == null
+                || !catalog.ShapeMaskArrayAvailable)
             {
-                throw new System.InvalidOperationException(
-                    "Prepared patches must be converted with a full rebuild.");
+                ReleaseRoadVisuals();
+                return;
             }
 
-            EnsureChildren();
-            var buffers = RoadChunkMeshBuilder.Build(
-                world,
-                wayPointGraph,
-                patchX,
-                patchZ,
-                patchSize,
-                roadWidthRatio,
-                catalog,
-                scratch.Road);
-            roadFilter.sharedMesh = buffers.CreateMesh(
-                $"Road [{patchX}, {patchZ}]",
-                roadFilter.sharedMesh);
-            roadRenderer.sharedMaterial = terrainMaterial;
-            roadRenderer.shadowCastingMode = ShadowCastingMode.Off;
-            roadRenderer.receiveShadows = true;
-            roadRenderer.enabled = !buffers.IsEmpty;
+            EnsureRoadMaps();
+            System.Array.Clear(roadPatchPixels, 0, roadPatchPixels.Length);
+            System.Array.Clear(
+                roadPortOffsetPixels,
+                0,
+                roadPortOffsetPixels.Length);
+            var startX = patchX * patchSize;
+            var startZ = patchZ * patchSize;
+            var endX = Mathf.Min(startX + patchSize, world.Size);
+            var endZ = Mathf.Min(startZ + patchSize, world.Size);
+            for (var z = startZ; z < endZ; z++)
+            for (var x = startX; x < endX; x++)
+            {
+                if (!roadTopology.TryGet(x, z, out var road)
+                    || !road.Road.Road.CrossesCenter
+                    || !catalog.TryResolve(road.Road.Road.Type, out var visual))
+                {
+                    continue;
+                }
+
+                var index = x - startX + (z - startZ) * patchSize;
+                roadPatchPixels[index] = new Color(
+                    (byte)road.Connections,
+                    visual.CornerMaskLayer,
+                    visual.Surface.GetLayer(0),
+                    visual.Surface.GetScale(0));
+                roadPortOffsetPixels[index] = new Color(
+                    road.West.BoundaryOffsetIndex,
+                    road.East.BoundaryOffsetIndex,
+                    road.South.BoundaryOffsetIndex,
+                    road.North.BoundaryOffsetIndex);
+            }
+
+            roadPatchMap.SetPixels(roadPatchPixels);
+            roadPatchMap.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            roadPortOffsetMap.SetPixels(roadPortOffsetPixels);
+            roadPortOffsetMap.Apply(
+                updateMipmaps: false,
+                makeNoLongerReadable: false);
+            terrainProperties ??= new MaterialPropertyBlock();
+            terrainProperties.Clear();
+            terrainProperties.SetTexture(RoadPatchMapProperty, roadPatchMap);
+            terrainProperties.SetTexture(
+                RoadPortOffsetMapProperty,
+                roadPortOffsetMap);
+            terrainProperties.SetVector(
+                RoadPatchParametersProperty,
+                new Vector4(
+                    startX * world.CellSize,
+                    startZ * world.CellSize,
+                    world.CellSize,
+                    patchSize));
+            terrainRenderer.SetPropertyBlock(terrainProperties);
         }
 
         public void ReleaseMeshes()
         {
+            ReleaseRoadVisuals();
             if (preparedReadOnly)
             {
                 return;
@@ -240,13 +273,10 @@ namespace MiniCivilization.World.Presentation
         {
             terrainFilter = FindFilter("Terrain", out terrainRenderer);
             waterFilter = FindFilter("Water", out waterRenderer);
-            roadFilter = FindFilter("Road", out roadRenderer);
             if (terrainFilter == null
                 || waterFilter == null
-                || roadFilter == null
                 || terrainFilter.sharedMesh == null
                 || waterFilter.sharedMesh == null
-                || roadFilter.sharedMesh == null
                 || (waterFilter.sharedMesh.vertexCount > 0
                     && !waterFilter.sharedMesh.HasVertexAttribute(
                         VertexAttribute.TexCoord5)))
@@ -255,6 +285,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             preparedReadOnly = true;
+            RemoveLegacyRoadChild();
             return true;
         }
 
@@ -276,10 +307,6 @@ namespace MiniCivilization.World.Presentation
                 yield return waterFilter.sharedMesh;
             }
 
-            if (roadFilter != null && roadFilter.sharedMesh != null)
-            {
-                yield return roadFilter.sharedMesh;
-            }
         }
 
         private void EnsureChildren()
@@ -292,17 +319,83 @@ namespace MiniCivilization.World.Presentation
                 "Water",
                 ref waterFilter,
                 ref waterRenderer);
-            EnsureRenderChild(
-                "Road",
-                ref roadFilter,
-                ref roadRenderer);
+        }
+
+        private void EnsureRoadMaps()
+        {
+            var requiresReplacement = roadPatchMap == null
+                || roadPatchMap.width != patchSize
+                || roadPatchMap.height != patchSize;
+            if (!requiresReplacement)
+            {
+                return;
+            }
+
+            ReleaseRoadVisuals();
+            roadPatchMap = CreateRoadMap("Road Patch Map");
+            roadPortOffsetMap = CreateRoadMap("Road Port Offset Map");
+            var pixelCount = checked(patchSize * patchSize);
+            roadPatchPixels = new Color[pixelCount];
+            roadPortOffsetPixels = new Color[pixelCount];
+        }
+
+        private Texture2D CreateRoadMap(string mapName) => new(
+            patchSize,
+            patchSize,
+            TextureFormat.RGBAHalf,
+            mipChain: false,
+            linear: true)
+        {
+            name = $"{mapName} [{patchX}, {patchZ}]",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Point,
+            anisoLevel = 0,
+            hideFlags = HideFlags.DontSave
+        };
+
+        private void ReleaseRoadVisuals()
+        {
+            if (terrainRenderer != null)
+            {
+                terrainRenderer.SetPropertyBlock(null);
+            }
+
+            ReleaseObject(roadPatchMap);
+            ReleaseObject(roadPortOffsetMap);
+            roadPatchMap = null;
+            roadPortOffsetMap = null;
+            roadPatchPixels = null;
+            roadPortOffsetPixels = null;
+            terrainProperties = null;
         }
 
         private void CacheExistingChildren()
         {
             terrainFilter = FindFilter("Terrain", out terrainRenderer);
             waterFilter = FindFilter("Water", out waterRenderer);
-            roadFilter = FindFilter("Road", out roadRenderer);
+        }
+
+        private void RemoveLegacyRoadChild()
+        {
+            var child = transform.Find("Road");
+            if (child == null)
+            {
+                return;
+            }
+
+            child.gameObject.SetActive(false);
+            if (!preparedReadOnly)
+            {
+                DestroyMesh(child.GetComponent<MeshFilter>());
+            }
+            if (Application.isPlaying)
+            {
+                Destroy(child.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(child.gameObject);
+            }
         }
 
         private MeshFilter FindFilter(

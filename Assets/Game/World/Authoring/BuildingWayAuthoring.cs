@@ -307,6 +307,30 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
+            var quantized = QuantizeExternalBoundaryPosition(
+                marker.ExternalDirection,
+                position);
+            if ((quantized - position).sqrMagnitude > positionTolerance * positionTolerance)
+            {
+                var previous = marker.transform.position;
+                var snapped = authoringSystem.transform.TransformPoint(
+                    ((Vector3)offset + quantized) * cellSize);
+#if UNITY_EDITOR
+                UnityEditor.Undo.RecordObject(
+                    marker.transform,
+                    "Quantize Building Way Marker");
+#endif
+                marker.transform.position = snapped;
+#if UNITY_EDITOR
+                UnityEditor.EditorUtility.SetDirty(marker.transform);
+#endif
+                Debug.Log(
+                    $"Way Marker '{marker.name}' was quantized on Building Cell {offset}: "
+                    + $"{previous} -> {snapped}.",
+                    marker);
+                position = quantized;
+            }
+
             point = new BuildingWayPointBakeData
             {
                 LocalCellOffset = offset,
@@ -316,6 +340,28 @@ namespace MiniCivilization.World.Authoring
             error = string.Empty;
             return true;
         }
+
+        private static Vector3 QuantizeExternalBoundaryPosition(
+            BuildingWayPointDirection direction,
+            Vector3 position)
+        {
+            switch (direction)
+            {
+                case BuildingWayPointDirection.North:
+                case BuildingWayPointDirection.South:
+                    position.x = QuantizeBoundaryCoordinate(position.x);
+                    break;
+                case BuildingWayPointDirection.East:
+                case BuildingWayPointDirection.West:
+                    position.z = QuantizeBoundaryCoordinate(position.z);
+                    break;
+            }
+
+            return position;
+        }
+
+        private static float QuantizeBoundaryCoordinate(float value) =>
+            Mathf.Clamp(Mathf.Round(value * 4f) / 4f, -0.5f, 0.5f);
 
         private static bool IsOnExternalBoundary(
             BuildingWayPointDirection direction,

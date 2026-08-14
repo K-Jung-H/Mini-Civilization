@@ -3,56 +3,9 @@ using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using UnityEngine;
-using WorldEntityId = MiniCivilization.World.Domain.EntityId;
 
 namespace MiniCivilization.World.Runtime
 {
-    public readonly struct RoadVisualSegment
-    {
-        public Vector3 Start { get; }
-        public Vector3 End { get; }
-        public RoadType RoadType { get; }
-        public CellCoordinate OwnerCell { get; }
-
-        internal RoadVisualSegment(
-            Vector3 start,
-            Vector3 end,
-            RoadType roadType,
-            CellCoordinate ownerCell)
-        {
-            Start = start;
-            End = end;
-            RoadType = roadType;
-            OwnerCell = ownerCell;
-        }
-    }
-
-    internal readonly struct BuildingWayLocation :
-        IEquatable<BuildingWayLocation>
-    {
-        public readonly WorldEntityId BuildingId;
-        public readonly int LocalPointIndex;
-
-        public BuildingWayLocation(
-            WorldEntityId buildingId,
-            int localPointIndex)
-        {
-            BuildingId = buildingId;
-            LocalPointIndex = localPointIndex;
-        }
-
-        public bool Equals(BuildingWayLocation other) =>
-            BuildingId == other.BuildingId
-            && LocalPointIndex == other.LocalPointIndex;
-
-        public override bool Equals(object obj) =>
-            obj is BuildingWayLocation other && Equals(other);
-
-        public override int GetHashCode() => HashCode.Combine(
-            BuildingId,
-            LocalPointIndex);
-    }
-
     internal sealed class WayMovementPlan
     {
         public Vector3[] GraphPositions { get; }
@@ -89,7 +42,6 @@ namespace MiniCivilization.World.Runtime
             Vector3[] positions,
             int[] neighborOffsets,
             int[] neighbors,
-            RoadVisualSegment[] roadSegments,
             Dictionary<BuildingWayLocation, int> nodeByBuildingPoint,
             Dictionary<int, List<int>> buildingNodesByCell,
             List<ExternalPort> externalPorts,
@@ -98,7 +50,6 @@ namespace MiniCivilization.World.Runtime
             Positions = positions;
             NeighborOffsets = neighborOffsets;
             Neighbors = neighbors;
-            RoadSegments = roadSegments;
             this.nodeByBuildingPoint = nodeByBuildingPoint;
             this.buildingNodesByCell = buildingNodesByCell;
             this.externalPorts = externalPorts;
@@ -108,11 +59,11 @@ namespace MiniCivilization.World.Runtime
         public IReadOnlyList<Vector3> Positions { get; }
         public IReadOnlyList<int> NeighborOffsets { get; }
         public IReadOnlyList<int> Neighbors { get; }
-        public IReadOnlyList<RoadVisualSegment> RoadSegments { get; }
 
         internal static WorldWayPointGraph Build(
             WorldRuntime runtime,
-            EntityRuntime entities)
+            EntityRuntime entities,
+            WorldRoadTopology roadTopology)
         {
             if (runtime == null)
             {
@@ -124,7 +75,12 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(nameof(entities));
             }
 
-            var builder = new Builder(runtime);
+            if (roadTopology == null)
+            {
+                throw new ArgumentNullException(nameof(roadTopology));
+            }
+
+            var builder = new Builder(runtime, roadTopology);
             entities.CopyEntitiesTo(builder.EntityBuffer);
             builder.AddBuildings();
             builder.AddRoads();
@@ -358,7 +314,6 @@ namespace MiniCivilization.World.Runtime
             private readonly List<HashSet<int>> adjacency = new();
             private readonly Dictionary<int, BuildingWayLocation>
                 buildingLocationByNode = new();
-            private readonly List<RoadVisualSegment> roadSegments = new();
             private readonly Dictionary<BuildingWayLocation, int>
                 nodeByBuildingPoint = new();
             private readonly Dictionary<int, List<int>> buildingNodesByCell =
@@ -366,12 +321,14 @@ namespace MiniCivilization.World.Runtime
             private readonly List<ExternalPort> externalPorts = new();
             private readonly Dictionary<RoadBoundaryKey, int> roadBoundaryNodes =
                 new();
-            private readonly Dictionary<int, RoadCellTopology> roadsByColumn =
-                new();
+            private readonly WorldRoadTopology roadTopology;
 
-            public Builder(WorldRuntime runtime)
+            public Builder(
+                WorldRuntime runtime,
+                WorldRoadTopology roadTopology)
             {
                 this.runtime = runtime;
+                this.roadTopology = roadTopology;
             }
 
             public List<Entity> EntityBuffer { get; } = new();
@@ -449,24 +406,9 @@ namespace MiniCivilization.World.Runtime
 
             public void AddRoads()
             {
-                for (var z = 0; z < runtime.Data.Size; z++)
-                for (var x = 0; x < runtime.Data.Size; x++)
+                for (var index = 0; index < roadTopology.Cells.Count; index++)
                 {
-                    if (RoadTopologyResolver.TryGetRoad(
-                            runtime,
-                            x,
-                            z,
-                            out var road))
-                    {
-                        roadsByColumn.Add(
-                            WorldIndex.EncodeColumn(runtime.Data, x, z),
-                            road);
-                    }
-                }
-
-                foreach (var pair in roadsByColumn)
-                {
-                    AddRoad(pair.Value);
+                    AddRoad(roadTopology.Cells[index]);
                 }
             }
 
@@ -522,108 +464,91 @@ namespace MiniCivilization.World.Runtime
                     positions.ToArray(),
                     offsets,
                     neighbors,
-                    roadSegments.ToArray(),
                     nodeByBuildingPoint,
                     buildingNodesByCell,
                     externalPorts,
                     buildingLocationByNode);
             }
 
-            private void AddRoad(in RoadCellTopology road)
+            private void AddRoad(in RoadTopologyCell road)
             {
                 var portNodes = new List<int>(4);
-                AddRoadPort(road, -1, 0, portNodes);
-                AddRoadPort(road, 1, 0, portNodes);
-                AddRoadPort(road, 0, -1, portNodes);
-                AddRoadPort(road, 0, 1, portNodes);
-                if (road.Road.CrossesCenter && portNodes.Count != 0)
+                AddRoadPort(road, RoadDirection.West, portNodes);
+                AddRoadPort(road, RoadDirection.East, portNodes);
+                AddRoadPort(road, RoadDirection.South, portNodes);
+                AddRoadPort(road, RoadDirection.North, portNodes);
+                if (road.Road.Road.CrossesCenter && portNodes.Count != 0)
                 {
                     var center = AddNode(
                         RoadTopologyResolver.ResolveCenter(
                             runtime.Data,
-                            road));
+                            road.Road));
                     for (var index = 0; index < portNodes.Count; index++)
                     {
-                        AddRoadEdge(
-                            center,
-                            portNodes[index],
-                            road.Road.Type,
-                            road.Cell);
+                        AddEdge(center, portNodes[index], true);
                     }
                 }
                 else if (portNodes.Count == 2)
                 {
-                    AddRoadEdge(
-                        portNodes[0],
-                        portNodes[1],
-                        road.Road.Type,
-                        road.Cell);
+                    AddEdge(portNodes[0], portNodes[1], true);
                 }
             }
 
             private void AddRoadPort(
-                in RoadCellTopology road,
-                int directionX,
-                int directionZ,
+                in RoadTopologyCell road,
+                RoadDirection direction,
                 ICollection<int> target)
             {
-                var neighborX = road.Cell.X + directionX;
-                var neighborZ = road.Cell.Z + directionZ;
-                if (!runtime.Data.ContainsColumn(neighborX, neighborZ))
+                var connection = road.GetConnection(direction);
+                if (!connection.IsConnected)
                 {
                     return;
                 }
 
-                var neighborColumn = WorldIndex.EncodeColumn(
+                if (connection.Target == RoadConnectionTarget.Building)
+                {
+                    if (nodeByBuildingPoint.TryGetValue(
+                            connection.BuildingLocation,
+                            out var buildingNode))
+                    {
+                        target.Add(buildingNode);
+                    }
+
+                    return;
+                }
+
+                if (connection.Target != RoadConnectionTarget.Road)
+                {
+                    return;
+                }
+
+                WorldIndex.DecodeColumn(
                     runtime.Data,
-                    neighborX,
-                    neighborZ);
-                if (roadsByColumn.TryGetValue(
-                        neighborColumn,
-                        out var neighborRoad)
-                    && RoadTopologyResolver.CanConnect(
-                        runtime.Data.Settings,
-                        road.SurfaceHeightSteps,
-                        neighborRoad.SurfaceHeightSteps))
+                    connection.NeighborColumn,
+                    out var neighborX,
+                    out var neighborZ);
+                if (!roadTopology.TryGet(neighborX, neighborZ, out var neighbor))
                 {
-                    var key = new RoadBoundaryKey(
-                        WorldIndex.EncodeColumn(
+                    return;
+                }
+
+                var key = new RoadBoundaryKey(
+                    WorldIndex.EncodeColumn(
+                        runtime.Data,
+                        road.Road.Cell.X,
+                        road.Road.Cell.Z),
+                    connection.NeighborColumn);
+                if (!roadBoundaryNodes.TryGetValue(key, out var node))
+                {
+                    node = AddNode(
+                        RoadTopologyResolver.ResolveSharedBoundary(
                             runtime.Data,
-                            road.Cell.X,
-                            road.Cell.Z),
-                        neighborColumn);
-                    if (!roadBoundaryNodes.TryGetValue(key, out var node))
-                    {
-                        node = AddNode(
-                            RoadTopologyResolver.ResolveSharedBoundary(
-                                runtime.Data,
-                                road,
-                                neighborRoad));
-                        roadBoundaryNodes.Add(key, node);
-                    }
-
-                    target.Add(node);
-                    return;
+                            road.Road,
+                            neighbor.Road));
+                    roadBoundaryNodes.Add(key, node);
                 }
 
-                for (var index = 0; index < externalPorts.Count; index++)
-                {
-                    var port = externalPorts[index];
-                    if (port.OutsideCell.X != road.Cell.X
-                        || port.OutsideCell.Z != road.Cell.Z
-                        || port.BuildingCell.X != neighborX
-                        || port.BuildingCell.Z != neighborZ
-                        || !RoadTopologyResolver.CanConnect(
-                            runtime.Data.Settings,
-                            road.SurfaceHeightSteps,
-                            port.HeightSteps))
-                    {
-                        continue;
-                    }
-
-                    target.Add(port.Node);
-                    return;
-                }
+                target.Add(node);
             }
 
             private void AddExternalPort(
@@ -658,25 +583,6 @@ namespace MiniCivilization.World.Runtime
                 positions.Add(position);
                 adjacency.Add(new HashSet<int>());
                 return index;
-            }
-
-            private void AddRoadEdge(
-                int a,
-                int b,
-                RoadType roadType,
-                CellCoordinate ownerCell)
-            {
-                if (a == b)
-                {
-                    return;
-                }
-
-                AddEdge(a, b, true);
-                roadSegments.Add(new RoadVisualSegment(
-                    positions[a],
-                    positions[b],
-                    roadType,
-                    ownerCell));
             }
 
             private void AddEdge(int a, int b, bool bidirectional)

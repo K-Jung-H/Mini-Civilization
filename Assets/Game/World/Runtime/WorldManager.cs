@@ -616,11 +616,7 @@ namespace MiniCivilization.World.Runtime
 
         private void OnEntityChanged(EntityChangeSet changeSet)
         {
-            if (changeSet.WayTopologyChanged)
-            {
-                worldRenderer.ApplyWayTopologyChanges(changeSet);
-            }
-
+            worldRenderer.ApplyEntityChanges(changeSet);
             MarkDirty();
             EntityChanged?.Invoke(changeSet);
         }

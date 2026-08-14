@@ -334,29 +334,24 @@ EntityChangeSet
 
 ### Road 시각화
 
-Road는 지형 Mesh의 정점이나 UV를 Road 폭에 맞춰 다시 분할하지 않는다. 활성 Road Way를 폭이 있는 별도 Strip Mesh로 변환하고, Road가 존재하는 Render Patch에만 Road Mesh를 생성한다.
+Road 전용 Mesh 생성 구조는 제거했다. `WorldRoadTopology`는 Road와 Building 외부 WayPoint의 연결 방향, 대상, 경계 위치 인덱스를 한 번 계산하며 `WorldWayPointGraph`와 Road 표시가 함께 사용한다.
+
+각 Render Patch는 두 개의 런타임 Texture만 가진다.
 
 ```text
-RoadData + WorldSurfaceQuery
-        ↓
-RoadTopologyResolver
-├─ WorldWayPointGraph 구성 정보
-└─ RoadChunkMesh 구성 정보
+RoadPatchMap
+├─ 연결 방향 Mask
+├─ Shape Mask 시작 Layer
+├─ Road Surface Layer
+└─ Texture Scale
+
+RoadPortOffsetMap
+└─ West / East / South / North 경계 위치 인덱스
 ```
 
-Road 경로와 시각화가 서로 다른 이웃 연결을 계산하지 않도록 동일한 `RoadTopologyResolver` 결과를 사용한다.
+`RoadVisualCatalog`는 RoadType별 Corner·Quarter·Straight Shape Mask와 Albedo·Normal·Surface Texture2DArray를 Bake한다. Terrain Shader는 Patch의 현재 Cell 정보를 읽고, 방향별 Shape Mask를 회전·반전해 합성한다. `0/1`, `0.25/0.75`, `0.5` 경계 위치는 각각 같은 Mask Layer를 공유한다.
 
-- 직선과 대각선 Way는 폭이 있는 Strip으로 생성한다.
-- `CrossesCenter=true`인 Cell은 활성 Strip과 Center Junction 면을 함께 생성한다.
-- 높이 차이가 `RoadMaxHeightSteps` 이하인 Road끼리는 공유 경계 Point 하나를 사용한다.
-- Road끼리의 공유 경계 Y는 양쪽 표면 높이의 중간값으로 계산해 두 Cell Center 사이에 연속 경사를 만든다.
-- Road와 Building의 공유 경계 Y는 Building 외부 WayPoint의 Bake된 Y를 사용한다.
-- 높이 차이가 `RoadMaxHeightSteps`를 초과하면 그래프 연결과 Road Strip을 모두 생성하지 않는다.
-- Road Mesh UV는 폭 방향 `0~1`, 진행 방향 누적 거리로 구성한다.
-- 하나의 Road Material과 Texture Array를 사용하고 `RoadType`을 Texture Layer 선택값으로 전달한다.
-- Road 폭과 지형 겹침 방지 Offset은 Presentation 설정이며 `RoadData`나 `WorldWayPointGraph`에 저장하지 않는다.
-
-Road 추가·제거와 이웃 연결 변경 시 변경 Cell, 인접 Cell과 해당 Render Patch의 Road Mesh만 다시 구성한다. Building이 Road를 대체하면 `RoadData` 변경 결과에 따라 Road Mesh가 제거되고 Building 외부 WayPoint까지의 남은 Road만 표현한다.
+Road 추가·제거·높이 변경 시에는 변경 열과 인접 열이 포함된 Patch만 Texture를 갱신한다. Building의 외부 WayPoint 변화도 해당 Building Cell과 인접 Patch만 갱신한다. `CrossesCenter=false` 특수 타일은 아직 표시하지 않으며, 특수 Road 패턴 단계에서 전용 Mask와 고정된 내부 Way를 추가한다.
 
 ### Building 내부 Way 편집
 
@@ -395,6 +390,7 @@ BuildingWayAuthoring
 - 기본 Connection은 양방향이므로 한쪽 Marker에만 등록한다. 특수한 경우에만 `OneWay=true`로 설정하며, 이때 현재 Marker가 From이다.
 - Link 선은 Editor `Handles`로만 시각화하고 `LineRenderer`나 런타임 GameObject를 만들지 않는다.
 - Bake 시 중복 Link, 자기 자신 연결, Container 외부 Marker 참조, 외부 방향과 Cell 경계 불일치를 검증한다.
+- 외부 Marker의 경계 접선 좌표는 Bake 시 `0, 0.25, 0.5, 0.75, 1.0` 위치로 정렬한다.
 - Editor Marker와 선택 상태는 런타임 Prefab 데이터로 사용하지 않고 Bake 결과인 `LocalWayPoints[]`, `LocalWays[]`만 Building Layout에 보관한다.
 
 ## Way 구조 적용 로드맵
@@ -450,17 +446,13 @@ BuildingWayAuthoring
 
 ### 7. Road 시각화 연결
 
-- 지형 Mesh와 분리된 Road Strip Mesh 생성
-- Center Junction, 직선, 대각선과 높이 경사 Mesh 구성
-- RoadType을 Texture Array Layer로 전달하는 단일 Material 적용
-- Road 변경 Cell과 인접 Cell이 포함된 Render Patch만 갱신
-- Building 배치로 제거된 RoadData와 그래프 연결을 Road Mesh에 반영
+- 별도 설계 후 적용
 
 ### 8. 통합 확인
 
 - 같은 높이 Road 연결
-- `RoadMaxHeightSteps` 이하 경사 연결과 연속 Mesh
-- 허용값을 초과한 Road 사이의 Way·Mesh 미연결
+- `RoadMaxHeightSteps` 이하 경사 연결
+- 허용값을 초과한 Road 사이의 Way 미연결
 - Center 경유와 Center 비경유 Road
 - Building 배치 성공 시 점유 범위 Road 제거
 - Building 외부 WayPoint가 없는 방향의 진입 차단

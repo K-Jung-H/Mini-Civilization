@@ -20,13 +20,13 @@ namespace MiniCivilization.World.Presentation
     {
         [Header("Rendering")]
         [SerializeField] private WorldSurfaceCatalog surfaceCatalog;
+        [SerializeField] private RoadVisualCatalog roadVisualCatalog;
         [SerializeField] private Material terrainMaterial;
         [SerializeField] private Material waterMaterial;
         [SerializeField] private Transform renderRoot;
 
         [Header("Mesh")]
         [SerializeField, Min(1)] private int maxPatchRebuildsPerFrame = 2;
-        [SerializeField, Range(0.05f, 1f)] private float roadWidthRatio = 0.3f;
 
         private readonly HashSet<Vector2Int> pendingFullPatches = new();
         private readonly HashSet<Vector2Int> pendingTerrainPatches = new();
@@ -60,7 +60,6 @@ namespace MiniCivilization.World.Presentation
             maxPatchRebuildsPerFrame = Math.Max(
                 1,
                 maxPatchRebuildsPerFrame);
-            roadWidthRatio = Mathf.Clamp(roadWidthRatio, 0.05f, 1f);
         }
 
         public void Bind(WorldRuntime runtime)
@@ -82,6 +81,7 @@ namespace MiniCivilization.World.Presentation
                 world,
                 boundWaterFlowState);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
+            roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             LastAppliedChangeId = runtime.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: false);
@@ -102,6 +102,7 @@ namespace MiniCivilization.World.Presentation
             exposureCache = new WorldExposureCache(world);
             surfaceQuery = new WorldSurfaceQuery(world);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
+            roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
             BindingMode = WorldRenderBindingMode.PreparedScene;
             LastAppliedChangeId = runtime.CurrentChangeId;
             BuildAllPatches(persistentSceneObjects: true);
@@ -161,6 +162,15 @@ namespace MiniCivilization.World.Presentation
                 boundWaterFlowState);
             activeRenderPatchSize = preparedPatchSize;
             chunkViews = adoptedViews;
+            roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
+            for (var z = 0; z < chunkViews.GetLength(1); z++)
+            for (var x = 0; x < chunkViews.GetLength(0); x++)
+            {
+                chunkViews[x, z].RebuildRoad(
+                    boundWorld,
+                    boundRuntime.RoadTopology,
+                    roadVisualCatalog);
+            }
             BindingMode = WorldRenderBindingMode.PreparedScene;
             LastAppliedChangeId = runtime.CurrentChangeId;
             return true;
@@ -209,9 +219,8 @@ namespace MiniCivilization.World.Presentation
                 || (changeSet.ChangeTypes & materialChanges) != 0;
             var rebuildWater =
                 (changeSet.ChangeTypes & waterChanges) != 0;
-            var rebuildRoad =
-                (changeSet.ChangeTypes
-                    & (WorldChangeType.RoadTopology | geometryChanges)) != 0;
+            var rebuildRoad = changeSet.Includes(WorldChangeType.RoadTopology)
+                || (changeSet.ChangeTypes & geometryChanges) != 0;
             var invalidateGeometry =
                 (changeSet.ChangeTypes
                     & (geometryChanges | waterChanges)) != 0;
@@ -248,16 +257,16 @@ namespace MiniCivilization.World.Presentation
                 }
             }
 
-            if (rebuildRoad)
-            {
-                QueueRoadPatches(changeSet.ChangedCellIndices);
-            }
-
             if (!rebuildFull
                 && rebuildWater
                 && activeRenderPatchSize > 0)
             {
                 QueueTerrainPatchesAffectedByWater(changeSet);
+            }
+
+            if (rebuildRoad && activeRenderPatchSize > 0)
+            {
+                QueueRoadPatches(changeSet.ChangedColumnIndices);
             }
 
             LastAppliedChangeId = changeSet.ChangeId;
@@ -299,6 +308,8 @@ namespace MiniCivilization.World.Presentation
                 {
                     var rebuildWaterWithTerrain =
                         pendingWaterPatches.Remove(patch);
+                    var rebuildRoadWithTerrain =
+                        pendingRoadPatches.Remove(patch);
                     if (!ContainsPatch(patch))
                     {
                         continue;
@@ -316,49 +327,40 @@ namespace MiniCivilization.World.Presentation
                         {
                             RebuildWaterPatch(terrainView);
                         }
+
+                        if (rebuildRoadWithTerrain)
+                        {
+                            RebuildRoadPatch(terrainView);
+                        }
                     }
 
                     continue;
                 }
 
-                if (!TryTakePatch(pendingWaterPatches, out patch))
+                if (TryTakePatch(pendingWaterPatches, out patch))
                 {
-                    if (!TryTakePatch(pendingRoadPatches, out patch))
-                    {
-                        break;
-                    }
-
                     if (!ContainsPatch(patch))
                     {
                         continue;
                     }
 
-                    var roadView = chunkViews[patch.x, patch.y];
-                    if (roadView.IsPrepared)
+                    var view = chunkViews[patch.x, patch.y];
+                    if (view.IsPrepared)
                     {
-                        BuildPatch(roadView, patch.x, patch.y);
+                        BuildPatch(view, patch.x, patch.y);
                     }
                     else
                     {
-                        RebuildRoadPatch(roadView);
+                        RebuildWaterPatch(view);
                     }
 
                     continue;
                 }
 
-                if (!ContainsPatch(patch))
+                if (TryTakePatch(pendingRoadPatches, out patch)
+                    && ContainsPatch(patch))
                 {
-                    continue;
-                }
-
-                var view = chunkViews[patch.x, patch.y];
-                if (view.IsPrepared)
-                {
-                    BuildPatch(view, patch.x, patch.y);
-                }
-                else
-                {
-                    RebuildWaterPatch(view);
+                    RebuildRoadPatch(chunkViews[patch.x, patch.y]);
                 }
             }
         }
@@ -411,42 +413,48 @@ namespace MiniCivilization.World.Presentation
         {
             view.RebuildRoad(
                 boundWorld,
-                boundRuntime.WayPointGraph,
-                roadWidthRatio,
-                surfaceCatalog,
-                terrainMaterial,
-                meshBuildScratch);
+                boundRuntime.RoadTopology,
+                roadVisualCatalog);
         }
 
-        public void ApplyWayTopologyChanges(EntityChangeSet changeSet)
+        public void ApplyEntityChanges(EntityChangeSet changeSet)
         {
-            if (changeSet == null)
-            {
-                throw new ArgumentNullException(nameof(changeSet));
-            }
-
-            if (changeSet.World != boundWorld
-                || !changeSet.WayTopologyChanged)
+            if (changeSet == null
+                || changeSet.World != boundWorld
+                || !changeSet.WayTopologyChanged
+                || activeRenderPatchSize <= 0)
             {
                 return;
             }
 
-            QueueRoadPatches(changeSet.AffectedCellIndices);
-            LastAppliedChangeId = changeSet.ChangeId;
-        }
-
-        private void QueueRoadPatches(IReadOnlyList<int> cellIndices)
-        {
-            if (activeRenderPatchSize <= 0)
+            var columns = new HashSet<int>();
+            for (var index = 0;
+                 index < changeSet.AffectedCellIndices.Count;
+                 index++)
             {
-                return;
+                var cell = WorldIndex.DecodeCell(
+                    boundWorld,
+                    changeSet.AffectedCellIndices[index]);
+                columns.Add(WorldIndex.EncodeColumn(
+                    boundWorld,
+                    cell.X,
+                    cell.Z));
             }
 
-            for (var index = 0; index < cellIndices.Count; index++)
+            QueueRoadPatches(columns);
+        }
+
+        private void QueueRoadPatches(IReadOnlyCollection<int> changedColumns)
+        {
+            foreach (var column in changedColumns)
             {
-                var cell = WorldIndex.DecodeCell(boundWorld, cellIndices[index]);
-                for (var z = cell.Z - 1; z <= cell.Z + 1; z++)
-                for (var x = cell.X - 1; x <= cell.X + 1; x++)
+                WorldIndex.DecodeColumn(
+                    boundWorld,
+                    column,
+                    out var centerX,
+                    out var centerZ);
+                for (var z = centerZ - 1; z <= centerZ + 1; z++)
+                for (var x = centerX - 1; x <= centerX + 1; x++)
                 {
                     if (!boundWorld.ContainsColumn(x, z))
                     {
@@ -456,7 +464,8 @@ namespace MiniCivilization.World.Presentation
                     var patch = new Vector2Int(
                         x / activeRenderPatchSize,
                         z / activeRenderPatchSize);
-                    if (!pendingFullPatches.Contains(patch))
+                    if (!pendingFullPatches.Contains(patch)
+                        && !pendingTerrainPatches.Contains(patch))
                     {
                         pendingRoadPatches.Add(patch);
                     }
@@ -546,9 +555,14 @@ namespace MiniCivilization.World.Presentation
             WorldSurfaceCatalog catalog,
             Material terrain,
             Material water,
-            Transform root)
+            Transform root,
+            RoadVisualCatalog roads = null)
         {
             surfaceCatalog = catalog;
+            if (roads != null)
+            {
+                roadVisualCatalog = roads;
+            }
             terrainMaterial = terrain;
             waterMaterial = water;
             renderRoot = root;
@@ -585,12 +599,12 @@ namespace MiniCivilization.World.Presentation
                 patchZ,
                 activeRenderPatchSize,
                 surfaceCatalog,
+                boundRuntime.RoadTopology,
+                roadVisualCatalog,
                 terrainMaterial,
                 waterMaterial,
                 surfaceQuery,
                 exposureCache,
-                boundRuntime.WayPointGraph,
-                roadWidthRatio,
                 meshBuildScratch);
         }
 

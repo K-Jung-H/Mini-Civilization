@@ -12,6 +12,9 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
+  - _ROAD_ALBEDO_ARRAY
+  - _ROAD_SHAPE_MASK_ARRAY
+  - _ROAD_SURFACE_ARRAY
   - _WORLD_ALBEDO_ARRAY
   m_InvalidKeywords: []
   m_LightmapFlags: 4
@@ -24,6 +27,30 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _RoadAlbedoArray:
+        m_Texture: {fileID: -1847242634837889245, guid: 70ab6c36a21d76d469ad8643fd746f45, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoadNormalArray:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoadPatchMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoadPortOffsetMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoadShapeMaskArray:
+        m_Texture: {fileID: 699724680076887744, guid: 70ab6c36a21d76d469ad8643fd746f45, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoadSurfaceArray:
+        m_Texture: {fileID: -8341084068353244904, guid: 70ab6c36a21d76d469ad8643fd746f45, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SurfaceAlbedoArray:
         m_Texture: {fileID: 4995299251530000139, guid: b6f6b194b8934c81a7e9b7e0ca000002, type: 2}
         m_Scale: {x: 1, y: 1}
@@ -41,5 +68,6 @@ Material:
     - _Cull: 2
     m_Colors:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
+    - _RoadPatchParameters: {r: 0, g: 0, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
