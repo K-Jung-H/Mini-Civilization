@@ -122,7 +122,9 @@ namespace MiniCivilization.World.Editing
             terrainGroup?.Initialize();
             entityGroup?.Initialize();
             environmentGroup?.Initialize();
+            NormalizeActionGroupExpansion();
             BindEvents();
+            EnsureSelectionModeSelected();
             SetExpanded(startExpanded);
         }
 
@@ -171,13 +173,12 @@ namespace MiniCivilization.World.Editing
 
         public int GetSelectedModeIndex()
         {
-            if (!isExpanded
-                || selectModeGroup == null
-                || !selectModeGroup.IsExpanded)
+            if (!isExpanded || selectModeGroup == null)
             {
                 return 0;
             }
 
+            EnsureSelectionModeSelected();
             if (singleSelectionToggle != null && singleSelectionToggle.isOn)
             {
                 return 1;
@@ -279,6 +280,7 @@ namespace MiniCivilization.World.Editing
             }
 
             toggle.SetIsOnWithoutNotify(true);
+            ToggleGroupVisualStyle.RefreshFor(toggle);
             SelectionChanged?.Invoke();
         }
 
@@ -302,6 +304,7 @@ namespace MiniCivilization.World.Editing
                         }
 
                         toggle.SetIsOnWithoutNotify(false);
+                        ToggleGroupVisualStyle.RefreshFor(toggle);
                         changed = true;
                     }
                 }
@@ -313,31 +316,24 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        public void SetEntityToolActive(EntityCategory? category)
+        public void SetBuildingDefinitionSelected(bool selected)
         {
-            var entityToolActive = category.HasValue;
+            if (selected)
+            {
+                SelectSingleMode();
+            }
+
             if (areaSelectionToggle != null)
             {
-                areaSelectionToggle.interactable = !entityToolActive;
+                areaSelectionToggle.interactable = !selected;
             }
 
-            var building = category == EntityCategory.Building;
             if (brushToggle != null)
             {
-                brushToggle.interactable = !building;
+                brushToggle.interactable = !selected;
             }
 
-            if (entityToolActive
-                && (areaSelectionToggle != null
-                    && areaSelectionToggle.isOn
-                    || building
-                    && brushToggle != null
-                    && brushToggle.isOn)
-                && singleSelectionToggle != null)
-            {
-                singleSelectionToggle.SetIsOnWithoutNotify(true);
-            }
-
+            EnsureSelectionModeSelected();
             RefreshBrushSizePanel();
             SelectionChanged?.Invoke();
         }
@@ -365,27 +361,25 @@ namespace MiniCivilization.World.Editing
 
         private void ToggleSelectModeGroup()
         {
-            ToggleGroup(selectModeGroup, false);
+            ToggleIndependentGroup(selectModeGroup);
         }
 
         private void ToggleEntityGroup()
         {
-            ToggleGroup(entityGroup, true);
+            ToggleExclusiveActionGroup(entityGroup);
         }
 
         private void ToggleTerrainGroup()
         {
-            ToggleGroup(terrainGroup, false);
+            ToggleExclusiveActionGroup(terrainGroup);
         }
 
         private void ToggleEnvironmentGroup()
         {
-            ToggleGroup(environmentGroup, false);
+            ToggleExclusiveActionGroup(environmentGroup);
         }
 
-        private void ToggleGroup(
-            WorldEditToolbarGroup group,
-            bool isEntityGroup)
+        private void ToggleIndependentGroup(WorldEditToolbarGroup group)
         {
             if (!isExpanded || group == null)
             {
@@ -393,13 +387,78 @@ namespace MiniCivilization.World.Editing
             }
 
             group.Toggle();
+            RefreshToolbarStructure();
+        }
+
+        private void ToggleExclusiveActionGroup(
+            WorldEditToolbarGroup group)
+        {
+            if (!isExpanded || group == null)
+            {
+                return;
+            }
+
+            var entityGroupWasExpanded = IsEntityGroupExpanded;
+            var expand = !group.IsExpanded;
+            group.SetExpanded(expand);
+            if (expand)
+            {
+                CollapseOtherActionGroups(group);
+            }
+
+            RefreshToolbarStructure();
+            if (entityGroupWasExpanded != IsEntityGroupExpanded)
+            {
+                EntityGroupExpandedChanged?.Invoke(IsEntityGroupExpanded);
+            }
+        }
+
+        private void RefreshToolbarStructure()
+        {
             RefreshGroupLayout();
             RefreshPropertyDetailPanels();
             SelectionChanged?.Invoke();
             StructureChanged?.Invoke();
-            if (isEntityGroup)
+        }
+
+        private void NormalizeActionGroupExpansion()
+        {
+            WorldEditToolbarGroup expandedGroup = null;
+            if (environmentGroup != null && environmentGroup.IsExpanded)
             {
-                EntityGroupExpandedChanged?.Invoke(IsEntityGroupExpanded);
+                expandedGroup = environmentGroup;
+            }
+            else if (entityGroup != null && entityGroup.IsExpanded)
+            {
+                expandedGroup = entityGroup;
+            }
+            else if (terrainGroup != null && terrainGroup.IsExpanded)
+            {
+                expandedGroup = terrainGroup;
+            }
+
+            if (expandedGroup != null)
+            {
+                CollapseOtherActionGroups(expandedGroup);
+            }
+        }
+
+        private void CollapseOtherActionGroups(
+            WorldEditToolbarGroup expandedGroup)
+        {
+            if (terrainGroup != null && terrainGroup != expandedGroup)
+            {
+                terrainGroup.SetExpanded(false);
+            }
+
+            if (entityGroup != null && entityGroup != expandedGroup)
+            {
+                entityGroup.SetExpanded(false);
+            }
+
+            if (environmentGroup != null && environmentGroup != expandedGroup)
+            {
+                environmentGroup.SetExpanded(false);
             }
         }
 
@@ -559,8 +618,38 @@ namespace MiniCivilization.World.Editing
 
         private void OnSelectionChanged(bool _)
         {
+            EnsureSelectionModeSelected();
             RefreshBrushSizePanel();
             SelectionChanged?.Invoke();
+        }
+
+        private void EnsureSelectionModeSelected()
+        {
+            if (singleSelectionToggle != null && singleSelectionToggle.isOn
+                || areaSelectionToggle != null && areaSelectionToggle.isOn
+                || brushToggle != null && brushToggle.isOn)
+            {
+                return;
+            }
+
+            if (areaSelectionToggle != null
+                && areaSelectionToggle.interactable)
+            {
+                areaSelectionToggle.SetIsOnWithoutNotify(true);
+                ToggleGroupVisualStyle.RefreshFor(areaSelectionToggle);
+                return;
+            }
+
+            SelectSingleMode();
+        }
+
+        private void SelectSingleMode()
+        {
+            if (singleSelectionToggle != null)
+            {
+                singleSelectionToggle.SetIsOnWithoutNotify(true);
+                ToggleGroupVisualStyle.RefreshFor(singleSelectionToggle);
+            }
         }
 
         private static void BindGroupButton(

@@ -22,6 +22,7 @@ namespace MiniCivilization.World.Editing
         public void SetSelectedWithoutNotify(bool selected)
         {
             selectionToggle?.SetIsOnWithoutNotify(selected);
+            ToggleGroupVisualStyle.RefreshFor(selectionToggle);
         }
 
         private void OnDestroy()
@@ -59,6 +60,7 @@ namespace MiniCivilization.World.Editing
             {
                 selectionToggle.group = toggleGroup;
                 selectionToggle.SetIsOnWithoutNotify(false);
+                ToggleGroupVisualStyle.RefreshFor(selectionToggle);
                 selectionListener = isOn =>
                 {
                     selectionChanged?.Invoke(definition, isOn);

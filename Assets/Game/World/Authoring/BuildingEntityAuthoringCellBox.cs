@@ -1,5 +1,6 @@
 using MiniCivilization.World.Domain;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Authoring
 {
@@ -43,11 +44,11 @@ namespace MiniCivilization.World.Authoring
         [SerializeField]
         private BuildingCellRole buildingRole;
 
-        [SerializeField, Min(0)]
-        private int maxTerrainCorrectionSteps;
+        [SerializeField, FormerlySerializedAs("maxTerrainCorrectionSteps"), Min(0)]
+        private int maxHeightAdjustmentSteps;
 
         public BuildingCellRole BuildingRole => buildingRole;
-        public int MaxTerrainCorrectionSteps => maxTerrainCorrectionSteps;
+        public int MaxHeightAdjustmentSteps => maxHeightAdjustmentSteps;
         public bool HasValidTerrainAnchor =>
             buildingRole != BuildingCellRole.TerrainAnchor
             || TerrainHeight == WorldGrid.HeightStepsPerCell;
@@ -85,11 +86,17 @@ namespace MiniCivilization.World.Authoring
 
             var sourceCorrectionSteps =
                 source is BuildingEntityAuthoringCellBox sourceBuilding
-                    ? sourceBuilding.MaxTerrainCorrectionSteps
+                    ? sourceBuilding.MaxHeightAdjustmentSteps
                     : 0;
-            if (maxTerrainCorrectionSteps != sourceCorrectionSteps)
+            if (maxHeightAdjustmentSteps != sourceCorrectionSteps)
             {
-                maxTerrainCorrectionSteps = sourceCorrectionSteps;
+                maxHeightAdjustmentSteps = sourceCorrectionSteps;
+                changed = true;
+            }
+
+            if (buildingRole == BuildingCellRole.TerrainAnchor
+                && SetTerrainHeight(WorldGrid.HeightStepsPerCell))
+            {
                 changed = true;
             }
 
@@ -99,9 +106,13 @@ namespace MiniCivilization.World.Authoring
         protected override void OnValidate()
         {
             base.OnValidate();
-            maxTerrainCorrectionSteps = Mathf.Max(
+            maxHeightAdjustmentSteps = Mathf.Max(
                 0,
-                maxTerrainCorrectionSteps);
+                maxHeightAdjustmentSteps);
+            if (buildingRole == BuildingCellRole.TerrainAnchor)
+            {
+                SetTerrainHeight(WorldGrid.HeightStepsPerCell);
+            }
         }
     }
 }

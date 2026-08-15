@@ -66,6 +66,23 @@ namespace MiniCivilization.World.Editing
             }
         }
 
+        public bool ContainsScreenPoint(Vector2 screenPosition)
+        {
+            if (panel == null || !panel.gameObject.activeInHierarchy)
+            {
+                return false;
+            }
+
+            var camera = canvas != null
+                && canvas.renderMode != RenderMode.ScreenSpaceOverlay
+                ? canvas.worldCamera
+                : null;
+            return RectTransformUtility.RectangleContainsScreenPoint(
+                panel,
+                screenPosition,
+                camera);
+        }
+
         private void PositionAt(Vector2 screenPosition)
         {
             if (panel == null || canvasRect == null)

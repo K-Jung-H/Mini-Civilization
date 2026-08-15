@@ -262,6 +262,8 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
+            toolbarView?.SetBuildingDefinitionSelected(
+                IsBuildingDefinition(definition));
             if (definition != null)
             {
                 isSynchronizingSelection = true;
@@ -282,7 +284,8 @@ namespace MiniCivilization.World.Editing
                 isSynchronizingSelection = false;
             }
 
-            toolbarView?.SetEntityToolActive(category);
+            toolbarView?.SetBuildingDefinitionSelected(
+                IsBuildingDefinition(catalogView?.SelectedDefinition));
             Refresh();
         }
 
@@ -290,18 +293,29 @@ namespace MiniCivilization.World.Editing
         {
             if (catalogView == null || catalogView.SelectedDefinition == null)
             {
+                toolbarView?.SetBuildingDefinitionSelected(false);
                 return;
             }
 
             isSynchronizingSelection = true;
             catalogView.ClearSelectedDefinition();
             isSynchronizingSelection = false;
+            toolbarView?.SetBuildingDefinitionSelected(false);
         }
 
         private void SynchronizeEntityToolAvailability()
         {
-            toolbarView?.SetEntityToolActive(catalogView?.ActiveCategory);
+            toolbarView?.SetBuildingDefinitionSelected(
+                IsBuildingDefinition(catalogView?.SelectedDefinition));
         }
+
+        private bool IsBuildingDefinition(EntityDefinition definition) =>
+            definition != null
+            && catalogView?.Catalog != null
+            && catalogView.Catalog.TryGetTypeKey(
+                definition,
+                out var typeKey)
+            && typeKey.Category == EntityCategory.Building;
 
         private void Refresh()
         {

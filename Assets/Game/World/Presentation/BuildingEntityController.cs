@@ -14,6 +14,23 @@ namespace MiniCivilization.World.Presentation
     }
 
     [Serializable]
+    public struct BuildingCellBakeData
+    {
+        public Vector3Int LocalOffset;
+        [Range(0, WorldGrid.HeightStepsPerCell)]
+        public int TerrainHeight;
+        [Min(0)] public int MaxHeightAdjustmentSteps;
+    }
+
+    [Serializable]
+    public struct BuildingCellTerrainBakeData
+    {
+        [Range(0, WorldGrid.HeightStepsPerCell)]
+        public int TerrainHeight;
+        [Min(0)] public int MaxHeightAdjustmentSteps;
+    }
+
+    [Serializable]
     public struct BuildingWayPointBakeData
     {
         public Vector3Int LocalCellOffset;
@@ -25,7 +42,8 @@ namespace MiniCivilization.World.Presentation
     public struct TerrainAnchorBakeData
     {
         public Vector3Int LocalOffset;
-        [Min(0)] public int MaxTerrainCorrectionSteps;
+        [FormerlySerializedAs("MaxTerrainCorrectionSteps")]
+        [Min(0)] public int MaxHeightAdjustmentSteps;
     }
 
     [Serializable]
@@ -42,6 +60,8 @@ namespace MiniCivilization.World.Presentation
         [SerializeField]
         [FormerlySerializedAs("occupiedCells")]
         private Vector3Int[] buildingCells = Array.Empty<Vector3Int>();
+        [SerializeField] private BuildingCellTerrainBakeData[]
+            buildingCellTerrain = Array.Empty<BuildingCellTerrainBakeData>();
         [SerializeField] private TerrainAnchorBakeData[] terrainAnchors =
             Array.Empty<TerrainAnchorBakeData>();
         [SerializeField] private BuildingWayPointBakeData[] localWayPoints =
@@ -70,12 +90,30 @@ namespace MiniCivilization.World.Presentation
         }
 
         internal void SetBakedLayout(
-            Vector3Int[] cells,
+            BuildingCellBakeData[] cells,
             TerrainAnchorBakeData[] anchors,
             BuildingWayPointBakeData[] points,
             BuildingWayBakeData[] ways)
         {
-            buildingCells = cells ?? Array.Empty<Vector3Int>();
+            cells ??= Array.Empty<BuildingCellBakeData>();
+            buildingCells = new Vector3Int[cells.Length];
+            buildingCellTerrain = new BuildingCellTerrainBakeData[cells.Length];
+            for (var index = 0; index < cells.Length; index++)
+            {
+                var cell = cells[index];
+                buildingCells[index] = cell.LocalOffset;
+                buildingCellTerrain[index] = new BuildingCellTerrainBakeData
+                {
+                    TerrainHeight = Mathf.Clamp(
+                        cell.TerrainHeight,
+                        0,
+                        WorldGrid.HeightStepsPerCell),
+                    MaxHeightAdjustmentSteps = Mathf.Max(
+                        0,
+                        cell.MaxHeightAdjustmentSteps)
+                };
+            }
+
             terrainAnchors = anchors ?? Array.Empty<TerrainAnchorBakeData>();
             localWayPoints = points ?? Array.Empty<BuildingWayPointBakeData>();
             localWays = ways ?? Array.Empty<BuildingWayBakeData>();
@@ -92,8 +130,17 @@ namespace MiniCivilization.World.Presentation
             var cells = new BuildingCell[buildingCells?.Length ?? 0];
             for (var index = 0; index < cells.Length; index++)
             {
+                var terrain = buildingCellTerrain != null
+                    && index < buildingCellTerrain.Length
+                    ? buildingCellTerrain[index]
+                    : default;
                 cells[index] = new BuildingCell(
-                    ToOffset(buildingCells[index]));
+                    ToOffset(buildingCells[index]),
+                    Mathf.Clamp(
+                        terrain.TerrainHeight,
+                        0,
+                        WorldGrid.HeightStepsPerCell),
+                    Mathf.Max(0, terrain.MaxHeightAdjustmentSteps));
             }
 
             var anchors = new TerrainAnchorCell[
@@ -103,7 +150,7 @@ namespace MiniCivilization.World.Presentation
                 var anchor = terrainAnchors[index];
                 anchors[index] = new TerrainAnchorCell(
                     ToOffset(anchor.LocalOffset),
-                    Mathf.Max(0, anchor.MaxTerrainCorrectionSteps));
+                    Mathf.Max(0, anchor.MaxHeightAdjustmentSteps));
             }
 
             var points = new BuildingWayPoint[localWayPoints?.Length ?? 0];
@@ -137,13 +184,28 @@ namespace MiniCivilization.World.Presentation
         private void OnValidate()
         {
             for (var index = 0;
+                 index < buildingCellTerrain?.Length;
+                 index++)
+            {
+                var terrain = buildingCellTerrain[index];
+                terrain.TerrainHeight = Mathf.Clamp(
+                    terrain.TerrainHeight,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                terrain.MaxHeightAdjustmentSteps = Mathf.Max(
+                    0,
+                    terrain.MaxHeightAdjustmentSteps);
+                buildingCellTerrain[index] = terrain;
+            }
+
+            for (var index = 0;
                  index < terrainAnchors?.Length;
                  index++)
             {
                 var anchor = terrainAnchors[index];
-                anchor.MaxTerrainCorrectionSteps = Math.Max(
+                anchor.MaxHeightAdjustmentSteps = Math.Max(
                     0,
-                    anchor.MaxTerrainCorrectionSteps);
+                    anchor.MaxHeightAdjustmentSteps);
                 terrainAnchors[index] = anchor;
             }
 

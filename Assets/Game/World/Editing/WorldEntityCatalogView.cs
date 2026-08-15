@@ -78,11 +78,6 @@ namespace MiniCivilization.World.Editing
             Unsubscribe();
             entityCatalog = catalog;
             toolbarView = toolbar;
-            if (definitionToggleGroup != null)
-            {
-                definitionToggleGroup.allowSwitchOff = true;
-            }
-
             if (Application.isPlaying && isActiveAndEnabled)
             {
                 Subscribe();

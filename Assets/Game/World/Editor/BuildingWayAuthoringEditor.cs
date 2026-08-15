@@ -56,12 +56,39 @@ namespace MiniCivilization.World.Editor
     {
         public override void OnInspectorGUI()
         {
+            serializedObject.Update();
+            var direction = serializedObject.FindProperty("externalDirection");
+            var connections = serializedObject.FindProperty("connections");
+
             EditorGUI.BeginChangeCheck();
-            DrawDefaultInspector();
-            if (EditorGUI.EndChangeCheck())
+            EditorGUILayout.PropertyField(direction);
+            var directionChanged = EditorGUI.EndChangeCheck();
+            serializedObject.ApplyModifiedProperties();
+
+            if (directionChanged)
             {
-                SceneView.RepaintAll();
+                var marker = (BuildingWayPointMarker)target;
+                var authoring = marker.GetComponentInParent<BuildingWayAuthoring>();
+                var moved = false;
+                if (authoring != null
+                    && !authoring.TrySnapExternalMarker(
+                        marker,
+                        out moved,
+                        out var error))
+                {
+                    Debug.LogError(error, marker);
+                }
+                else if (authoring != null && moved
+                    && marker.gameObject.scene.IsValid())
+                {
+                    EditorSceneManager.MarkSceneDirty(marker.gameObject.scene);
+                }
             }
+
+            serializedObject.Update();
+            EditorGUILayout.PropertyField(connections, true);
+            serializedObject.ApplyModifiedProperties();
+            SceneView.RepaintAll();
         }
     }
 

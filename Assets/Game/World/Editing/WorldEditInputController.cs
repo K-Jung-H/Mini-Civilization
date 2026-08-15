@@ -143,6 +143,15 @@ namespace MiniCivilization.World.Editing
 
             if (isPending)
             {
+                if (mouse.leftButton.wasPressedThisFrame
+                    && (confirmationView == null
+                        || !confirmationView.ContainsScreenPoint(
+                            mouse.position.ReadValue())))
+                {
+                    CancelPending();
+                    return;
+                }
+
                 selectionState.ClearEditHovered();
                 return;
             }

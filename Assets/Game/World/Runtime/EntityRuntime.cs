@@ -148,9 +148,17 @@ namespace MiniCivilization.World.Runtime
                 coordinate.Y,
                 coordinate.Z));
 
+        public bool IsTerrainProtected(CellCoordinate coordinate) =>
+            IsBuildingOccupied(coordinate)
+            || IsTerrainAnchored(coordinate);
+
         public bool HasTerrainAnchorInColumn(int x, int z) =>
             world.ContainsColumn(x, z)
             && terrainAnchorColumns.Contains(WorldIndex.EncodeColumn(world, x, z));
+
+        public bool HasTerrainProtectedInColumn(int x, int z) =>
+            HasBuildingInColumn(x, z)
+            || HasTerrainAnchorInColumn(x, z);
 
         public bool HasBuildingInColumn(int x, int z)
         {
@@ -253,11 +261,14 @@ namespace MiniCivilization.World.Runtime
                 ?? throw new InvalidOperationException(
                     $"Building type {data.TypeKey} does not define a layout.");
             var hasCenterCell = false;
+            var centerTerrainHeight = 0;
             for (var index = 0; index < layout.BuildingCells.Count; index++)
             {
                 if (layout.BuildingCells[index].LocalOffset.Equals(default))
                 {
                     hasCenterCell = true;
+                    centerTerrainHeight = layout.BuildingCells[index]
+                        .TerrainHeight;
                     break;
                 }
             }
@@ -305,10 +316,16 @@ namespace MiniCivilization.World.Runtime
                 var column = GetOrCreatePlacementColumn(
                     columns,
                     coordinate);
-                var targetHeight = centerSurface.GroundHeight
+                var targetHeight = checked(
+                    centerSurface.GroundHeight
                     + localCell.LocalOffset.Y
-                    * WorldGrid.HeightStepsPerCell;
-                column.SetBuildingTarget(targetHeight, coordinate);
+                        * WorldGrid.HeightStepsPerCell
+                    + localCell.TerrainHeight
+                    - centerTerrainHeight);
+                column.SetBuildingTarget(
+                    targetHeight,
+                    coordinate,
+                    localCell.MaxHeightAdjustmentSteps);
             }
 
             for (var index = 0;
@@ -422,9 +439,25 @@ namespace MiniCivilization.World.Runtime
                     column.TargetHeight - column.Surface.GroundHeight);
                 if (correctionSteps
                     > layout.TerrainAnchorCells[index]
-                        .MaxTerrainCorrectionSteps)
+                        .MaxHeightAdjustmentSteps)
                 {
                     invalidCells.Add(coordinate);
+                }
+            }
+
+            foreach (var column in columns.Values)
+            {
+                if (column.MaxHeightAdjustmentSteps < 0)
+                {
+                    continue;
+                }
+
+                var adjustmentSteps = Math.Abs(
+                    column.TargetHeight - column.Surface.GroundHeight);
+                if (adjustmentSteps
+                    > column.MaxHeightAdjustmentSteps)
+                {
+                    invalidCells.Add(column.RepresentativeCell);
                 }
             }
 
@@ -1267,6 +1300,7 @@ namespace MiniCivilization.World.Runtime
             public SurfaceHeightData Surface { get; }
             public bool HasBuildingTarget { get; private set; }
             public int BuildingTargetHeight { get; private set; }
+            public int MaxHeightAdjustmentSteps { get; private set; } = -1;
             public int MinimumAnchorHeight { get; private set; }
             public bool RequiresRebuild { get; set; }
             public int TargetHeight { get; set; }
@@ -1282,7 +1316,8 @@ namespace MiniCivilization.World.Runtime
 
             public void SetBuildingTarget(
                 int height,
-                CellCoordinate representativeCell)
+                CellCoordinate representativeCell,
+                int maxHeightAdjustmentSteps)
             {
                 if (HasBuildingTarget
                     && BuildingTargetHeight <= height)
@@ -1293,6 +1328,7 @@ namespace MiniCivilization.World.Runtime
                 HasBuildingTarget = true;
                 BuildingTargetHeight = height;
                 RepresentativeCell = representativeCell;
+                MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
             }
 
             public void RequireAnchorHeight(

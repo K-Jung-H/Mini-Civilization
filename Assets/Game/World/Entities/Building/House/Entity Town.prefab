@@ -119,23 +119,31 @@ MonoBehaviour:
   animator: {fileID: 0}
   entityType: 1
   buildingCells:
+  - {x: 0, y: 0, z: -1}
   - {x: 0, y: 0, z: 0}
+  buildingCellTerrain:
+  - TerrainHeight: 3
+    MaxHeightAdjustmentSteps: 5
+  - TerrainHeight: 0
+    MaxHeightAdjustmentSteps: 0
   terrainAnchors:
+  - LocalOffset: {x: 0, y: -1, z: -1}
+    MaxHeightAdjustmentSteps: 5
   - LocalOffset: {x: 0, y: -1, z: 0}
-    MaxTerrainCorrectionSteps: 0
+    MaxHeightAdjustmentSteps: 5
   localWayPoints:
   - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0, y: 0, z: 0.25}
-    ExternalDirection: 0
+    LocalPosition: {x: 0.25, y: 0, z: 0.5}
+    ExternalDirection: 1
   - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0.25, y: 0, z: 0}
-    ExternalDirection: 0
-  - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0, y: 0, z: -0.25}
-    ExternalDirection: 0
-  - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: -0.25, y: 0, z: 0}
-    ExternalDirection: 0
+    LocalPosition: {x: 0.5, y: 0, z: 0.25}
+    ExternalDirection: 2
+  - LocalCellOffset: {x: 0, y: 0, z: -1}
+    LocalPosition: {x: 0, y: 0, z: -0.5}
+    ExternalDirection: 3
+  - LocalCellOffset: {x: 0, y: 0, z: -1}
+    LocalPosition: {x: -0.5, y: 0, z: 0.5}
+    ExternalDirection: 4
   - LocalCellOffset: {x: 0, y: 0, z: 0}
     LocalPosition: {x: 0, y: 0, z: 0}
     ExternalDirection: 0

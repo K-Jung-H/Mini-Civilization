@@ -63,7 +63,6 @@ namespace MiniCivilization.World.Presentation
             transform.localScale = Vector3.one;
 
             EnsureChildren();
-            RemoveLegacyRoadChild();
             if (catalog != null)
             {
                 catalog.ApplyToMaterials(
@@ -285,7 +284,6 @@ namespace MiniCivilization.World.Presentation
             }
 
             preparedReadOnly = true;
-            RemoveLegacyRoadChild();
             return true;
         }
 
@@ -373,29 +371,6 @@ namespace MiniCivilization.World.Presentation
         {
             terrainFilter = FindFilter("Terrain", out terrainRenderer);
             waterFilter = FindFilter("Water", out waterRenderer);
-        }
-
-        private void RemoveLegacyRoadChild()
-        {
-            var child = transform.Find("Road");
-            if (child == null)
-            {
-                return;
-            }
-
-            child.gameObject.SetActive(false);
-            if (!preparedReadOnly)
-            {
-                DestroyMesh(child.GetComponent<MeshFilter>());
-            }
-            if (Application.isPlaying)
-            {
-                Destroy(child.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(child.gameObject);
-            }
         }
 
         private MeshFilter FindFilter(

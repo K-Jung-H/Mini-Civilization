@@ -662,7 +662,7 @@ namespace MiniCivilization.World.Editing
                     $"Cell ({x}, {y}, {z}) is outside the world.");
             }
 
-            if (IsTerrainAnchored(x, y, z))
+            if (IsTerrainProtected(x, y, z))
             {
                 return;
             }
@@ -731,7 +731,7 @@ namespace MiniCivilization.World.Editing
         public bool RaiseColumn(int x, int z)
         {
             EnsureColumn(x, z);
-            if (HasTerrainAnchorInColumn(x, z))
+            if (HasTerrainProtectedInColumn(x, z))
             {
                 return false;
             }
@@ -763,7 +763,7 @@ namespace MiniCivilization.World.Editing
         public bool LowerColumn(int x, int z)
         {
             EnsureColumn(x, z);
-            if (HasTerrainAnchorInColumn(x, z))
+            if (HasTerrainProtectedInColumn(x, z))
             {
                 return false;
             }
@@ -809,7 +809,7 @@ namespace MiniCivilization.World.Editing
                     $"Cell ({x}, {y}, {z}) is outside the world.");
             }
 
-            if (IsTerrainAnchored(x, y, z))
+            if (IsTerrainProtected(x, y, z))
             {
                 return false;
             }
@@ -838,7 +838,7 @@ namespace MiniCivilization.World.Editing
             SurfaceType surface = SurfaceType.Ground)
         {
             EnsureColumn(x, z);
-            if (HasTerrainAnchorInColumn(x, z))
+            if (HasTerrainProtectedInColumn(x, z))
             {
                 return;
             }
@@ -889,7 +889,7 @@ namespace MiniCivilization.World.Editing
             int waterSurfaceUnits)
         {
             EnsureColumn(x, z);
-            if (HasTerrainAnchorInColumn(x, z))
+            if (HasTerrainProtectedInColumn(x, z))
             {
                 return;
             }
@@ -1043,11 +1043,12 @@ namespace MiniCivilization.World.Editing
                 : world.GetCell(x, y, z);
         }
 
-        private bool IsTerrainAnchored(int x, int y, int z) =>
-            runtime.Entities.IsTerrainAnchored(new CellCoordinate(x, y, z));
+        private bool IsTerrainProtected(int x, int y, int z) =>
+            runtime.Entities.IsTerrainProtected(
+                new CellCoordinate(x, y, z));
 
-        private bool HasTerrainAnchorInColumn(int x, int z) =>
-            runtime.Entities.HasTerrainAnchorInColumn(x, z);
+        private bool HasTerrainProtectedInColumn(int x, int z) =>
+            runtime.Entities.HasTerrainProtectedInColumn(x, z);
 
         public bool TryGetLowestPendingSolidY(
             int x,

@@ -18,30 +18,50 @@ namespace MiniCivilization.World.Entities
     public readonly struct BuildingCell
     {
         public CellOffset LocalOffset { get; }
+        public int TerrainHeight { get; }
+        public int MaxHeightAdjustmentSteps { get; }
 
-        public BuildingCell(CellOffset localOffset)
+        public BuildingCell(
+            CellOffset localOffset,
+            int terrainHeight = 0,
+            int maxHeightAdjustmentSteps = 0)
         {
+            if (terrainHeight < 0
+                || terrainHeight > WorldGrid.HeightStepsPerCell)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(terrainHeight));
+            }
+
+            if (maxHeightAdjustmentSteps < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maxHeightAdjustmentSteps));
+            }
+
             LocalOffset = localOffset;
+            TerrainHeight = terrainHeight;
+            MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
         }
     }
 
     public readonly struct TerrainAnchorCell
     {
         public CellOffset LocalOffset { get; }
-        public int MaxTerrainCorrectionSteps { get; }
+        public int MaxHeightAdjustmentSteps { get; }
 
         public TerrainAnchorCell(
             CellOffset localOffset,
-            int maxTerrainCorrectionSteps)
+            int maxHeightAdjustmentSteps)
         {
-            if (maxTerrainCorrectionSteps < 0)
+            if (maxHeightAdjustmentSteps < 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maxTerrainCorrectionSteps));
+                    nameof(maxHeightAdjustmentSteps));
             }
 
             LocalOffset = localOffset;
-            MaxTerrainCorrectionSteps = maxTerrainCorrectionSteps;
+            MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
         }
     }
 
@@ -215,9 +235,19 @@ namespace MiniCivilization.World.Entities
 
             var cell = ToWorld(entity, point.LocalCellOffset);
             var local = Rotate(point.LocalPosition, entity.Direction);
+            var baseHeight = cell.Y * world.CellSize;
+            if (EntityGroundSupport.TryResolve(
+                    world,
+                    cell,
+                    out var groundSupport))
+            {
+                baseHeight = groundSupport.SurfaceHeightUnits
+                    * world.HeightStep;
+            }
+
             return new Vector3(
                 (cell.X + 0.5f + local.x) * world.CellSize,
-                (cell.Y + local.y) * world.CellSize,
+                baseHeight + local.y * world.CellSize,
                 (cell.Z + 0.5f + local.z) * world.CellSize);
         }
 

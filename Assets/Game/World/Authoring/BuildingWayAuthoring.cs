@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using MiniCivilization.World.Presentation;
 using UnityEngine;
@@ -56,7 +57,7 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
-            var buildingCellSet = new HashSet<Vector3Int>(buildingCells);
+            var buildingCellSet = CreateBuildingCellSet(buildingCells);
 
             var markers = markerContainer.GetComponentsInChildren<
                 BuildingWayPointMarker>(true);
@@ -153,12 +154,118 @@ namespace MiniCivilization.World.Authoring
             return true;
         }
 
+        internal bool TrySnapExternalMarker(
+            BuildingWayPointMarker marker,
+            out bool moved,
+            out string error)
+        {
+            moved = false;
+            if (marker == null)
+            {
+                error = "Building Way Marker is missing.";
+                return false;
+            }
+
+            if (marker.ExternalDirection == BuildingWayPointDirection.None)
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            if (authoringSystem == null)
+            {
+                error = "Entity Authoring System is not assigned.";
+                return false;
+            }
+
+            if (markerContainer == null
+                || !marker.transform.IsChildOf(markerContainer))
+            {
+                error = "Way Marker must be a child of the assigned Way Marker Container.";
+                return false;
+            }
+
+            var cellSize = authoringSystem.CellSize;
+            if (!float.IsFinite(cellSize) || cellSize <= 0f)
+            {
+                error = "Entity Authoring Cell size must be finite and positive.";
+                return false;
+            }
+
+            if (!TryCollectBuildingCells(
+                    out var buildingCells,
+                    out _,
+                    out error))
+            {
+                return false;
+            }
+
+            var buildingCellSet = CreateBuildingCellSet(buildingCells);
+            var source = authoringSystem.transform.InverseTransformPoint(
+                marker.transform.position) / cellSize;
+            var nearest = default(Vector3);
+            var nearestDistance = float.PositiveInfinity;
+            for (var index = 0; index < buildingCells.Length; index++)
+            {
+                var cellOffset = buildingCells[index].LocalOffset;
+                if (buildingCellSet.Contains(
+                        cellOffset + GetDirectionOffset(
+                            marker.ExternalDirection)))
+                {
+                    continue;
+                }
+
+                var candidate = ClampToCell(source, cellOffset);
+                var position = candidate - (Vector3)cellOffset;
+                candidate = (Vector3)cellOffset
+                    + ProjectToExternalBoundary(
+                        marker.ExternalDirection,
+                        position);
+                var distance = (candidate - source).sqrMagnitude;
+                if (distance >= nearestDistance)
+                {
+                    continue;
+                }
+
+                nearest = candidate;
+                nearestDistance = distance;
+            }
+
+            if (!float.IsFinite(nearestDistance))
+            {
+                error = $"No Building Cell exposes the {marker.ExternalDirection} side.";
+                return false;
+            }
+
+            var snapped = authoringSystem.transform.TransformPoint(
+                nearest * cellSize);
+            if ((snapped - marker.transform.position).sqrMagnitude
+                <= 0.000000000001f)
+            {
+                error = string.Empty;
+                return true;
+            }
+
+#if UNITY_EDITOR
+            UnityEditor.Undo.RecordObject(
+                marker.transform,
+                "Snap Building Way Marker");
+#endif
+            marker.transform.position = snapped;
+#if UNITY_EDITOR
+            UnityEditor.EditorUtility.SetDirty(marker.transform);
+#endif
+            moved = true;
+            error = string.Empty;
+            return true;
+        }
+
         private bool TryCollectBuildingCells(
-            out Vector3Int[] buildingCells,
+            out BuildingCellBakeData[] buildingCells,
             out TerrainAnchorBakeData[] terrainAnchors,
             out string error)
         {
-            var cells = new List<Vector3Int>();
+            var cells = new List<BuildingCellBakeData>();
             var anchors = new List<TerrainAnchorBakeData>();
             var usedOffsets = new HashSet<Vector3Int>();
             var pooledCells = authoringSystem.PooledCells;
@@ -183,15 +290,29 @@ namespace MiniCivilization.World.Authoring
 
                 if (cell.BuildingRole == BuildingCellRole.Building)
                 {
-                    cells.Add(cell.LocalOffset);
+                    cells.Add(new BuildingCellBakeData
+                    {
+                        LocalOffset = cell.LocalOffset,
+                        TerrainHeight = cell.TerrainHeight,
+                        MaxHeightAdjustmentSteps =
+                            cell.MaxHeightAdjustmentSteps
+                    });
                 }
                 else
                 {
+                    if (!cell.HasValidTerrainAnchor)
+                    {
+                        buildingCells = null;
+                        terrainAnchors = null;
+                        error = $"Terrain Anchor {cell.LocalOffset} requires Terrain Height {WorldGrid.HeightStepsPerCell}.";
+                        return false;
+                    }
+
                     anchors.Add(new TerrainAnchorBakeData
                     {
                         LocalOffset = cell.LocalOffset,
-                        MaxTerrainCorrectionSteps =
-                            cell.MaxTerrainCorrectionSteps
+                        MaxHeightAdjustmentSteps =
+                            cell.MaxHeightAdjustmentSteps
                     });
                 }
             }
@@ -204,7 +325,7 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
-            if (!cells.Contains(Vector3Int.zero))
+            if (!ContainsCenter(cells))
             {
                 buildingCells = null;
                 terrainAnchors = null;
@@ -212,7 +333,9 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
-            cells.Sort(CompareOffset);
+            cells.Sort((left, right) => CompareOffset(
+                left.LocalOffset,
+                right.LocalOffset));
             anchors.Sort((left, right) => CompareOffset(
                 left.LocalOffset,
                 right.LocalOffset));
@@ -222,9 +345,35 @@ namespace MiniCivilization.World.Authoring
             return true;
         }
 
+        private static HashSet<Vector3Int> CreateBuildingCellSet(
+            IReadOnlyList<BuildingCellBakeData> cells)
+        {
+            var result = new HashSet<Vector3Int>();
+            for (var index = 0; index < cells.Count; index++)
+            {
+                result.Add(cells[index].LocalOffset);
+            }
+
+            return result;
+        }
+
+        private static bool ContainsCenter(
+            IReadOnlyList<BuildingCellBakeData> cells)
+        {
+            for (var index = 0; index < cells.Count; index++)
+            {
+                if (cells[index].LocalOffset == Vector3Int.zero)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private bool TryBakePoint(
             BuildingWayPointMarker marker,
-            IReadOnlyList<Vector3Int> buildingCells,
+            IReadOnlyList<BuildingCellBakeData> buildingCells,
             ISet<Vector3Int> buildingCellSet,
             out BuildingWayPointBakeData point,
             out string error)
@@ -244,7 +393,7 @@ namespace MiniCivilization.World.Authoring
             var nearestDistance = float.PositiveInfinity;
             for (var index = 0; index < buildingCells.Count; index++)
             {
-                var candidateOffset = buildingCells[index];
+                var candidateOffset = buildingCells[index].LocalOffset;
                 var candidate = ClampToCell(local, candidateOffset);
                 var distance = (candidate - local).sqrMagnitude;
                 if (distance >= nearestDistance)
@@ -359,6 +508,40 @@ namespace MiniCivilization.World.Authoring
 
             return position;
         }
+
+        private static Vector3 ProjectToExternalBoundary(
+            BuildingWayPointDirection direction,
+            Vector3 position)
+        {
+            position = QuantizeExternalBoundaryPosition(direction, position);
+            switch (direction)
+            {
+                case BuildingWayPointDirection.North:
+                    position.z = 0.5f;
+                    break;
+                case BuildingWayPointDirection.East:
+                    position.x = 0.5f;
+                    break;
+                case BuildingWayPointDirection.South:
+                    position.z = -0.5f;
+                    break;
+                case BuildingWayPointDirection.West:
+                    position.x = -0.5f;
+                    break;
+            }
+
+            return position;
+        }
+
+        private static Vector3Int GetDirectionOffset(
+            BuildingWayPointDirection direction) => direction switch
+        {
+            BuildingWayPointDirection.North => Vector3Int.forward,
+            BuildingWayPointDirection.East => Vector3Int.right,
+            BuildingWayPointDirection.South => Vector3Int.back,
+            BuildingWayPointDirection.West => Vector3Int.left,
+            _ => Vector3Int.zero
+        };
 
         private static float QuantizeBoundaryCoordinate(float value) =>
             Mathf.Clamp(Mathf.Round(value * 4f) / 4f, -0.5f, 0.5f);
