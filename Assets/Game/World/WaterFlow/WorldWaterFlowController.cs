@@ -15,7 +15,7 @@ namespace MiniCivilization.World.WaterFlow
         [SerializeField, Min(1)]
         private int maxCellsPerFrame = 2048;
 
-        private readonly HashSet<int> pendingBodyColumnIndices = new();
+        private readonly HashSet<CellColumnCoordinate> pendingBodyColumns = new();
         private readonly HashSet<int> affectedWaterBodyIds = new();
         private WorldRuntime boundRuntime;
         private WorldData boundWorld;
@@ -66,9 +66,9 @@ namespace MiniCivilization.World.WaterFlow
                 return;
             }
 
-            foreach (var columnIndex in result.ChangedColumnIndices)
+            foreach (var column in result.ChangedColumns)
             {
-                pendingBodyColumnIndices.Add(columnIndex);
+                pendingBodyColumns.Add(column);
             }
 
             if (result.HasTopologyChanges
@@ -76,11 +76,11 @@ namespace MiniCivilization.World.WaterFlow
             {
                 WaterTypeResolver.RefreshChanged(
                     boundWorld,
-                    pendingBodyColumnIndices,
-                    result.LogicalChangedCellIndices,
-                    result.RenderChangedCellIndices,
-                    result.WaterTypeChangedCellIndices,
-                    result.ChangedColumnIndices);
+                    pendingBodyColumns,
+                    result.LogicalChangedCells,
+                    result.RenderChangedCells,
+                    result.WaterTypeChangedCells,
+                    result.ChangedColumns);
             }
 
             CommitResolvedChanges(result);
@@ -99,11 +99,11 @@ namespace MiniCivilization.World.WaterFlow
                     boundWorld,
                     boundRuntime.SurfaceCache,
                     State,
-                    pendingBodyColumnIndices,
+                    pendingBodyColumns,
                     affectedWaterBodyIds);
             }
 
-            pendingBodyColumnIndices.Clear();
+            pendingBodyColumns.Clear();
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
             StateChanged?.Invoke(State);
@@ -132,7 +132,7 @@ namespace MiniCivilization.World.WaterFlow
                     "World runtime water state has not been prepared.");
             }
 
-            pendingBodyColumnIndices.Clear();
+            pendingBodyColumns.Clear();
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
             simulationAccumulator = 0f;
@@ -147,7 +147,7 @@ namespace MiniCivilization.World.WaterFlow
             activeParameters = default;
             waterBodyTopologyRefreshRequested = false;
             waterBodyMetricsRefreshRequested = false;
-            pendingBodyColumnIndices.Clear();
+            pendingBodyColumns.Clear();
             affectedWaterBodyIds.Clear();
             simulationAccumulator = 0f;
             LastAppliedChangeId = WorldChangeId.None;
@@ -179,18 +179,18 @@ namespace MiniCivilization.World.WaterFlow
                 | WorldChangeType.WaterSurface;
             if ((changeSet.ChangeTypes & relevantChanges) != 0)
             {
-                ReconcileEditedWater(changeSet.ChangedCellIndices);
+                ReconcileEditedWater(changeSet.ChangedCells);
                 boundRuntime.WaterFlowResolver.EnqueueChanges(
                     boundWorld,
                     State,
-                    changeSet.ChangedCellIndices,
-                    changeSet.ChangedColumnIndices);
+                    changeSet.ChangedCells,
+                    changeSet.ChangedColumns);
                 for (var index = 0;
-                     index < changeSet.ChangedColumnIndices.Count;
+                     index < changeSet.ChangedColumns.Count;
                      index++)
                 {
-                    pendingBodyColumnIndices.Add(
-                        changeSet.ChangedColumnIndices[index]);
+                    pendingBodyColumns.Add(
+                        changeSet.ChangedColumns[index]);
                 }
 
                 waterBodyTopologyRefreshRequested |=
@@ -204,22 +204,22 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         private void ReconcileEditedWater(
-            IReadOnlyList<int> changedCellIndices)
+            IReadOnlyList<CellCoordinate> changedCells)
         {
-            for (var index = 0; index < changedCellIndices.Count; index++)
+            for (var index = 0; index < changedCells.Count; index++)
             {
-                State.SynchronizeFromPersistent(changedCellIndices[index]);
+                State.SynchronizeFromPersistent(changedCells[index]);
             }
         }
 
         private void CommitResolvedChanges(
             WaterFlowRecalculationResult result)
         {
-            var changedColumns = ToSortedArray(result.ChangedColumnIndices);
+            var changedColumns = ToSortedArray(result.ChangedColumns);
             var logicalCells = ToSortedArray(
-                result.LogicalChangedCellIndices);
+                result.LogicalChangedCells);
             var renderCells = ToSortedArray(
-                result.RenderChangedCellIndices);
+                result.RenderChangedCells);
             var affectedChunks = BuildAffectedChunks(
                 renderCells,
                 changedColumns);
@@ -236,7 +236,7 @@ namespace MiniCivilization.World.WaterFlow
                     | WorldChangeType.Ecology;
             }
 
-            if (result.WaterTypeChangedCellIndices.Count > 0)
+            if (result.WaterTypeChangedCells.Count > 0)
             {
                 changeTypes |= WorldChangeType.Ecology;
             }
@@ -255,13 +255,13 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         private ChunkCoordinate[] BuildAffectedChunks(
-            int[] cells,
-            int[] columns)
+            CellCoordinate[] cells,
+            CellColumnCoordinate[] columns)
         {
             var chunks = new HashSet<ChunkCoordinate>();
             for (var index = 0; index < cells.Length; index++)
             {
-                var cell = WorldIndex.DecodeCell(boundWorld, cells[index]);
+                var cell = cells[index];
                 var minX = Math.Max(0, cell.X - 1) / boundWorld.ChunkSizeX;
                 var maxX = Math.Min(boundWorld.Size - 1, cell.X + 1)
                     / boundWorld.ChunkSizeX;
@@ -283,15 +283,15 @@ namespace MiniCivilization.World.WaterFlow
             {
                 for (var index = 0; index < columns.Length; index++)
                 {
-                    WorldIndex.DecodeColumn(
-                        boundWorld,
-                        columns[index],
-                        out var x,
-                        out var z);
+                    var column = columns[index];
                     chunks.Add(new ChunkCoordinate(
-                        x / boundWorld.ChunkSizeX,
+                        WorldCoordinateUtility.FloorDivide(
+                            column.X,
+                            boundWorld.ChunkSizeX),
                         0,
-                        z / boundWorld.ChunkSizeZ));
+                        WorldCoordinateUtility.FloorDivide(
+                            column.Z,
+                            boundWorld.ChunkSizeZ)));
                 }
             }
 
@@ -300,18 +300,18 @@ namespace MiniCivilization.World.WaterFlow
             return result;
         }
 
-        private CellBounds BuildBounds(int[] cells)
+        private static CellBounds BuildBounds(CellCoordinate[] cells)
         {
             if (cells.Length == 0)
             {
                 return new CellBounds(default, default);
             }
 
-            var minimum = WorldIndex.DecodeCell(boundWorld, cells[0]);
+            var minimum = cells[0];
             var maximum = minimum;
             for (var index = 1; index < cells.Length; index++)
             {
-                var cell = WorldIndex.DecodeCell(boundWorld, cells[index]);
+                var cell = cells[index];
                 minimum = new CellCoordinate(
                     Math.Min(minimum.X, cell.X),
                     Math.Min(minimum.Y, cell.Y),
@@ -325,9 +325,10 @@ namespace MiniCivilization.World.WaterFlow
             return new CellBounds(minimum, maximum);
         }
 
-        private static int[] ToSortedArray(HashSet<int> source)
+        private static T[] ToSortedArray<T>(HashSet<T> source)
+            where T : IComparable<T>
         {
-            var result = new int[source.Count];
+            var result = new T[source.Count];
             source.CopyTo(result);
             Array.Sort(result);
             return result;

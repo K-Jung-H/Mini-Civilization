@@ -35,10 +35,7 @@ namespace MiniCivilization.World.Domain
             int minimumInlandLakeDepthSteps,
             int pondMaximumArea,
             WaterFlowRules waterFlowRules,
-            float desertMoistureThreshold,
-            float wetlandMoistureThreshold,
-            float snowTemperatureThreshold,
-            int waterMoistureRadius)
+            float coldClimateThreshold)
         {
             if (!float.IsFinite(cellSize) || cellSize <= 0f)
             {
@@ -101,10 +98,10 @@ namespace MiniCivilization.World.Domain
             MinimumInlandLakeDepthSteps = minimumInlandLakeDepthSteps;
             PondMaximumArea = pondMaximumArea;
             WaterFlowRules = waterFlowRules;
-            DesertMoistureThreshold = desertMoistureThreshold;
-            WetlandMoistureThreshold = wetlandMoistureThreshold;
-            SnowTemperatureThreshold = snowTemperatureThreshold;
-            WaterMoistureRadius = waterMoistureRadius;
+            ColdClimateThreshold = Math.Clamp(
+                coldClimateThreshold,
+                0f,
+                0.5f);
 
             if (SeaLevelUnits <= 0
                 || SeaLevelUnits >= WorldHeight * WorldGrid.HeightStepsPerCell)
@@ -150,9 +147,6 @@ namespace MiniCivilization.World.Domain
         public int MinimumInlandLakeDepthSteps { get; }
         public int PondMaximumArea { get; }
         public WaterFlowRules WaterFlowRules { get; }
-        public float DesertMoistureThreshold { get; }
-        public float WetlandMoistureThreshold { get; }
-        public float SnowTemperatureThreshold { get; }
-        public int WaterMoistureRadius { get; }
+        public float ColdClimateThreshold { get; }
     }
 }

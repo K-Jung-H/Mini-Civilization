@@ -6,26 +6,57 @@ namespace MiniCivilization.World.Runtime
 {
     public sealed class SurfaceCache
     {
+        private sealed class ColumnData
+        {
+            public ColumnData(int cellCount)
+            {
+                Heights = new SurfaceHeightData[cellCount];
+            }
+
+            public SurfaceHeightData[] Heights { get; }
+        }
+
         private readonly WorldData world;
-        private readonly SurfaceHeightData[] surfaceHeights;
+        private readonly Dictionary<ChunkColumnCoordinate, ColumnData> columns =
+            new();
 
         internal SurfaceCache(WorldData world)
         {
             this.world = world ?? throw new ArgumentNullException(nameof(world));
-            surfaceHeights = new SurfaceHeightData[world.Size * world.Size];
         }
 
-        public SurfaceHeightData GetSurfaceHeight(int x, int z) =>
+        public int PreparedColumnCount => columns.Count;
+
+        public bool IsPrepared(ChunkColumnCoordinate coordinate) =>
+            columns.ContainsKey(coordinate);
+
+        public bool IsPrepared(int x, int z) =>
             world.ContainsColumn(x, z)
-                ? surfaceHeights[x + world.Size * z]
-                : default;
+            && columns.ContainsKey(ToChunkColumn(x, z));
+
+        public SurfaceHeightData GetSurfaceHeight(int x, int z)
+        {
+            if (!world.ContainsColumn(x, z))
+            {
+                return default;
+            }
+
+            var coordinate = ToChunkColumn(x, z);
+            if (columns.TryGetValue(coordinate, out var column))
+            {
+                return column.Heights[ToLocalColumnIndex(coordinate, x, z)];
+            }
+
+            return ResolveSurfaceHeight(x, z);
+        }
 
         public void RebuildAll()
         {
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            columns.Clear();
+            for (var chunkZ = 0; chunkZ < world.ChunkCountZ; chunkZ++)
+            for (var chunkX = 0; chunkX < world.ChunkCountX; chunkX++)
             {
-                Rebuild(x, z);
+                PrepareColumn(new ChunkColumnCoordinate(chunkX, chunkZ));
             }
         }
 
@@ -37,6 +68,44 @@ namespace MiniCivilization.World.Runtime
                     $"World column ({x}, {z}) is outside the world.");
             }
 
+            var coordinate = ToChunkColumn(x, z);
+            if (columns.TryGetValue(coordinate, out var column))
+            {
+                column.Heights[ToLocalColumnIndex(coordinate, x, z)] =
+                    ResolveSurfaceHeight(x, z);
+            }
+        }
+
+        internal bool PrepareColumn(ChunkColumnCoordinate coordinate)
+        {
+            ValidateChunkColumn(coordinate);
+            if (columns.ContainsKey(coordinate))
+            {
+                return false;
+            }
+
+            var column = new ColumnData(
+                checked(world.ChunkSizeX * world.ChunkSizeZ));
+            columns.Add(coordinate, column);
+            var startX = coordinate.X * world.ChunkSizeX;
+            var startZ = coordinate.Z * world.ChunkSizeZ;
+            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            for (var z = startZ; z < endZ; z++)
+            for (var x = startX; x < endX; x++)
+            {
+                column.Heights[ToLocalColumnIndex(coordinate, x, z)] =
+                    ResolveSurfaceHeight(x, z);
+            }
+
+            return true;
+        }
+
+        internal bool ReleaseColumn(ChunkColumnCoordinate coordinate) =>
+            columns.Remove(coordinate);
+
+        private SurfaceHeightData ResolveSurfaceHeight(int x, int z)
+        {
             var groundHeight = 0;
             var waterHeight = 0;
             for (var y = world.Height - 1; y >= 0; y--)
@@ -66,11 +135,30 @@ namespace MiniCivilization.World.Runtime
                 waterHeight = 0;
             }
 
-            surfaceHeights[x + world.Size * z] = new SurfaceHeightData
+            return new SurfaceHeightData
             {
                 GroundHeight = groundHeight,
                 WaterHeight = waterHeight
             };
+        }
+
+        private ChunkColumnCoordinate ToChunkColumn(int x, int z) =>
+            WorldCoordinateUtility.ToChunkColumn(x, z, world.ChunkSizeX);
+
+        private int ToLocalColumnIndex(
+            ChunkColumnCoordinate coordinate,
+            int x,
+            int z) =>
+            x - coordinate.X * world.ChunkSizeX
+            + world.ChunkSizeX * (z - coordinate.Z * world.ChunkSizeZ);
+
+        private void ValidateChunkColumn(ChunkColumnCoordinate coordinate)
+        {
+            if ((uint)coordinate.X >= world.ChunkCountX
+                || (uint)coordinate.Z >= world.ChunkCountZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(coordinate));
+            }
         }
     }
 
@@ -81,13 +169,26 @@ namespace MiniCivilization.World.Runtime
             (1, 0), (-1, 0), (0, 1), (0, -1)
         };
 
+        private sealed class ColumnData
+        {
+            public ColumnData(int horizontalCellCount, int worldHeight)
+            {
+                OpenHeights = new ushort[checked(
+                    horizontalCellCount * worldHeight)];
+                WaterDistances = new ushort[horizontalCellCount];
+                WetColumns = new bool[horizontalCellCount];
+            }
+
+            public ushort[] OpenHeights { get; }
+            public ushort[] WaterDistances { get; }
+            public bool[] WetColumns { get; }
+        }
+
         private readonly WorldData world;
         private readonly SurfaceCache surface;
-        private ushort[] openHeights;
-        private ushort[] waterDistances;
-        private bool[] wetColumns;
-        private Queue<int> waterQueue;
-        private readonly HashSet<int> affectedWaterColumns = new();
+        private readonly Dictionary<ChunkColumnCoordinate, ColumnData> columns =
+            new();
+        private readonly Queue<CellColumnCoordinate> waterQueue = new();
 
         internal NavigationCache(WorldData world, SurfaceCache surface)
         {
@@ -95,386 +196,238 @@ namespace MiniCivilization.World.Runtime
             this.surface = surface ?? throw new ArgumentNullException(nameof(surface));
         }
 
-        public bool HasData => openHeights != null;
+        public bool HasData => columns.Count > 0;
+        public int PreparedColumnCount => columns.Count;
+
+        public bool IsPrepared(ChunkColumnCoordinate coordinate) =>
+            columns.ContainsKey(coordinate);
 
         public PathData GetPathData(int x, int y, int z)
         {
-            if (!world.Contains(x, y, z) || openHeights == null)
+            if (!world.Contains(x, y, z)
+                || !TryGetColumnData(x, z, out var coordinate, out var column))
             {
                 return default;
             }
 
-            var columnIndex = x + world.Size * z;
+            var localColumnIndex = ToLocalColumnIndex(coordinate, x, z);
             return new PathData
             {
-                OpenHeight = openHeights[WorldIndex.EncodeCell(world, x, y, z)],
+                OpenHeight = column.OpenHeights[
+                    localColumnIndex + HorizontalCellCount * y],
                 WaterDistance = y == surface.GetSurfaceHeight(x, z).GroundCellY
-                    ? waterDistances[columnIndex]
+                    ? column.WaterDistances[localColumnIndex]
                     : (ushort)0
             };
         }
 
-        public void RebuildAll()
+        public void RebuildColumns(IEnumerable<CellColumnCoordinate> changedColumns)
         {
-            EnsureData();
-            RebuildAllOpenHeights();
-            RebuildWaterDistances();
-        }
-
-        public void RebuildColumns(IEnumerable<int> columnIndices)
-        {
-            if (columnIndices == null)
+            if (changedColumns == null)
             {
                 return;
             }
 
-            EnsureData();
-            foreach (var columnIndex in columnIndices)
+            foreach (var changed in changedColumns)
             {
-                if ((uint)columnIndex >= (uint)(world.Size * world.Size))
+                if (!world.ContainsColumn(changed.X, changed.Z)
+                    || !TryGetColumnData(
+                        changed.X,
+                        changed.Z,
+                        out var coordinate,
+                        out var column))
                 {
                     continue;
                 }
 
                 RebuildOpenHeightColumn(
-                    columnIndex % world.Size,
-                    columnIndex / world.Size);
+                    coordinate,
+                    column,
+                    changed.X,
+                    changed.Z);
             }
         }
 
         public void RebuildWaterDistances()
         {
-            EnsureData();
-            Array.Fill(waterDistances, ushort.MaxValue);
-            Array.Clear(wetColumns, 0, wetColumns.Length);
             waterQueue.Clear();
-
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            foreach (var pair in columns)
             {
-                var columnIndex = x + world.Size * z;
-                var column = surface.GetSurfaceHeight(x, z);
-                if (!column.HasGround)
+                var coordinate = pair.Key;
+                var column = pair.Value;
+                var startX = coordinate.X * world.ChunkSizeX;
+                var startZ = coordinate.Z * world.ChunkSizeZ;
+                var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+                var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+                for (var z = startZ; z < endZ; z++)
+                for (var x = startX; x < endX; x++)
                 {
-                    waterDistances[columnIndex] = 0;
-                    continue;
-                }
-
-                wetColumns[columnIndex] = column.WaterHeight > column.GroundHeight;
-                if (!wetColumns[columnIndex])
-                {
-                    waterDistances[columnIndex] = 0;
+                    var localIndex = ToLocalColumnIndex(coordinate, x, z);
+                    var height = surface.GetSurfaceHeight(x, z);
+                    var wet = height.HasGround
+                        && height.WaterHeight > height.GroundHeight;
+                    column.WetColumns[localIndex] = wet;
+                    column.WaterDistances[localIndex] = wet
+                        ? ushort.MaxValue
+                        : (ushort)0;
                 }
             }
 
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            foreach (var pair in columns)
             {
-                var index = x + world.Size * z;
-                if (!wetColumns[index] || !HasDryNeighbor(x, z))
+                var coordinate = pair.Key;
+                var column = pair.Value;
+                var startX = coordinate.X * world.ChunkSizeX;
+                var startZ = coordinate.Z * world.ChunkSizeZ;
+                var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+                var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+                for (var z = startZ; z < endZ; z++)
+                for (var x = startX; x < endX; x++)
                 {
-                    continue;
-                }
+                    var localIndex = ToLocalColumnIndex(coordinate, x, z);
+                    if (!column.WetColumns[localIndex]
+                        || !HasPreparedDryNeighbor(x, z))
+                    {
+                        continue;
+                    }
 
-                waterDistances[index] = 1;
-                waterQueue.Enqueue(index);
+                    column.WaterDistances[localIndex] = 1;
+                    waterQueue.Enqueue(new CellColumnCoordinate(x, z));
+                }
             }
 
             while (waterQueue.Count > 0)
             {
-                var index = waterQueue.Dequeue();
-                var x = index % world.Size;
-                var z = index / world.Size;
-                var nextDistance = waterDistances[index] == ushort.MaxValue
-                    ? ushort.MaxValue
-                    : (ushort)Math.Min(ushort.MaxValue, waterDistances[index] + 1);
-                for (var directionIndex = 0; directionIndex < Directions.Length; directionIndex++)
+                var current = waterQueue.Dequeue();
+                if (!TryGetColumnData(
+                        current.X,
+                        current.Z,
+                        out var currentCoordinate,
+                        out var currentColumn))
                 {
-                    var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
-                    if (!world.ContainsColumn(nextX, nextZ))
-                    {
-                        continue;
-                    }
-
-                    var nextIndex = nextX + world.Size * nextZ;
-                    if (!wetColumns[nextIndex]
-                        || waterDistances[nextIndex] <= nextDistance)
-                    {
-                        continue;
-                    }
-
-                    waterDistances[nextIndex] = nextDistance;
-                    waterQueue.Enqueue(nextIndex);
-                }
-            }
-
-            bool HasDryNeighbor(int x, int z)
-            {
-                for (var directionIndex = 0; directionIndex < Directions.Length; directionIndex++)
-                {
-                    var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
-                    if (!world.ContainsColumn(nextX, nextZ))
-                    {
-                        continue;
-                    }
-
-                    var nextIndex = nextX + world.Size * nextZ;
-                    if (surface.GetSurfaceHeight(nextX, nextZ).HasGround
-                        && !wetColumns[nextIndex])
-                    {
-                        return true;
-                    }
+                    continue;
                 }
 
-                return false;
+                var currentIndex = ToLocalColumnIndex(
+                    currentCoordinate,
+                    current.X,
+                    current.Z);
+                var nextDistance = currentColumn.WaterDistances[currentIndex]
+                    == ushort.MaxValue
+                        ? ushort.MaxValue
+                        : (ushort)Math.Min(
+                            ushort.MaxValue,
+                            currentColumn.WaterDistances[currentIndex] + 1);
+                for (var directionIndex = 0;
+                     directionIndex < Directions.Length;
+                     directionIndex++)
+                {
+                    var direction = Directions[directionIndex];
+                    var nextX = current.X + direction.x;
+                    var nextZ = current.Z + direction.z;
+                    if (!TryGetColumnData(
+                            nextX,
+                            nextZ,
+                            out var nextCoordinate,
+                            out var nextColumn))
+                    {
+                        continue;
+                    }
+
+                    var nextIndex = ToLocalColumnIndex(
+                        nextCoordinate,
+                        nextX,
+                        nextZ);
+                    if (!nextColumn.WetColumns[nextIndex]
+                        || nextColumn.WaterDistances[nextIndex] <= nextDistance)
+                    {
+                        continue;
+                    }
+
+                    nextColumn.WaterDistances[nextIndex] = nextDistance;
+                    waterQueue.Enqueue(new CellColumnCoordinate(nextX, nextZ));
+                }
             }
         }
 
         public void RebuildWaterDistances(
-            IReadOnlyList<int> changedColumns)
+            IReadOnlyList<CellColumnCoordinate> changedColumns)
         {
-            EnsureData();
             if (changedColumns == null || changedColumns.Count == 0)
             {
                 return;
             }
 
-            var maximumPartialColumns = Math.Max(
-                1,
-                waterDistances.Length / 4);
-            if (changedColumns.Count > maximumPartialColumns)
-            {
-                RebuildWaterDistances();
-                return;
-            }
-
-            affectedWaterColumns.Clear();
             for (var index = 0; index < changedColumns.Count; index++)
             {
-                var columnIndex = changedColumns[index];
-                if ((uint)columnIndex >= (uint)waterDistances.Length)
-                {
-                    continue;
-                }
-
-                RefreshWaterColumnState(columnIndex);
-                if (!CollectAffectedWaterComponent(
-                        columnIndex,
-                        maximumPartialColumns))
+                var changed = changedColumns[index];
+                if (IsPreparedCellColumn(changed.X, changed.Z)
+                    || HasPreparedNeighbor(changed.X, changed.Z))
                 {
                     RebuildWaterDistances();
                     return;
                 }
-
-                var x = columnIndex % world.Size;
-                var z = columnIndex / world.Size;
-                for (var directionIndex = 0;
-                     directionIndex < Directions.Length;
-                     directionIndex++)
-                {
-                    var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
-                    if (!world.ContainsColumn(nextX, nextZ)
-                        || !CollectAffectedWaterComponent(
-                            nextX + world.Size * nextZ,
-                            maximumPartialColumns))
-                    {
-                        if (!world.ContainsColumn(nextX, nextZ))
-                        {
-                            continue;
-                        }
-
-                        RebuildWaterDistances();
-                        return;
-                    }
-                }
             }
-
-            RebuildAffectedWaterDistances();
         }
 
-        private bool CollectAffectedWaterComponent(
-            int startIndex,
-            int maximumPartialColumns)
+        internal bool PrepareColumn(
+            ChunkColumnCoordinate coordinate,
+            bool rebuildWaterDistances)
         {
-            RefreshWaterColumnState(startIndex);
-            if (!wetColumns[startIndex]
-                || affectedWaterColumns.Contains(startIndex))
+            ValidateChunkColumn(coordinate);
+            if (columns.ContainsKey(coordinate))
             {
-                return true;
+                return false;
             }
 
-            waterQueue.Clear();
-            waterQueue.Enqueue(startIndex);
-            affectedWaterColumns.Add(startIndex);
-            while (waterQueue.Count > 0)
+            var column = new ColumnData(HorizontalCellCount, world.Height);
+            columns.Add(coordinate, column);
+            var startX = coordinate.X * world.ChunkSizeX;
+            var startZ = coordinate.Z * world.ChunkSizeZ;
+            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            for (var z = startZ; z < endZ; z++)
+            for (var x = startX; x < endX; x++)
             {
-                var index = waterQueue.Dequeue();
-                if (affectedWaterColumns.Count > maximumPartialColumns)
-                {
-                    waterQueue.Clear();
-                    return false;
-                }
+                RebuildOpenHeightColumn(coordinate, column, x, z);
+            }
 
-                var x = index % world.Size;
-                var z = index / world.Size;
-                for (var directionIndex = 0;
-                     directionIndex < Directions.Length;
-                     directionIndex++)
-                {
-                    var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
-                    if (!world.ContainsColumn(nextX, nextZ))
-                    {
-                        continue;
-                    }
-
-                    var nextIndex = nextX + world.Size * nextZ;
-                    RefreshWaterColumnState(nextIndex);
-                    if (!wetColumns[nextIndex]
-                        || !affectedWaterColumns.Add(nextIndex))
-                    {
-                        continue;
-                    }
-
-                    waterQueue.Enqueue(nextIndex);
-                }
+            if (rebuildWaterDistances)
+            {
+                RebuildWaterDistances();
             }
 
             return true;
         }
 
-        private void RebuildAffectedWaterDistances()
+        internal bool ReleaseColumn(
+            ChunkColumnCoordinate coordinate,
+            bool rebuildWaterDistances)
         {
-            if (affectedWaterColumns.Count == 0)
+            if (!columns.Remove(coordinate))
             {
-                return;
+                return false;
             }
 
-            waterQueue.Clear();
-            foreach (var index in affectedWaterColumns)
+            if (rebuildWaterDistances)
             {
-                waterDistances[index] = ushort.MaxValue;
+                RebuildWaterDistances();
             }
 
-            foreach (var index in affectedWaterColumns)
-            {
-                var x = index % world.Size;
-                var z = index / world.Size;
-                if (!HasDryNeighbor(x, z))
-                {
-                    continue;
-                }
-
-                waterDistances[index] = 1;
-                waterQueue.Enqueue(index);
-            }
-
-            while (waterQueue.Count > 0)
-            {
-                var index = waterQueue.Dequeue();
-                var x = index % world.Size;
-                var z = index / world.Size;
-                var nextDistance = (ushort)Math.Min(
-                    ushort.MaxValue,
-                    waterDistances[index] + 1);
-                for (var directionIndex = 0;
-                     directionIndex < Directions.Length;
-                     directionIndex++)
-                {
-                    var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
-                    if (!world.ContainsColumn(nextX, nextZ))
-                    {
-                        continue;
-                    }
-
-                    var nextIndex = nextX + world.Size * nextZ;
-                    if (!affectedWaterColumns.Contains(nextIndex)
-                        || waterDistances[nextIndex] <= nextDistance)
-                    {
-                        continue;
-                    }
-
-                    waterDistances[nextIndex] = nextDistance;
-                    waterQueue.Enqueue(nextIndex);
-                }
-            }
+            return true;
         }
 
-        private void RefreshWaterColumnState(int columnIndex)
+        private void RebuildOpenHeightColumn(
+            ChunkColumnCoordinate coordinate,
+            ColumnData column,
+            int x,
+            int z)
         {
-            var x = columnIndex % world.Size;
-            var z = columnIndex / world.Size;
-            var column = surface.GetSurfaceHeight(x, z);
-            wetColumns[columnIndex] = column.HasGround
-                && column.WaterHeight > column.GroundHeight;
-            if (!wetColumns[columnIndex])
-            {
-                waterDistances[columnIndex] = 0;
-            }
-        }
-
-        private bool HasDryNeighbor(int x, int z)
-        {
-            for (var directionIndex = 0;
-                 directionIndex < Directions.Length;
-                 directionIndex++)
-            {
-                var direction = Directions[directionIndex];
-                var nextX = x + direction.x;
-                var nextZ = z + direction.z;
-                if (!world.ContainsColumn(nextX, nextZ))
-                {
-                    continue;
-                }
-
-                var nextIndex = nextX + world.Size * nextZ;
-                var next = surface.GetSurfaceHeight(nextX, nextZ);
-                if (next.HasGround && !wetColumns[nextIndex])
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void EnsureData()
-        {
-            if (openHeights != null)
-            {
-                return;
-            }
-
-            openHeights = new ushort[checked(world.Size * world.Size * world.Height)];
-            waterDistances = new ushort[checked(world.Size * world.Size)];
-            wetColumns = new bool[waterDistances.Length];
-            waterQueue = new Queue<int>(waterDistances.Length);
-        }
-
-        private void RebuildAllOpenHeights()
-        {
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
-            {
-                RebuildOpenHeightColumn(x, z);
-            }
-        }
-
-        private void RebuildOpenHeightColumn(int x, int z)
-        {
-            var firstIndex = WorldIndex.EncodeCell(world, x, 0, z);
+            var localColumnIndex = ToLocalColumnIndex(coordinate, x, z);
             for (var y = 0; y < world.Height; y++)
             {
-                openHeights[firstIndex + world.Size * world.Size * y] = 0;
+                column.OpenHeights[
+                    localColumnIndex + HorizontalCellCount * y] = 0;
             }
 
             var ceiling = world.Height * WorldGrid.HeightStepsPerCell;
@@ -486,10 +439,111 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var floor = y * WorldGrid.HeightStepsPerCell + cell.Terrain.SolidHeight;
-                openHeights[WorldIndex.EncodeCell(world, x, y, z)] =
-                    checked((ushort)Math.Clamp(ceiling - floor, 0, ushort.MaxValue));
+                var floor = y * WorldGrid.HeightStepsPerCell
+                    + cell.Terrain.SolidHeight;
+                column.OpenHeights[
+                    localColumnIndex + HorizontalCellCount * y] =
+                    checked((ushort)Math.Clamp(
+                        ceiling - floor,
+                        0,
+                        ushort.MaxValue));
                 ceiling = y * WorldGrid.HeightStepsPerCell;
+            }
+        }
+
+        private bool HasPreparedDryNeighbor(int x, int z)
+        {
+            for (var directionIndex = 0;
+                 directionIndex < Directions.Length;
+                 directionIndex++)
+            {
+                var direction = Directions[directionIndex];
+                var nextX = x + direction.x;
+                var nextZ = z + direction.z;
+                if (!TryGetColumnData(
+                        nextX,
+                        nextZ,
+                        out var coordinate,
+                        out var column))
+                {
+                    continue;
+                }
+
+                var index = ToLocalColumnIndex(
+                    coordinate,
+                    nextX,
+                    nextZ);
+                if (!column.WetColumns[index]
+                    && surface.GetSurfaceHeight(nextX, nextZ).HasGround)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasPreparedNeighbor(int x, int z)
+        {
+            for (var directionIndex = 0;
+                 directionIndex < Directions.Length;
+                 directionIndex++)
+            {
+                var direction = Directions[directionIndex];
+                if (IsPreparedCellColumn(
+                    x + direction.x,
+                    z + direction.z))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsPreparedCellColumn(int x, int z) =>
+            world.ContainsColumn(x, z)
+            && columns.ContainsKey(WorldCoordinateUtility.ToChunkColumn(
+                x,
+                z,
+                world.ChunkSizeX));
+
+        private bool TryGetColumnData(
+            int x,
+            int z,
+            out ChunkColumnCoordinate coordinate,
+            out ColumnData column)
+        {
+            if (!world.ContainsColumn(x, z))
+            {
+                coordinate = default;
+                column = null;
+                return false;
+            }
+
+            coordinate = WorldCoordinateUtility.ToChunkColumn(
+                x,
+                z,
+                world.ChunkSizeX);
+            return columns.TryGetValue(coordinate, out column);
+        }
+
+        private int HorizontalCellCount =>
+            checked(world.ChunkSizeX * world.ChunkSizeZ);
+
+        private int ToLocalColumnIndex(
+            ChunkColumnCoordinate coordinate,
+            int x,
+            int z) =>
+            x - coordinate.X * world.ChunkSizeX
+            + world.ChunkSizeX * (z - coordinate.Z * world.ChunkSizeZ);
+
+        private void ValidateChunkColumn(ChunkColumnCoordinate coordinate)
+        {
+            if ((uint)coordinate.X >= world.ChunkCountX
+                || (uint)coordinate.Z >= world.ChunkCountZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(coordinate));
             }
         }
     }

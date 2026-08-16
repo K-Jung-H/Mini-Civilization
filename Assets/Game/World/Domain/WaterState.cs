@@ -6,24 +6,24 @@ namespace MiniCivilization.World.Domain
     [Serializable]
     public sealed class WaterFlowScheduleData
     {
-        private int[] frontierCellIndices = Array.Empty<int>();
+        private CellCoordinate[] frontierCells = Array.Empty<CellCoordinate>();
 
-        public IReadOnlyList<int> FrontierCellIndices => frontierCellIndices;
-        public bool HasPendingFlow => frontierCellIndices.Length > 0;
+        public IReadOnlyList<CellCoordinate> FrontierCells => frontierCells;
+        public bool HasPendingFlow => frontierCells.Length > 0;
 
-        internal void ReplaceFrontier(IReadOnlyCollection<int> values)
+        internal void ReplaceFrontier(IReadOnlyCollection<CellCoordinate> values)
         {
             if (values == null || values.Count == 0)
             {
-                frontierCellIndices = Array.Empty<int>();
+                frontierCells = Array.Empty<CellCoordinate>();
                 return;
             }
 
-            frontierCellIndices = new int[values.Count];
+            frontierCells = new CellCoordinate[values.Count];
             var index = 0;
             foreach (var value in values)
             {
-                frontierCellIndices[index++] = value;
+                frontierCells[index++] = value;
             }
         }
     }

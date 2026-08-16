@@ -32,7 +32,6 @@ namespace MiniCivilization.World.Interaction
         {
             var cell = snapshot.Cell;
             var column = cell.SurfaceHeight;
-            var environment = cell.Environment;
             var waterBody = snapshot.WaterBody;
             var waterText = cell.HasWater
                 ? $"Amount: {cell.Water.Amount * WaterAmount.Unit:0.00} " +
@@ -54,18 +53,17 @@ namespace MiniCivilization.World.Interaction
             return new WorldTileInfoViewModel(
                 "Selected Cell",
                 $"X {snapshot.Pick.Cell.X}   Y {snapshot.Pick.Cell.Y}   Z {snapshot.Pick.Cell.Z}",
-                $"Biome: {environment.Biome}\n" +
+                $"Climate: {cell.Biome.Climate}\n" +
+                $"Terrain biome: {cell.Biome.Terrain}\n" +
+                $"Water biome: {cell.Biome.Water}\n" +
                 $"Material: {cell.Terrain.Material}\n" +
                 $"Geology: {cell.Terrain.Geology}\n" +
-                $"Solid fill: {cell.Terrain.SolidHeight}/{WorldGrid.HeightStepsPerCell}\n" +
-                $"Temperature: {environment.Temperature}\n" +
-                $"Moisture: {environment.Moisture}\n" +
-                $"Fertility: {environment.Fertility}",
+                $"Solid fill: {cell.Terrain.SolidHeight}/{WorldGrid.HeightStepsPerCell}",
                 waterText,
                 $"Picked surface: {snapshot.Pick.SurfaceType}\n" +
                 $"Surface type: {cell.Terrain.Surface}\n" +
                 $"Column ground top: {column.GroundHeight}",
-                $"Cell index: {snapshot.Pick.CellIndex}\n" +
+                $"Cell: {snapshot.Pick.Cell}\n" +
                 $"Resource: {cell.Terrain.ResourceId}\n" +
                 $"Open height: {cell.Path.OpenHeight}\n" +
                 $"Water distance: {cell.Path.WaterDistance}");

@@ -33,7 +33,7 @@ namespace MiniCivilization.World.Runtime
     {
         private readonly Dictionary<BuildingWayLocation, int>
             nodeByBuildingPoint;
-        private readonly Dictionary<int, List<int>> buildingNodesByCell;
+        private readonly Dictionary<CellCoordinate, List<int>> buildingNodesByCell;
         private readonly List<ExternalPort> externalPorts;
         private readonly Dictionary<int, BuildingWayLocation>
             buildingLocationByNode;
@@ -43,7 +43,7 @@ namespace MiniCivilization.World.Runtime
             int[] neighborOffsets,
             int[] neighbors,
             Dictionary<BuildingWayLocation, int> nodeByBuildingPoint,
-            Dictionary<int, List<int>> buildingNodesByCell,
+            Dictionary<CellCoordinate, List<int>> buildingNodesByCell,
             List<ExternalPort> externalPorts,
             Dictionary<int, BuildingWayLocation> buildingLocationByNode)
         {
@@ -109,9 +109,7 @@ namespace MiniCivilization.World.Runtime
         {
             location = default;
             if (!world.Contains(cell.X, cell.Y, cell.Z)
-                || !buildingNodesByCell.TryGetValue(
-                    WorldIndex.EncodeCell(world, cell.X, cell.Y, cell.Z),
-                    out var nodes)
+                || !buildingNodesByCell.TryGetValue(cell, out var nodes)
                 || nodes.Count == 0)
             {
                 return false;
@@ -135,13 +133,8 @@ namespace MiniCivilization.World.Runtime
                 && nodeByBuildingPoint.TryGetValue(
                     currentLocation,
                     out currentNode);
-            var nextCellIndex = WorldIndex.EncodeCell(
-                world,
-                nextCell.X,
-                nextCell.Y,
-                nextCell.Z);
             var nextIsBuilding = buildingNodesByCell.TryGetValue(
-                nextCellIndex,
+                nextCell,
                 out var nextNodes)
                 && nextNodes.Count != 0;
 
@@ -316,7 +309,7 @@ namespace MiniCivilization.World.Runtime
                 buildingLocationByNode = new();
             private readonly Dictionary<BuildingWayLocation, int>
                 nodeByBuildingPoint = new();
-            private readonly Dictionary<int, List<int>> buildingNodesByCell =
+            private readonly Dictionary<CellCoordinate, List<int>> buildingNodesByCell =
                 new();
             private readonly List<ExternalPort> externalPorts = new();
             private readonly Dictionary<RoadBoundaryKey, int> roadBoundaryNodes =
@@ -366,17 +359,12 @@ namespace MiniCivilization.World.Runtime
                         var cell = layout.ToWorld(
                             building.Data,
                             point.LocalCellOffset);
-                        var cellIndex = WorldIndex.EncodeCell(
-                            runtime.Data,
-                            cell.X,
-                            cell.Y,
-                            cell.Z);
                         if (!buildingNodesByCell.TryGetValue(
-                                cellIndex,
+                                cell,
                                 out var nodes))
                         {
                             nodes = new List<int>();
-                            buildingNodesByCell.Add(cellIndex, nodes);
+                            buildingNodesByCell.Add(cell, nodes);
                         }
 
                         nodes.Add(node);
@@ -522,19 +510,15 @@ namespace MiniCivilization.World.Runtime
                     return;
                 }
 
-                WorldIndex.DecodeColumn(
-                    runtime.Data,
-                    connection.NeighborColumn,
-                    out var neighborX,
-                    out var neighborZ);
+                var neighborX = connection.NeighborColumn.X;
+                var neighborZ = connection.NeighborColumn.Z;
                 if (!roadTopology.TryGet(neighborX, neighborZ, out var neighbor))
                 {
                     return;
                 }
 
                 var key = new RoadBoundaryKey(
-                    WorldIndex.EncodeColumn(
-                        runtime.Data,
+                    new CellColumnCoordinate(
                         road.Road.Cell.X,
                         road.Road.Cell.Z),
                     connection.NeighborColumn);
@@ -597,17 +581,27 @@ namespace MiniCivilization.World.Runtime
             private readonly struct RoadBoundaryKey :
                 IEquatable<RoadBoundaryKey>
             {
-                private readonly int first;
-                private readonly int second;
+                private readonly CellColumnCoordinate first;
+                private readonly CellColumnCoordinate second;
 
-                public RoadBoundaryKey(int a, int b)
+                public RoadBoundaryKey(
+                    CellColumnCoordinate a,
+                    CellColumnCoordinate b)
                 {
-                    first = Math.Min(a, b);
-                    second = Math.Max(a, b);
+                    if (a.CompareTo(b) <= 0)
+                    {
+                        first = a;
+                        second = b;
+                    }
+                    else
+                    {
+                        first = b;
+                        second = a;
+                    }
                 }
 
                 public bool Equals(RoadBoundaryKey other) =>
-                    first == other.first && second == other.second;
+                    first.Equals(other.first) && second.Equals(other.second);
 
                 public override bool Equals(object obj) =>
                     obj is RoadBoundaryKey other && Equals(other);

@@ -124,18 +124,10 @@ namespace MiniCivilization.World.Generation
         private float dissipationAmountLoss = 0.05f;
 
         [Header("바이옴 판정")]
-        [Tooltip("수분 값이 이 값 이하인 육지를 사막으로 판정합니다.")]
-        [InspectorName("사막 건조 기준")]
-        [SerializeField, Range(0f, 1f)] private float desertMoistureThreshold = 0.28f;
-        [Tooltip("수분 값이 이 값 이상이고 주변에 물의 영향이 있는 육지를 습지로 판정합니다.")]
-        [InspectorName("습지 수분 기준")]
-        [SerializeField, Range(0f, 1f)] private float wetlandMoistureThreshold = 0.72f;
-        [Tooltip("온도 값이 이 값 이하인 육지를 툰드라로 판정하고 눈 재질을 적용합니다.")]
-        [InspectorName("설원 온도 기준")]
-        [SerializeField, Range(0f, 1f)] private float snowTemperatureThreshold = 0.24f;
-        [Tooltip("바다, 강과 호수가 주변 타일의 수분에 영향을 주는 탐색 반지름입니다. 단위는 타일입니다.")]
-        [InspectorName("물 영향 거리")]
-        [SerializeField, Range(1, 12)] private int waterMoistureRadius = 6;
+        [Tooltip("계산된 기후 값이 이 값 이하이면 Cold, 1에서 이 값을 뺀 값 이상이면 Warm으로 판정합니다.")]
+        [InspectorName("한랭 기후 기준")]
+        [SerializeField, Range(0f, 0.5f)]
+        private float coldClimateThreshold = 0.24f;
 
         public float CellSize => cellSize;
         public float HeightStep => cellSize / WorldGrid.HeightStepsPerCell;
@@ -181,10 +173,7 @@ namespace MiniCivilization.World.Generation
             spreadAmountLoss,
             minimumSpreadAmount,
             dissipationAmountLoss);
-        public float DesertMoistureThreshold => desertMoistureThreshold;
-        public float WetlandMoistureThreshold => wetlandMoistureThreshold;
-        public float SnowTemperatureThreshold => snowTemperatureThreshold;
-        public int WaterMoistureRadius => waterMoistureRadius;
+        public float ColdClimateThreshold => coldClimateThreshold;
 
         public WorldSettingsData CreateData(int seed) => new(
             seed,
@@ -217,10 +206,7 @@ namespace MiniCivilization.World.Generation
             MinimumInlandLakeDepthSteps,
             PondMaximumArea,
             WaterFlowRules,
-            DesertMoistureThreshold,
-            WetlandMoistureThreshold,
-            SnowTemperatureThreshold,
-            WaterMoistureRadius);
+            ColdClimateThreshold);
 
         public void ConfigureDimensions(
             int size,
@@ -330,6 +316,10 @@ namespace MiniCivilization.World.Generation
                 dissipationAmountLoss,
                 WaterAmount.Unit,
                 1f);
+            coldClimateThreshold = Math.Clamp(
+                coldClimateThreshold,
+                0f,
+                0.5f);
         }
     }
 }

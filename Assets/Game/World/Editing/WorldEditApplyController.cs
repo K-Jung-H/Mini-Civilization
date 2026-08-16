@@ -22,9 +22,9 @@ namespace MiniCivilization.World.Editing
         private readonly List<CellCoordinate> remappedCells = new();
         private readonly List<CellCoordinate> validCells = new();
         private readonly List<CellCoordinate> invalidCells = new();
-        private readonly HashSet<int> selectedColumns = new();
-        private readonly HashSet<int> selectedTerrainCells = new();
-        private readonly Dictionary<int, int> shiftedColumnBottoms = new();
+        private readonly HashSet<CellColumnCoordinate> selectedColumns = new();
+        private readonly HashSet<CellCoordinate> selectedTerrainCells = new();
+        private readonly Dictionary<CellColumnCoordinate, int> shiftedColumnBottoms = new();
 
         private bool isSubscribed;
 
@@ -273,9 +273,6 @@ namespace MiniCivilization.World.Editing
             {
                 case WorldEditPropertyGroup.Terrain:
                     ApplyTerrain(world, action.TerrainOperation);
-                    return true;
-                case WorldEditPropertyGroup.Biome:
-                    ApplyBiome(world, action.Biome);
                     return true;
                 case WorldEditPropertyGroup.Road:
                     return ApplyRoad(
@@ -536,17 +533,11 @@ namespace MiniCivilization.World.Editing
                                 continue;
                             }
 
-                            selectedTerrainCells.Add(
-                                WorldIndex.EncodeCell(
-                                    world,
-                                    coordinate.X,
-                                    coordinate.Y,
-                                    coordinate.Z));
-                            var columnIndex = WorldIndex.EncodeColumn(
-                                world,
+                            selectedTerrainCells.Add(coordinate);
+                            var column = new CellColumnCoordinate(
                                 coordinate.X,
                                 coordinate.Z);
-                            if (!selectedColumns.Add(columnIndex))
+                            if (!selectedColumns.Add(column))
                             {
                                 continue;
                             }
@@ -569,7 +560,7 @@ namespace MiniCivilization.World.Editing
                             if (shifted)
                             {
                                 shiftedColumnBottoms.Add(
-                                    columnIndex,
+                                    column,
                                     lowestSolidY);
                             }
                         }
@@ -600,46 +591,6 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private void ApplyBiome(WorldData world, BiomeType biome)
-        {
-            if (biome == BiomeType.None)
-            {
-                return;
-            }
-
-            selectedColumns.Clear();
-            var transaction = editController.BeginTransaction();
-            try
-            {
-                for (var index = 0; index < selectedCells.Count; index++)
-                {
-                    var coordinate = selectedCells[index];
-                    var columnIndex = WorldIndex.EncodeColumn(
-                        world,
-                        coordinate.X,
-                        coordinate.Z);
-                    if (selectedColumns.Add(columnIndex))
-                    {
-                        transaction.SetBiome(
-                            coordinate.X,
-                            coordinate.Z,
-                            biome);
-                    }
-                }
-
-                transaction.Commit();
-            }
-            catch
-            {
-                if (!transaction.IsCompleted)
-                {
-                    transaction.Rollback();
-                }
-
-                throw;
-            }
-        }
-
         private void RemapShiftedSelection(
             WorldData world,
             TerrainEditOperation operation)
@@ -648,20 +599,14 @@ namespace MiniCivilization.World.Editing
             for (var index = 0; index < selectedCells.Count; index++)
             {
                 var coordinate = selectedCells[index];
-                var columnIndex = WorldIndex.EncodeColumn(
-                    world,
+                var column = new CellColumnCoordinate(
                     coordinate.X,
                     coordinate.Z);
                 var remapped = coordinate;
                 if (shiftedColumnBottoms.TryGetValue(
-                        columnIndex,
+                        column,
                         out var lowestSolidY)
-                    && selectedTerrainCells.Contains(
-                        WorldIndex.EncodeCell(
-                            world,
-                            coordinate.X,
-                            coordinate.Y,
-                            coordinate.Z)))
+                    && selectedTerrainCells.Contains(coordinate))
                 {
                     if (operation == TerrainEditOperation.Raise)
                     {

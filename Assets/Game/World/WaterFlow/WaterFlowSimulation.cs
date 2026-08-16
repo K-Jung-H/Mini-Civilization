@@ -67,9 +67,8 @@ namespace MiniCivilization.World.WaterFlow
 
         public static WaterVisualState Resolve(
             WorldData world,
-            int cellIndex)
+            CellCoordinate coordinate)
         {
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             var cell = world.GetCell(
                 coordinate.X,
                 coordinate.Y,
@@ -131,24 +130,24 @@ namespace MiniCivilization.World.WaterFlow
 
     internal sealed class WaterFlowRecalculationResult
     {
-        public readonly HashSet<int> LogicalChangedCellIndices = new();
-        public readonly HashSet<int> RenderChangedCellIndices = new();
-        public readonly HashSet<int> TopologyChangedCellIndices = new();
-        public readonly HashSet<int> WaterTypeChangedCellIndices = new();
-        public readonly HashSet<int> ChangedColumnIndices = new();
+        public readonly HashSet<CellCoordinate> LogicalChangedCells = new();
+        public readonly HashSet<CellCoordinate> RenderChangedCells = new();
+        public readonly HashSet<CellCoordinate> TopologyChangedCells = new();
+        public readonly HashSet<CellCoordinate> WaterTypeChangedCells = new();
+        public readonly HashSet<CellColumnCoordinate> ChangedColumns = new();
 
         public bool HasRenderChanges =>
-            RenderChangedCellIndices.Count > 0;
+            RenderChangedCells.Count > 0;
         public bool HasTopologyChanges =>
-            TopologyChangedCellIndices.Count > 0;
+            TopologyChangedCells.Count > 0;
 
         public void Clear()
         {
-            LogicalChangedCellIndices.Clear();
-            RenderChangedCellIndices.Clear();
-            TopologyChangedCellIndices.Clear();
-            WaterTypeChangedCellIndices.Clear();
-            ChangedColumnIndices.Clear();
+            LogicalChangedCells.Clear();
+            RenderChangedCells.Clear();
+            TopologyChangedCells.Clear();
+            WaterTypeChangedCells.Clear();
+            ChangedColumns.Clear();
         }
     }
 
@@ -159,11 +158,11 @@ namespace MiniCivilization.World.WaterFlow
             (1, 0), (0, 1), (-1, 0), (0, -1)
         };
 
-        private readonly List<int> activeWave = new();
-        private readonly HashSet<int> restartWave = new();
-        private readonly HashSet<int> nextWave = new();
-        private readonly HashSet<int> applyCells = new();
-        private readonly Dictionary<int, WaterVisualState>
+        private readonly List<CellCoordinate> activeWave = new();
+        private readonly HashSet<CellCoordinate> restartWave = new();
+        private readonly HashSet<CellCoordinate> nextWave = new();
+        private readonly HashSet<CellCoordinate> applyCells = new();
+        private readonly Dictionary<CellCoordinate, WaterVisualState>
             previousVisualStates = new();
         private readonly WaterFlowRecalculationResult result = new();
         private readonly int cellCount;
@@ -186,7 +185,7 @@ namespace MiniCivilization.World.WaterFlow
         public void RestoreFrontier(
             WorldData world,
             WaterFlowState state,
-            IReadOnlyList<int> frontier)
+            IReadOnlyList<CellCoordinate> frontier)
         {
             ValidateWorldAndState(world, state);
             restartWave.Clear();
@@ -194,15 +193,15 @@ namespace MiniCivilization.World.WaterFlow
             {
                 for (var index = 0; index < frontier.Count; index++)
                 {
-                    var cellIndex = frontier[index];
-                    if ((uint)cellIndex >= cellCount)
+                    var cell = frontier[index];
+                    if (!world.Contains(cell.X, cell.Y, cell.Z))
                     {
                         throw new ArgumentOutOfRangeException(
                             nameof(frontier),
                             "A water frontier Cell is outside the world.");
                     }
 
-                    restartWave.Add(cellIndex);
+                    restartWave.Add(cell);
                 }
             }
 
@@ -212,8 +211,8 @@ namespace MiniCivilization.World.WaterFlow
         public void EnqueueChanges(
             WorldData world,
             WaterFlowState state,
-            IReadOnlyCollection<int> changedCellIndices,
-            IReadOnlyCollection<int> changedColumnIndices)
+            IReadOnlyCollection<CellCoordinate> changedCells,
+            IReadOnlyCollection<CellColumnCoordinate> changedColumns)
         {
             ValidateWorldAndState(world, state);
             restartWave.Clear();
@@ -222,35 +221,35 @@ namespace MiniCivilization.World.WaterFlow
                 restartWave.Add(activeWave[index]);
             }
 
-            if (changedCellIndices != null)
+            if (changedCells != null)
             {
-                foreach (var cellIndex in changedCellIndices)
+                foreach (var cell in changedCells)
                 {
-                    if ((uint)cellIndex >= cellCount)
+                    if (!world.Contains(cell.X, cell.Y, cell.Z))
                     {
                         throw new ArgumentOutOfRangeException(
-                            nameof(changedCellIndices));
+                            nameof(changedCells));
                     }
 
-                    AddCellAndNeighbors(world, restartWave, cellIndex);
+                    AddCellAndNeighbors(world, restartWave, cell);
                 }
             }
 
-            if (changedColumnIndices != null)
+            if (changedColumns != null)
             {
-                foreach (var columnIndex in changedColumnIndices)
+                foreach (var column in changedColumns)
                 {
-                    WorldIndex.DecodeColumn(
-                        world,
-                        columnIndex,
-                        out var x,
-                        out var z);
+                    if (!world.ContainsColumn(column.X, column.Z))
+                    {
+                        continue;
+                    }
+
                     for (var y = 0; y < world.Height; y++)
                     {
                         AddCellAndNeighbors(
                             world,
                             restartWave,
-                            WorldIndex.EncodeCell(world, x, y, z));
+                            new CellCoordinate(column.X, y, column.Z));
                     }
                 }
             }
@@ -287,13 +286,13 @@ namespace MiniCivilization.World.WaterFlow
             var stop = Math.Min(activeWave.Count, cursor + maximumCells);
             for (; cursor < stop; cursor++)
             {
-                var cellIndex = activeWave[cursor];
+                var cell = activeWave[cursor];
                 state.StageResolvedCell(
-                    cellIndex,
+                    cell,
                     ResolveDesiredWater(
                         world,
                         state,
-                        cellIndex,
+                        cell,
                         parameters));
             }
 
@@ -306,6 +305,7 @@ namespace MiniCivilization.World.WaterFlow
             ApplyStagedState(world, state);
             BuildNextWave(world);
             ReplaceActiveWave(world, state, nextWave);
+
             completedResult = result;
             return true;
         }
@@ -313,15 +313,14 @@ namespace MiniCivilization.World.WaterFlow
         private static WaterData ResolveDesiredWater(
             WorldData world,
             WaterFlowState state,
-            int cellIndex,
+            CellCoordinate coordinate,
             in WaterFlowParameters parameters)
         {
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
             var cell = world.GetCell(
                 coordinate.X,
                 coordinate.Y,
                 coordinate.Z);
-            var current = state.GetWater(cellIndex);
+            var current = state.GetWater(coordinate);
             var capacitySteps =
                 WorldGrid.HeightStepsPerCell - cell.Terrain.SolidHeight;
             if (capacitySteps <= 0)
@@ -343,7 +342,7 @@ namespace MiniCivilization.World.WaterFlow
                     current.Flow |= ResolveSourceOutflowDirections(
                         world,
                         state,
-                        cellIndex,
+                        coordinate,
                         parameters);
                 }
 
@@ -359,12 +358,11 @@ namespace MiniCivilization.World.WaterFlow
                 coordinate);
             if (coordinate.Y + 1 < world.Height)
             {
-                var aboveIndex = WorldIndex.EncodeCell(
-                    world,
+                var aboveCell = new CellCoordinate(
                     coordinate.X,
                     coordinate.Y + 1,
                     coordinate.Z);
-                var above = state.GetWater(aboveIndex);
+                var above = state.GetWater(aboveCell);
                 if (above.Amount >= parameters.MinimumSpreadAmount
                     && CanFlowDown(
                         world,
@@ -395,12 +393,11 @@ namespace MiniCivilization.World.WaterFlow
                     continue;
                 }
 
-                var donorIndex = WorldIndex.EncodeCell(
-                    world,
+                var donorCell = new CellCoordinate(
                     donorX,
                     coordinate.Y,
                     donorZ);
-                var donor = state.GetWater(donorIndex);
+                var donor = state.GetWater(donorCell);
                 if (donor.Amount <= parameters.SpreadAmountLoss
                     || donor.Amount < parameters.MinimumSpreadAmount
                     || (donor.Role == WaterRole.Dynamic
@@ -429,8 +426,8 @@ namespace MiniCivilization.World.WaterFlow
                     || !CanReachHorizontally(
                         world,
                         state,
-                        donorIndex,
-                        cellIndex,
+                        donorCell,
+                        coordinate,
                         candidateAmount))
                 {
                     continue;
@@ -449,7 +446,7 @@ namespace MiniCivilization.World.WaterFlow
                     && HasReachablePreferredDirection(
                         world,
                         state,
-                        donorIndex,
+                        donorCell,
                         donorHeading,
                         candidateAmount))
                 {
@@ -507,7 +504,7 @@ namespace MiniCivilization.World.WaterFlow
         private static FlowDirection ResolveSourceOutflowDirections(
             WorldData world,
             WaterFlowState state,
-            int sourceIndex,
+            CellCoordinate source,
             in WaterFlowParameters parameters)
         {
             if (WaterAmount.Full <= parameters.SpreadAmountLoss)
@@ -522,7 +519,6 @@ namespace MiniCivilization.World.WaterFlow
                 return FlowDirection.None;
             }
 
-            var source = WorldIndex.DecodeCell(world, sourceIndex);
             var result = FlowDirection.None;
             for (var directionIndex = 0;
                  directionIndex < HorizontalDirections.Length;
@@ -536,19 +532,18 @@ namespace MiniCivilization.World.WaterFlow
                     continue;
                 }
 
-                var targetIndex = WorldIndex.EncodeCell(
-                    world,
+                var targetCell = new CellCoordinate(
                     targetX,
                     source.Y,
                     targetZ);
-                var targetWater = state.GetWater(targetIndex);
+                var targetWater = state.GetWater(targetCell);
                 if (targetWater.Role == WaterRole.Source
                     || targetWater.Amount > candidateAmount
                     || !CanReachHorizontally(
                         world,
                         state,
-                        sourceIndex,
-                        targetIndex,
+                        source,
+                        targetCell,
                         candidateAmount))
                 {
                     continue;
@@ -570,12 +565,11 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            var belowIndex = WorldIndex.EncodeCell(
-                world,
+            var belowCell = new CellCoordinate(
                 coordinate.X,
                 coordinate.Y - 1,
                 coordinate.Z);
-            return state.GetWater(belowIndex).Role
+            return state.GetWater(belowCell).Role
                 == WaterRole.Source;
         }
 
@@ -668,12 +662,11 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            var belowIndex = WorldIndex.EncodeCell(
-                world,
+            var belowCell = new CellCoordinate(
                 coordinate.X,
                 coordinate.Y - 1,
                 coordinate.Z);
-            var belowWater = state.GetWater(belowIndex);
+            var belowWater = state.GetWater(belowCell);
             return WaterFlowReachability.CanFlowDown(
                 coordinate.Y,
                 below,
@@ -701,12 +694,10 @@ namespace MiniCivilization.World.WaterFlow
         private static bool CanReachHorizontally(
             WorldData world,
             WaterFlowState state,
-            int donorIndex,
-            int targetIndex,
+            CellCoordinate donorCoordinate,
+            CellCoordinate targetCoordinate,
             byte candidateAmount)
         {
-            var donorCoordinate = WorldIndex.DecodeCell(world, donorIndex);
-            var targetCoordinate = WorldIndex.DecodeCell(world, targetIndex);
             var donorCell = world.GetCell(
                 donorCoordinate.X,
                 donorCoordinate.Y,
@@ -715,7 +706,7 @@ namespace MiniCivilization.World.WaterFlow
                 targetCoordinate.X,
                 targetCoordinate.Y,
                 targetCoordinate.Z);
-            var donorWater = state.GetWater(donorIndex);
+            var donorWater = state.GetWater(donorCoordinate);
             return WaterFlowReachability.CanReachHorizontally(
                 donorCoordinate,
                 donorCell,
@@ -728,11 +719,10 @@ namespace MiniCivilization.World.WaterFlow
         private static bool HasReachablePreferredDirection(
             WorldData world,
             WaterFlowState state,
-            int donorIndex,
+            CellCoordinate donor,
             FlowDirection preferredDirection,
             byte candidateAmount)
         {
-            var donor = WorldIndex.DecodeCell(world, donorIndex);
             for (var index = 0;
                  index < HorizontalDirections.Length;
                  index++)
@@ -753,9 +743,8 @@ namespace MiniCivilization.World.WaterFlow
                 return CanReachHorizontally(
                     world,
                     state,
-                    donorIndex,
-                    WorldIndex.EncodeCell(
-                        world,
+                    donor,
+                    new CellCoordinate(
                         targetX,
                         donor.Y,
                         targetZ),
@@ -783,10 +772,10 @@ namespace MiniCivilization.World.WaterFlow
                 AddCellAndNeighbors(world, applyCells, pair.Key);
             }
 
-            foreach (var cellIndex in applyCells)
+            foreach (var cell in applyCells)
             {
-                previousVisualStates[cellIndex] =
-                    WaterVisualState.Resolve(world, cellIndex);
+                previousVisualStates[cell] =
+                    WaterVisualState.Resolve(world, cell);
             }
         }
 
@@ -796,7 +785,7 @@ namespace MiniCivilization.World.WaterFlow
         {
             foreach (var pair in state.EnumerateStagedCells())
             {
-                var coordinate = WorldIndex.DecodeCell(world, pair.Key);
+                var coordinate = pair.Key;
                 var cell = world.GetCell(
                     coordinate.X,
                     coordinate.Y,
@@ -814,26 +803,25 @@ namespace MiniCivilization.World.WaterFlow
                     coordinate.Y,
                     coordinate.Z,
                     cell);
-                result.LogicalChangedCellIndices.Add(pair.Key);
-                result.ChangedColumnIndices.Add(WorldIndex.EncodeColumn(
-                    world,
+                result.LogicalChangedCells.Add(pair.Key);
+                result.ChangedColumns.Add(new CellColumnCoordinate(
                     coordinate.X,
                     coordinate.Z));
                 if (previousWater.HasWater != cell.Water.HasWater)
                 {
-                    result.TopologyChangedCellIndices.Add(pair.Key);
+                    result.TopologyChangedCells.Add(pair.Key);
                 }
             }
 
-            foreach (var cellIndex in applyCells)
+            foreach (var cell in applyCells)
             {
-                var next = WaterVisualState.Resolve(world, cellIndex);
+                var next = WaterVisualState.Resolve(world, cell);
                 if (!previousVisualStates.TryGetValue(
-                        cellIndex,
+                        cell,
                         out var previous)
                     || !previous.Equals(next))
                 {
-                    result.RenderChangedCellIndices.Add(cellIndex);
+                    result.RenderChangedCells.Add(cell);
                 }
             }
 
@@ -843,24 +831,24 @@ namespace MiniCivilization.World.WaterFlow
         private void BuildNextWave(WorldData world)
         {
             nextWave.Clear();
-            foreach (var cellIndex in result.LogicalChangedCellIndices)
+            foreach (var cell in result.LogicalChangedCells)
             {
-                AddCellAndNeighbors(world, nextWave, cellIndex);
+                AddCellAndNeighbors(world, nextWave, cell);
             }
         }
 
         private void ReplaceActiveWave(
             WorldData world,
             WaterFlowState state,
-            IReadOnlyCollection<int> cells)
+            IReadOnlyCollection<CellCoordinate> cells)
         {
             state.CancelResolutionPass();
             activeWave.Clear();
             if (cells != null && cells.Count > 0)
             {
-                foreach (var cellIndex in cells)
+                foreach (var cell in cells)
                 {
-                    activeWave.Add(cellIndex);
+                    activeWave.Add(cell);
                 }
 
                 activeWave.Sort();
@@ -873,11 +861,10 @@ namespace MiniCivilization.World.WaterFlow
 
         private static void AddCellAndNeighbors(
             WorldData world,
-            HashSet<int> cells,
-            int cellIndex)
+            HashSet<CellCoordinate> cells,
+            CellCoordinate coordinate)
         {
-            cells.Add(cellIndex);
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+            cells.Add(coordinate);
             AddIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
             AddIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
             AddIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
@@ -889,7 +876,7 @@ namespace MiniCivilization.World.WaterFlow
             {
                 if (world.Contains(x, y, z))
                 {
-                    cells.Add(WorldIndex.EncodeCell(world, x, y, z));
+                    cells.Add(new CellCoordinate(x, y, z));
                 }
             }
         }
@@ -934,7 +921,7 @@ namespace MiniCivilization.World.WaterFlow
                 throw new ArgumentNullException(nameof(world));
             }
 
-            var frontier = new HashSet<int>();
+            var frontier = new HashSet<CellCoordinate>();
             for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
@@ -947,18 +934,17 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 AddSourceAndNeighbors(
-                    WorldIndex.EncodeCell(world, x, y, z));
+                    new CellCoordinate(x, y, z));
             }
 
-            var sortedFrontier = new int[frontier.Count];
+            var sortedFrontier = new CellCoordinate[frontier.Count];
             frontier.CopyTo(sortedFrontier);
             Array.Sort(sortedFrontier);
             world.WaterFlowSchedule.ReplaceFrontier(sortedFrontier);
 
-            void AddSourceAndNeighbors(int cellIndex)
+            void AddSourceAndNeighbors(CellCoordinate coordinate)
             {
-                frontier.Add(cellIndex);
-                var coordinate = WorldIndex.DecodeCell(world, cellIndex);
+                frontier.Add(coordinate);
                 AddIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
                 AddIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
                 AddIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
@@ -971,7 +957,7 @@ namespace MiniCivilization.World.WaterFlow
             {
                 if (world.Contains(x, y, z))
                 {
-                    frontier.Add(WorldIndex.EncodeCell(world, x, y, z));
+                    frontier.Add(new CellCoordinate(x, y, z));
                 }
             }
         }

@@ -42,7 +42,7 @@ namespace MiniCivilization.World.Definitions
     public sealed class BiomeSurfaceSet
     {
         [Tooltip("아래 Surface 프로필들이 적용될 바이옴입니다.")]
-        public BiomeType Biome = BiomeType.Grassland;
+        public TerrainBiome Biome = TerrainBiome.Field;
 
         [Tooltip("바이옴 전용 Ground, Cliff, Road, Riverbed 등의 표현입니다.")]
         public List<TerrainSurfaceDefinition> Surfaces = new();
@@ -243,7 +243,7 @@ namespace MiniCivilization.World.Definitions
         private List<TerrainSurfaceDefinition> commonTerrain = new();
 
         [SerializeField]
-        [Tooltip("BiomeType별 Ground, Cliff, Road, Riverbed 등의 재질 프로필입니다.")]
+        [Tooltip("TerrainBiome별 Ground, Cliff, Road, Riverbed 등의 재질 프로필입니다.")]
         private List<BiomeSurfaceSet> biomes = new();
 
         [SerializeField]
@@ -313,7 +313,7 @@ namespace MiniCivilization.World.Definitions
             bakedTextureArraySignature = signature;
         }
 
-        public SurfaceAppearance ResolveTerrain(BiomeType biome, SurfaceType type)
+        public SurfaceAppearance ResolveTerrain(TerrainBiome biome, SurfaceType type)
         {
             EnsureRuntimeCache();
             if (biomeCache.TryGetValue(new TerrainSurfaceKey(biome, type), out var exact))
@@ -444,19 +444,19 @@ namespace MiniCivilization.World.Definitions
 
             biomes = new List<BiomeSurfaceSet>
             {
-                CreateBiomeSet(BiomeType.Grassland, new Color(0.25f, 0.5f, 0.18f)),
-                CreateBiomeSet(BiomeType.Forest, new Color(0.16f, 0.38f, 0.12f)),
-                CreateBiomeSet(BiomeType.Desert, new Color(0.76f, 0.64f, 0.38f)),
-                CreateBiomeSet(BiomeType.Snow, new Color(0.9f, 0.94f, 0.98f)),
-                CreateBiomeSet(BiomeType.Wetland, new Color(0.25f, 0.19f, 0.12f)),
-                CreateBiomeSet(BiomeType.Mountain, new Color(0.34f, 0.35f, 0.37f))
+                CreateBiomeSet(TerrainBiome.Field, new Color(0.25f, 0.5f, 0.18f)),
+                CreateBiomeSet(TerrainBiome.Forest, new Color(0.16f, 0.38f, 0.12f)),
+                CreateBiomeSet(TerrainBiome.Desert, new Color(0.76f, 0.64f, 0.38f)),
+                CreateBiomeSet(TerrainBiome.Snow, new Color(0.9f, 0.94f, 0.98f)),
+                CreateBiomeSet(TerrainBiome.Wetland, new Color(0.25f, 0.19f, 0.12f)),
+                CreateBiomeSet(TerrainBiome.Mountain, new Color(0.34f, 0.35f, 0.37f))
             };
 
-            biomes[(int)BiomeType.Snow - 1].Surfaces.Add(
+            biomes[(int)TerrainBiome.Snow - 1].Surfaces.Add(
                 CreateTerrainDefinition(SurfaceType.Cliff, new Color(0.62f, 0.67f, 0.72f), 0f, 0.3f));
-            biomes[(int)BiomeType.Desert - 1].Surfaces.Add(
+            biomes[(int)TerrainBiome.Desert - 1].Surfaces.Add(
                 CreateTerrainDefinition(SurfaceType.Road, new Color(0.46f, 0.34f, 0.19f), 0f, 0.14f));
-            biomes[(int)BiomeType.Forest - 1].Surfaces.Add(
+            biomes[(int)TerrainBiome.Forest - 1].Surfaces.Add(
                 CreateTerrainDefinition(SurfaceType.Riverbed, new Color(0.19f, 0.24f, 0.18f), 0f, 0.12f));
 
             waterSurface = CreateWaterProfile(
@@ -464,7 +464,7 @@ namespace MiniCivilization.World.Definitions
                 0.72f);
         }
 
-        private static BiomeSurfaceSet CreateBiomeSet(BiomeType biome, Color tint)
+        private static BiomeSurfaceSet CreateBiomeSet(TerrainBiome biome, Color tint)
         {
             return new BiomeSurfaceSet
             {
@@ -606,10 +606,10 @@ namespace MiniCivilization.World.Definitions
 
         private readonly struct TerrainSurfaceKey : IEquatable<TerrainSurfaceKey>
         {
-            private readonly BiomeType biome;
+            private readonly TerrainBiome biome;
             private readonly SurfaceType surface;
 
-            public TerrainSurfaceKey(BiomeType biome, SurfaceType surface)
+            public TerrainSurfaceKey(TerrainBiome biome, SurfaceType surface)
             {
                 this.biome = biome;
                 this.surface = surface;
@@ -624,11 +624,11 @@ namespace MiniCivilization.World.Definitions
 
     public static class DefaultSurfacePalette
     {
-        public static SurfaceAppearance ResolveTerrain(BiomeType biome, SurfaceType type)
+        public static SurfaceAppearance ResolveTerrain(TerrainBiome biome, SurfaceType type)
         {
             if (type == SurfaceType.Cliff)
             {
-                var cliff = biome == BiomeType.Snow
+                var cliff = biome == TerrainBiome.Snow
                     ? new Color(0.62f, 0.67f, 0.72f)
                     : new Color(0.34f, 0.35f, 0.37f);
                 return new SurfaceAppearance(cliff, 0.02f, 0.25f, 0.95f);
@@ -656,12 +656,12 @@ namespace MiniCivilization.World.Definitions
 
             return biome switch
             {
-                BiomeType.Forest => new SurfaceAppearance(new Color(0.16f, 0.38f, 0.12f), 0f, 0.14f, 1f),
-                BiomeType.Desert => new SurfaceAppearance(new Color(0.76f, 0.64f, 0.38f), 0f, 0.18f, 1f),
-                BiomeType.Snow => new SurfaceAppearance(new Color(0.9f, 0.94f, 0.98f), 0f, 0.42f, 1f),
-                BiomeType.Wetland => new SurfaceAppearance(new Color(0.25f, 0.19f, 0.12f), 0f, 0.12f, 0.9f),
-                BiomeType.Mountain => new SurfaceAppearance(new Color(0.34f, 0.35f, 0.37f), 0.02f, 0.25f, 0.95f),
-                BiomeType.Grassland => new SurfaceAppearance(new Color(0.25f, 0.5f, 0.18f), 0f, 0.16f, 1f),
+                TerrainBiome.Forest => new SurfaceAppearance(new Color(0.16f, 0.38f, 0.12f), 0f, 0.14f, 1f),
+                TerrainBiome.Desert => new SurfaceAppearance(new Color(0.76f, 0.64f, 0.38f), 0f, 0.18f, 1f),
+                TerrainBiome.Snow => new SurfaceAppearance(new Color(0.9f, 0.94f, 0.98f), 0f, 0.42f, 1f),
+                TerrainBiome.Wetland => new SurfaceAppearance(new Color(0.25f, 0.19f, 0.12f), 0f, 0.12f, 0.9f),
+                TerrainBiome.Mountain => new SurfaceAppearance(new Color(0.34f, 0.35f, 0.37f), 0.02f, 0.25f, 0.95f),
+                TerrainBiome.Field => new SurfaceAppearance(new Color(0.25f, 0.5f, 0.18f), 0f, 0.16f, 1f),
                 _ => new SurfaceAppearance(new Color(0.38f, 0.28f, 0.16f), 0f, 0.2f, 1f)
             };
         }

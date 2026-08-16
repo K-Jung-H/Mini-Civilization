@@ -44,7 +44,4 @@ MonoBehaviour:
   spreadAmountLoss: 0.01
   minimumSpreadAmount: 0.05
   dissipationAmountLoss: 0.05
-  desertMoistureThreshold: 0.28
-  wetlandMoistureThreshold: 0.72
-  snowTemperatureThreshold: 0.24
-  waterMoistureRadius: 6
+  coldClimateThreshold: 0.24

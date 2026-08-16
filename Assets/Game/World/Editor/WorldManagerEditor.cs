@@ -17,8 +17,6 @@ namespace MiniCivilization.World.Editor
             DrawStatus(manager);
             EditorGUILayout.Space();
             DrawWorldActions(manager);
-            EditorGUILayout.Space();
-            DrawPreparedSceneActions(manager);
         }
 
         private static void DrawStatus(WorldManager manager)
@@ -27,11 +25,13 @@ namespace MiniCivilization.World.Editor
                 || manager.EditController == null
                 || manager.WaterFlowController == null
                 || manager.Renderer == null
+                || manager.StreamingController == null
+                || manager.EntityManager == null
                 || manager.SaveController == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Generation, Editing, Water Flow, Renderer, and Save " +
-                    "references must be assigned.",
+                    "Generation, Editing, Water Flow, Renderer, Streaming, " +
+                    "Entity Manager, and Save references must be assigned.",
                     MessageType.Error);
             }
 
@@ -41,10 +41,18 @@ namespace MiniCivilization.World.Editor
                 var runtime = manager.CurrentWorldRuntime;
                 var waterBodyCount =
                     manager.WaterFlowController?.State?.WaterBodies.Count ?? 0;
+                var streaming = manager.StreamingController;
+                var streamingCenter = streaming != null && streaming.HasCenter
+                    ? streaming.CurrentCenter.ToString()
+                    : "None";
                 EditorGUILayout.HelpBox(
                     $"Active world: {world.Size} x {world.Size} x {world.Height}\n" +
                     $"Seed: {world.Seed}\n" +
                     $"Water bodies: {waterBodyCount}\n" +
+                    $"Streaming center: {streamingCenter}\n" +
+                    $"Prepared cache columns: {runtime.SurfaceCache.PreparedColumnCount}\n" +
+                    $"Rendered/Pooled patches: {manager.Renderer.RenderedPatchCount}/" +
+                    $"{manager.Renderer.PooledPatchCount}\n" +
                     $"Change ID: {runtime.CurrentChangeId}\n" +
                     $"Dirty: {(manager.IsDirty ? "Yes" : "No")}\n" +
                     $"Renderer: {manager.Renderer.BindingMode}",
@@ -53,8 +61,7 @@ namespace MiniCivilization.World.Editor
             else if (manager.CurrentWorldDataAsset != null)
             {
                 EditorGUILayout.HelpBox(
-                    "A WorldDataAsset is assigned. It will be activated when Play starts, " +
-                    "or by preparing the scene.",
+                    "A WorldDataAsset is assigned. It will be activated when Play starts.",
                     MessageType.Info);
             }
             else
@@ -115,30 +122,6 @@ namespace MiniCivilization.World.Editor
             }
         }
 
-        private static void DrawPreparedSceneActions(WorldManager manager)
-        {
-            EditorGUILayout.LabelField(
-                "Editor Prepared Scene",
-                EditorStyles.boldLabel);
-            using (new EditorGUI.DisabledScope(!manager.HasWorld))
-            {
-                if (GUILayout.Button("Prepare Current World In Scene"))
-                {
-                    PrepareCurrentWorld(manager);
-                }
-            }
-
-            var asset = manager.CurrentWorldDataAsset;
-            using (new EditorGUI.DisabledScope(
-                       asset == null || !asset.HasPreparedRenderCache))
-            {
-                if (GUILayout.Button("Remove Prepared Render Cache"))
-                {
-                    WorldPreparedRenderCacheUtility.Remove(manager, asset);
-                }
-            }
-        }
-
         private static void SaveAs(WorldManager manager)
         {
             var currentPath = manager.SaveController.ActiveSavePath;
@@ -176,34 +159,5 @@ namespace MiniCivilization.World.Editor
             }
         }
 
-        private static void PrepareCurrentWorld(WorldManager manager)
-        {
-            var asset = manager.CurrentWorldDataAsset;
-            if (!AssetDatabase.Contains(asset))
-            {
-                const string directory = "Assets/Game/World/Data";
-                if (!AssetDatabase.IsValidFolder(directory))
-                {
-                    AssetDatabase.CreateFolder("Assets/Game/World", "Data");
-                }
-
-                var path = EditorUtility.SaveFilePanelInProject(
-                    "Create WorldDataAsset",
-                    asset != null ? asset.name : "WorldData",
-                    "asset",
-                    "Choose where the prepared WorldDataAsset will be stored.",
-                    directory);
-                if (string.IsNullOrEmpty(path))
-                {
-                    return;
-                }
-
-                asset = WorldPreparedRenderCacheUtility.EnsurePersistentAsset(
-                    manager,
-                    path);
-            }
-
-            WorldPreparedRenderCacheUtility.Prepare(manager, asset);
-        }
     }
 }

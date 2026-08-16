@@ -22,17 +22,10 @@ namespace MiniCivilization.World.Interaction
         PositiveZ = 6
     }
 
-    public static class WorldCellIndex
-    {
-        public static int Encode(WorldData world, int x, int y, int z)
-            => WorldIndex.EncodeCell(world, x, y, z);
-
-    }
-
     public interface IWorldCellSelection
     {
         CellBounds Bounds { get; }
-        bool Contains(int cellIndex, CellCoordinate coordinate);
+        bool Contains(CellCoordinate coordinate);
         void CopyCellsTo(List<CellCoordinate> target, WorldData world);
     }
 
@@ -65,7 +58,7 @@ namespace MiniCivilization.World.Interaction
             return new WorldCellBoxSelection(new CellBounds(minimum, maximum));
         }
 
-        public bool Contains(int cellIndex, CellCoordinate coordinate)
+        public bool Contains(CellCoordinate coordinate)
         {
             return coordinate.X >= Bounds.Minimum.X
                 && coordinate.X <= Bounds.Maximum.X
@@ -104,18 +97,18 @@ namespace MiniCivilization.World.Interaction
     public sealed class WorldCellSetSelection : IWorldCellSelection
     {
         private readonly CellCoordinate[] cells;
-        private readonly HashSet<int> cellIndices;
+        private readonly HashSet<CellCoordinate> cellCoordinates;
 
         public CellBounds Bounds { get; }
         public int Count => cells.Length;
 
         private WorldCellSetSelection(
             CellCoordinate[] cells,
-            HashSet<int> cellIndices,
+            HashSet<CellCoordinate> cellCoordinates,
             CellBounds bounds)
         {
             this.cells = cells;
-            this.cellIndices = cellIndices;
+            this.cellCoordinates = cellCoordinates;
             Bounds = bounds;
         }
 
@@ -133,7 +126,7 @@ namespace MiniCivilization.World.Interaction
                 throw new ArgumentNullException(nameof(coordinates));
             }
 
-            var indices = new HashSet<int>();
+            var uniqueCoordinates = new HashSet<CellCoordinate>();
             var uniqueCells = new List<CellCoordinate>();
             var minimum = new CellCoordinate(
                 world.Size - 1,
@@ -150,12 +143,7 @@ namespace MiniCivilization.World.Interaction
                     continue;
                 }
 
-                var index = WorldCellIndex.Encode(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if (!indices.Add(index))
+                if (!uniqueCoordinates.Add(coordinate))
                 {
                     continue;
                 }
@@ -180,12 +168,12 @@ namespace MiniCivilization.World.Interaction
 
             return new WorldCellSetSelection(
                 uniqueCells.ToArray(),
-                indices,
+                uniqueCoordinates,
                 new CellBounds(minimum, maximum));
         }
 
-        public bool Contains(int cellIndex, CellCoordinate coordinate) =>
-            cellIndices.Contains(cellIndex);
+        public bool Contains(CellCoordinate coordinate) =>
+            cellCoordinates.Contains(coordinate);
 
         public void CopyCellsTo(
             List<CellCoordinate> target,
@@ -203,7 +191,6 @@ namespace MiniCivilization.World.Interaction
     public readonly struct TilePickResult : IEquatable<TilePickResult>
     {
         public readonly CellCoordinate Cell;
-        public readonly int CellIndex;
         public readonly SurfaceInteractionType SurfaceType;
         public readonly CellSurfaceFace Face;
         public readonly Vector3 HitPoint;
@@ -212,7 +199,6 @@ namespace MiniCivilization.World.Interaction
 
         public TilePickResult(
             CellCoordinate cell,
-            int cellIndex,
             SurfaceInteractionType surfaceType,
             CellSurfaceFace face,
             Vector3 hitPoint,
@@ -220,7 +206,6 @@ namespace MiniCivilization.World.Interaction
             float distance = 0f)
         {
             Cell = cell;
-            CellIndex = cellIndex;
             SurfaceType = surfaceType;
             Face = face;
             HitPoint = hitPoint;
@@ -230,7 +215,7 @@ namespace MiniCivilization.World.Interaction
 
         public bool Equals(TilePickResult other)
         {
-            return CellIndex == other.CellIndex
+            return Cell.Equals(other.Cell)
                 && SurfaceType == other.SurfaceType
                 && Face == other.Face;
         }
@@ -242,7 +227,7 @@ namespace MiniCivilization.World.Interaction
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(CellIndex, SurfaceType, Face);
+            return HashCode.Combine(Cell, SurfaceType, Face);
         }
 
         public override string ToString()

@@ -13,10 +13,10 @@ namespace MiniCivilization.World.Runtime
         private readonly WorldData world;
         private readonly EntityTypeRegistry registry;
         private readonly Dictionary<EntityId, Entity> entitiesById = new();
-        private readonly Dictionary<int, List<EntityId>> entityIdsByCell = new();
-        private readonly Dictionary<int, BuildingCellState> buildingCells = new();
-        private readonly HashSet<int> terrainAnchorCells = new();
-        private readonly HashSet<int> terrainAnchorColumns = new();
+        private readonly Dictionary<CellCoordinate, List<EntityId>> entityIdsByCell = new();
+        private readonly Dictionary<CellCoordinate, BuildingCellState> buildingCells = new();
+        private readonly HashSet<CellCoordinate> terrainAnchorCells = new();
+        private readonly HashSet<CellColumnCoordinate> terrainAnchorColumns = new();
         private readonly List<Entity> tickEntities = new();
         private readonly HashSet<EntityId> movingEntityIds = new();
         private readonly Dictionary<EntityId, BuildingWayLocation>
@@ -33,9 +33,8 @@ namespace MiniCivilization.World.Runtime
             world = runtime.Data;
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
 
-            for (var index = 0; index < world.Entities.Count; index++)
+            foreach (var data in world.EnumerateEntities())
             {
-                var data = world.Entities[index];
                 ReserveEntityId(data.Id);
                 AddRuntimeEntity(registry.Create(data));
             }
@@ -99,6 +98,11 @@ namespace MiniCivilization.World.Runtime
             for (var index = 0; index < tickEntities.Count; index++)
             {
                 var entity = tickEntities[index];
+                if (!runtime.IsSimulationActive(entity.AnchorCell))
+                {
+                    continue;
+                }
+
                 var previousActivity = entity.Activity;
                 var previousPhase = entity.ActivityPhase;
                 var previousTarget = entity.InteractionTargetId;
@@ -121,32 +125,18 @@ namespace MiniCivilization.World.Runtime
                 return NoEntityIds;
             }
 
-            return entityIdsByCell.TryGetValue(
-                WorldIndex.EncodeCell(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z),
-                out var ids)
+            return entityIdsByCell.TryGetValue(coordinate, out var ids)
                 ? ids
                 : NoEntityIds;
         }
 
         public bool IsBuildingOccupied(CellCoordinate coordinate) =>
             world.Contains(coordinate.X, coordinate.Y, coordinate.Z)
-            && buildingCells.ContainsKey(WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z));
+            && buildingCells.ContainsKey(coordinate);
 
         public bool IsTerrainAnchored(CellCoordinate coordinate) =>
             world.Contains(coordinate.X, coordinate.Y, coordinate.Z)
-            && terrainAnchorCells.Contains(WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z));
+            && terrainAnchorCells.Contains(coordinate);
 
         public bool IsTerrainProtected(CellCoordinate coordinate) =>
             IsBuildingOccupied(coordinate)
@@ -154,7 +144,7 @@ namespace MiniCivilization.World.Runtime
 
         public bool HasTerrainAnchorInColumn(int x, int z) =>
             world.ContainsColumn(x, z)
-            && terrainAnchorColumns.Contains(WorldIndex.EncodeColumn(world, x, z));
+            && terrainAnchorColumns.Contains(new CellColumnCoordinate(x, z));
 
         public bool HasTerrainProtectedInColumn(int x, int z) =>
             HasBuildingInColumn(x, z)
@@ -169,8 +159,7 @@ namespace MiniCivilization.World.Runtime
 
             for (var y = 0; y < world.Height; y++)
             {
-                if (buildingCells.ContainsKey(
-                    WorldIndex.EncodeCell(world, x, y, z)))
+                if (buildingCells.ContainsKey(new CellCoordinate(x, y, z)))
                 {
                     return true;
                 }
@@ -283,7 +272,7 @@ namespace MiniCivilization.World.Runtime
                 layout.BuildingCells.Count];
             var anchorWorldCells = new CellCoordinate[
                 layout.TerrainAnchorCells.Count];
-            var columns = new Dictionary<int, BuildingPlacementColumn>();
+            var columns = new Dictionary<CellColumnCoordinate, BuildingPlacementColumn>();
             var invalidCells = new HashSet<CellCoordinate>();
             var centerSurface = runtime.SurfaceCache.GetSurfaceHeight(
                 data.AnchorCell.X,
@@ -431,8 +420,7 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var column = columns[WorldIndex.EncodeColumn(
-                    world,
+                var column = columns[new CellColumnCoordinate(
                     coordinate.X,
                     coordinate.Z)];
                 var correctionSteps = Math.Abs(
@@ -472,8 +460,7 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var column = columns[WorldIndex.EncodeColumn(
-                    world,
+                var column = columns[new CellColumnCoordinate(
                     coordinate.X,
                     coordinate.Z)];
                 var projectedHeight = Math.Clamp(
@@ -487,7 +474,7 @@ namespace MiniCivilization.World.Runtime
                 }
             }
 
-            var buildingColumns = new HashSet<int>();
+            var buildingColumns = new HashSet<CellColumnCoordinate>();
             for (var index = 0; index < buildingWorldCells.Length; index++)
             {
                 var coordinate = buildingWorldCells[index];
@@ -496,11 +483,10 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var columnIndex = WorldIndex.EncodeColumn(
-                    world,
+                var columnCoordinate = new CellColumnCoordinate(
                     coordinate.X,
                     coordinate.Z);
-                if (!buildingColumns.Add(columnIndex))
+                if (!buildingColumns.Add(columnCoordinate))
                 {
                     continue;
                 }
@@ -650,7 +636,7 @@ namespace MiniCivilization.World.Runtime
             var current = entity.AnchorCell;
             var destination = entity.MoveTo;
             RemoveEntityFromCell(entity.Id, current);
-            entity.Data.MoveTo(destination);
+            world.MoveEntity(entity.Data, destination);
             AddEntityToCell(entity.Id, destination);
             entity.FinishMove();
             movingEntityIds.Remove(entity.Id);
@@ -800,13 +786,7 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
-            return buildingCells.TryGetValue(
-                WorldIndex.EncodeCell(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z),
-                out cell);
+            return buildingCells.TryGetValue(coordinate, out cell);
         }
 
         private EntityId AllocateEntityId()
@@ -825,14 +805,13 @@ namespace MiniCivilization.World.Runtime
         }
 
         private BuildingPlacementColumn GetOrCreatePlacementColumn(
-            Dictionary<int, BuildingPlacementColumn> columns,
+            Dictionary<CellColumnCoordinate, BuildingPlacementColumn> columns,
             CellCoordinate representativeCell)
         {
-            var columnIndex = WorldIndex.EncodeColumn(
-                world,
+            var columnCoordinate = new CellColumnCoordinate(
                 representativeCell.X,
                 representativeCell.Z);
-            if (columns.TryGetValue(columnIndex, out var column))
+            if (columns.TryGetValue(columnCoordinate, out var column))
             {
                 return column;
             }
@@ -842,7 +821,7 @@ namespace MiniCivilization.World.Runtime
                 runtime.SurfaceCache.GetSurfaceHeight(
                     representativeCell.X,
                     representativeCell.Z));
-            columns.Add(columnIndex, column);
+            columns.Add(columnCoordinate, column);
             return column;
         }
 
@@ -937,7 +916,7 @@ namespace MiniCivilization.World.Runtime
                     $"Building {building.Id} does not define a layout.");
             var buildingStates = new BuildingCellState[
                 layout.BuildingCells.Count];
-            var anchors = new int[layout.TerrainAnchorCells.Count];
+            var anchors = new CellCoordinate[layout.TerrainAnchorCells.Count];
             var roadCells = CollectRoadCells(layout, building.Data);
             if (roadCells.Count != 0)
             {
@@ -950,9 +929,9 @@ namespace MiniCivilization.World.Runtime
             {
                 var localCell = layout.BuildingCells[index];
                 var coordinate = layout.ToWorld(building.Data, localCell.LocalOffset);
-                var cellIndex = RequireWorldCell(coordinate, building.Id);
-                if (buildingCells.ContainsKey(cellIndex)
-                    || terrainAnchorCells.Contains(cellIndex))
+                RequireWorldCell(coordinate, building.Id);
+                if (buildingCells.ContainsKey(coordinate)
+                    || terrainAnchorCells.Contains(coordinate))
                 {
                     throw new InvalidOperationException(
                         $"Building {building.Id} overlaps another building Cell or Terrain Anchor.");
@@ -968,9 +947,9 @@ namespace MiniCivilization.World.Runtime
                 var coordinate = layout.ToWorld(
                     building.Data,
                     layout.TerrainAnchorCells[index].LocalOffset);
-                var cellIndex = RequireWorldCell(coordinate, building.Id);
-                if (buildingCells.ContainsKey(cellIndex)
-                    || terrainAnchorCells.Contains(cellIndex))
+                RequireWorldCell(coordinate, building.Id);
+                if (buildingCells.ContainsKey(coordinate)
+                    || terrainAnchorCells.Contains(coordinate))
                 {
                     throw new InvalidOperationException(
                         $"Building {building.Id} overlaps another building Cell or Terrain Anchor.");
@@ -986,7 +965,7 @@ namespace MiniCivilization.World.Runtime
                         $"Building {building.Id} Terrain Anchor {coordinate} must be fully filled.");
                 }
 
-                anchors[index] = cellIndex;
+                anchors[index] = coordinate;
             }
 
             var placement = new BuildingPlacementContext(world, this, building);
@@ -999,25 +978,16 @@ namespace MiniCivilization.World.Runtime
             for (var index = 0; index < buildingStates.Length; index++)
             {
                 var state = buildingStates[index];
-                buildingCells.Add(
-                    WorldIndex.EncodeCell(
-                        world,
-                        state.Coordinate.X,
-                        state.Coordinate.Y,
-                        state.Coordinate.Z),
-                    state);
+                buildingCells.Add(state.Coordinate, state);
                 AddEntityToCell(building.Id, state.Coordinate);
             }
 
             for (var index = 0; index < anchors.Length; index++)
             {
                 terrainAnchorCells.Add(anchors[index]);
-                WorldIndex.DecodeColumn(
-                    world,
-                    anchors[index] % (world.Size * world.Size),
-                    out var x,
-                    out var z);
-                terrainAnchorColumns.Add(WorldIndex.EncodeColumn(world, x, z));
+                terrainAnchorColumns.Add(new CellColumnCoordinate(
+                    anchors[index].X,
+                    anchors[index].Z));
             }
 
         }
@@ -1027,17 +997,16 @@ namespace MiniCivilization.World.Runtime
             EntityData buildingData)
         {
             var result = new List<CellCoordinate>();
-            var columns = new HashSet<int>();
+            var columns = new HashSet<CellColumnCoordinate>();
             for (var index = 0; index < layout.BuildingCells.Count; index++)
             {
                 var buildingCell = layout.ToWorld(
                     buildingData,
                     layout.BuildingCells[index].LocalOffset);
-                var columnIndex = WorldIndex.EncodeColumn(
-                    world,
+                var columnCoordinate = new CellColumnCoordinate(
                     buildingCell.X,
                     buildingCell.Z);
-                if (!columns.Add(columnIndex))
+                if (!columns.Add(columnCoordinate))
                 {
                     continue;
                 }
@@ -1073,12 +1042,7 @@ namespace MiniCivilization.World.Runtime
                 var coordinate = layout.ToWorld(
                     building.Data,
                     layout.BuildingCells[index].LocalOffset);
-                var cellIndex = WorldIndex.EncodeCell(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                buildingCells.Remove(cellIndex);
+                buildingCells.Remove(coordinate);
                 RemoveEntityFromCell(building.Id, coordinate);
             }
 
@@ -1087,33 +1051,32 @@ namespace MiniCivilization.World.Runtime
                 var coordinate = layout.ToWorld(
                     building.Data,
                     layout.TerrainAnchorCells[index].LocalOffset);
-                var cellIndex = WorldIndex.EncodeCell(
-                    world,
+                terrainAnchorCells.Remove(coordinate);
+                var columnCoordinate = new CellColumnCoordinate(
                     coordinate.X,
-                    coordinate.Y,
                     coordinate.Z);
-                terrainAnchorCells.Remove(cellIndex);
-                var columnIndex = WorldIndex.EncodeColumn(world, coordinate.X, coordinate.Z);
-                if (!HasTerrainAnchorInColumnExcept(columnIndex, cellIndex))
+                if (!HasTerrainAnchorInColumnExcept(
+                        columnCoordinate,
+                        coordinate))
                 {
-                    terrainAnchorColumns.Remove(columnIndex);
+                    terrainAnchorColumns.Remove(columnCoordinate);
                 }
             }
         }
 
         private bool HasTerrainAnchorInColumnExcept(
-            int columnIndex,
-            int excludedCellIndex)
+            CellColumnCoordinate columnCoordinate,
+            CellCoordinate excludedCell)
         {
-            foreach (var cellIndex in terrainAnchorCells)
+            foreach (var cell in terrainAnchorCells)
             {
-                if (cellIndex == excludedCellIndex)
+                if (cell.Equals(excludedCell))
                 {
                     continue;
                 }
 
-                WorldIndex.DecodeCell(world, cellIndex);
-                if (cellIndex % (world.Size * world.Size) == columnIndex)
+                if (cell.X == columnCoordinate.X
+                    && cell.Z == columnCoordinate.Z)
                 {
                     return true;
                 }
@@ -1122,7 +1085,7 @@ namespace MiniCivilization.World.Runtime
             return false;
         }
 
-        private int RequireWorldCell(CellCoordinate coordinate, EntityId id)
+        private void RequireWorldCell(CellCoordinate coordinate, EntityId id)
         {
             if (!world.Contains(coordinate.X, coordinate.Y, coordinate.Z))
             {
@@ -1130,24 +1093,14 @@ namespace MiniCivilization.World.Runtime
                     $"Building {id} references a Cell outside the world.");
             }
 
-            return WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
         }
 
         private void AddEntityToCell(EntityId id, CellCoordinate coordinate)
         {
-            var cellIndex = WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
-            if (!entityIdsByCell.TryGetValue(cellIndex, out var ids))
+            if (!entityIdsByCell.TryGetValue(coordinate, out var ids))
             {
                 ids = new List<EntityId>();
-                entityIdsByCell.Add(cellIndex, ids);
+                entityIdsByCell.Add(coordinate, ids);
             }
 
             ids.Add(id);
@@ -1156,12 +1109,7 @@ namespace MiniCivilization.World.Runtime
 
         private void RemoveEntityFromCell(EntityId id, CellCoordinate coordinate)
         {
-            var cellIndex = WorldIndex.EncodeCell(
-                world,
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z);
-            if (!entityIdsByCell.TryGetValue(cellIndex, out var ids)
+            if (!entityIdsByCell.TryGetValue(coordinate, out var ids)
                 || !ids.Remove(id))
             {
                 throw new InvalidOperationException(
@@ -1170,7 +1118,7 @@ namespace MiniCivilization.World.Runtime
 
             if (ids.Count == 0)
             {
-                entityIdsByCell.Remove(cellIndex);
+                entityIdsByCell.Remove(coordinate);
             }
         }
 
@@ -1199,30 +1147,25 @@ namespace MiniCivilization.World.Runtime
             IReadOnlyList<CellCoordinate> affectedCells,
             bool wayTopologyChanged = false)
         {
-            var uniqueCells = new HashSet<int>();
+            var uniqueCells = new HashSet<CellCoordinate>();
             var chunks = new HashSet<ChunkCoordinate>();
             for (var index = 0; index < affectedCells.Count; index++)
             {
                 var coordinate = affectedCells[index];
-                var cellIndex = WorldIndex.EncodeCell(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if (!uniqueCells.Add(cellIndex))
+                if (!uniqueCells.Add(coordinate))
                 {
                     continue;
                 }
 
-                chunks.Add(new ChunkCoordinate(
-                    coordinate.X / world.ChunkSizeX,
-                    coordinate.Y / world.ChunkSizeY,
-                    coordinate.Z / world.ChunkSizeZ));
+                chunks.Add(WorldCoordinateUtility.ToChunk(
+                    coordinate,
+                    world.ChunkSizeX,
+                    world.ChunkSizeY));
             }
 
-            var cellIndices = new int[uniqueCells.Count];
-            uniqueCells.CopyTo(cellIndices);
-            Array.Sort(cellIndices);
+            var changedCells = new CellCoordinate[uniqueCells.Count];
+            uniqueCells.CopyTo(changedCells);
+            Array.Sort(changedCells);
             var affectedChunks = new ChunkCoordinate[chunks.Count];
             chunks.CopyTo(affectedChunks);
             Array.Sort(affectedChunks, CompareChunks);
@@ -1233,7 +1176,7 @@ namespace MiniCivilization.World.Runtime
                 CopyAndSort(added),
                 CopyAndSort(removed),
                 CopyAndSort(moved),
-                cellIndices,
+                changedCells,
                 affectedChunks,
                 wayTopologyChanged);
             Changed?.Invoke(changeSet);

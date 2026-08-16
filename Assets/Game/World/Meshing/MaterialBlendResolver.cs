@@ -80,7 +80,7 @@ namespace MiniCivilization.World.Meshing
 
         internal static SurfaceAppearance ResolveTerrainAppearance(
             WorldSurfaceCatalog catalog,
-            BiomeType biome,
+            TerrainBiome biome,
             SurfaceType surface)
         {
             return catalog != null
@@ -141,7 +141,7 @@ namespace MiniCivilization.World.Meshing
 
             return ResolveTerrainAppearance(
                 catalog,
-                world.GetEnvironment(x, z).Biome,
+                cell.Biome.Terrain,
                 surfaceOverride ?? surface);
         }
 

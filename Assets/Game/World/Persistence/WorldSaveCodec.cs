@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Persistence
@@ -12,9 +13,8 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D;
         private const uint WaterFlowScheduleMarker = 0x31534657;
         private const uint EntitiesMarker = 0x31544E45;
-        private const ushort CurrentVersion = 10;
-        private const int CellByteSize = 16;
-        private const int EnvironmentByteSize = 5;
+        private const ushort CurrentVersion = 12;
+        private const int CellByteSize = 18;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
         private enum ValueEncoding : byte
@@ -71,28 +71,21 @@ namespace MiniCivilization.World.Persistence
             writer.Write((byte)0);
             WriteSettings(writer, world.Settings);
 
-            var chunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
-            writer.Write(chunkCount);
-            foreach (var chunk in world.EnumerateChunks())
+            var chunks = new List<ChunkData>(world.EnumerateChunks());
+            chunks.Sort((left, right) =>
+                left.Coordinate.CompareTo(right.Coordinate));
+            writer.Write(chunks.Count);
+            for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
             {
+                var chunk = chunks[chunkIndex];
                 writer.Write(chunk.Coordinate.X);
                 writer.Write(chunk.Coordinate.Y);
                 writer.Write(chunk.Coordinate.Z);
                 WriteCellSection(writer, chunk.AsSpan());
             }
 
-            var environmentSectionCount = checked(world.ChunkCountX * world.ChunkCountZ);
-            writer.Write(environmentSectionCount);
-            for (var chunkZ = 0; chunkZ < world.ChunkCountZ; chunkZ++)
-            for (var chunkX = 0; chunkX < world.ChunkCountX; chunkX++)
-            {
-                writer.Write(chunkX);
-                writer.Write(chunkZ);
-                WriteEnvironmentSection(writer, world, chunkX, chunkZ);
-            }
-
             WriteWaterFlowSchedule(writer, world.WaterFlowSchedule);
-            WriteEntities(writer, world.Entities);
+            WriteEntities(writer, world);
             writer.Write(Footer);
             writer.Flush();
         }
@@ -133,10 +126,10 @@ namespace MiniCivilization.World.Persistence
             var world = new WorldData(ReadSettings(reader));
             var expectedChunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
             var chunkCount = reader.ReadInt32();
-            if (chunkCount != expectedChunkCount)
+            if (chunkCount < 0 || chunkCount > expectedChunkCount)
             {
                 throw new InvalidDataException(
-                    $"The save contains {chunkCount} Cell chunks; {expectedChunkCount} were expected.");
+                    $"The save contains an invalid Cell chunk count {chunkCount}.");
             }
 
             var loadedChunks = new bool[expectedChunkCount];
@@ -155,38 +148,9 @@ namespace MiniCivilization.World.Persistence
                 }
 
                 loadedChunks[chunkIndex] = true;
-                ReadCellSection(reader, world.GetChunk(chunkX, chunkY, chunkZ));
-            }
-
-            var expectedEnvironmentSections = checked(world.ChunkCountX * world.ChunkCountZ);
-            var environmentSectionCount = reader.ReadInt32();
-            if (environmentSectionCount != expectedEnvironmentSections)
-            {
-                throw new InvalidDataException(
-                    $"The save contains {environmentSectionCount} environment chunks; " +
-                    $"{expectedEnvironmentSections} were expected.");
-            }
-
-            var loadedEnvironmentSections = new bool[expectedEnvironmentSections];
-            for (var i = 0; i < environmentSectionCount; i++)
-            {
-                var chunkX = reader.ReadInt32();
-                var chunkZ = reader.ReadInt32();
-                if ((uint)chunkX >= world.ChunkCountX || (uint)chunkZ >= world.ChunkCountZ)
-                {
-                    throw new InvalidDataException(
-                        $"Environment chunk ({chunkX}, {chunkZ}) is outside the world.");
-                }
-
-                var sectionIndex = chunkX + world.ChunkCountX * chunkZ;
-                if (loadedEnvironmentSections[sectionIndex])
-                {
-                    throw new InvalidDataException(
-                        $"Environment chunk ({chunkX}, {chunkZ}) occurs more than once.");
-                }
-
-                loadedEnvironmentSections[sectionIndex] = true;
-                ReadEnvironmentSection(reader, world, chunkX, chunkZ);
+                ReadCellSection(
+                    reader,
+                    world.GetOrCreateChunk(chunkX, chunkY, chunkZ));
             }
 
             if (reader.ReadUInt32() != WaterFlowScheduleMarker)
@@ -218,12 +182,15 @@ namespace MiniCivilization.World.Persistence
             WaterFlowScheduleData schedule)
         {
             writer.Write(WaterFlowScheduleMarker);
-            writer.Write(schedule.FrontierCellIndices.Count);
+            writer.Write(schedule.FrontierCells.Count);
             for (var index = 0;
-                 index < schedule.FrontierCellIndices.Count;
+                 index < schedule.FrontierCells.Count;
                  index++)
             {
-                writer.Write(schedule.FrontierCellIndices[index]);
+                var cell = schedule.FrontierCells[index];
+                writer.Write(cell.X);
+                writer.Write(cell.Y);
+                writer.Write(cell.Z);
             }
         }
 
@@ -241,25 +208,27 @@ namespace MiniCivilization.World.Persistence
                     "The water flow frontier size is invalid.");
             }
 
-            var frontier = new int[frontierCount];
-            var seen = new bool[cellCapacity];
+            var frontier = new CellCoordinate[frontierCount];
+            var seen = new HashSet<CellCoordinate>();
             for (var index = 0; index < frontierCount; index++)
             {
-                var cellIndex = reader.ReadInt32();
-                if ((uint)cellIndex >= cellCapacity)
+                var cell = new CellCoordinate(
+                    reader.ReadInt32(),
+                    reader.ReadInt32(),
+                    reader.ReadInt32());
+                if (!world.Contains(cell.X, cell.Y, cell.Z))
                 {
                     throw new InvalidDataException(
                         "A water flow frontier Cell is outside the world.");
                 }
 
-                if (seen[cellIndex])
+                if (!seen.Add(cell))
                 {
                     throw new InvalidDataException(
                         "A water flow frontier Cell occurs more than once.");
                 }
 
-                seen[cellIndex] = true;
-                frontier[index] = cellIndex;
+                frontier[index] = cell;
             }
 
             schedule.ReplaceFrontier(frontier);
@@ -267,8 +236,10 @@ namespace MiniCivilization.World.Persistence
 
         private static void WriteEntities(
             BinaryWriter writer,
-            System.Collections.Generic.IReadOnlyList<EntityData> entities)
+            WorldData world)
         {
+            var entities = new List<EntityData>(world.EnumerateEntities());
+            entities.Sort((left, right) => left.Id.CompareTo(right.Id));
             writer.Write(EntitiesMarker);
             writer.Write(entities.Count);
             for (var index = 0; index < entities.Count; index++)
@@ -354,27 +325,11 @@ namespace MiniCivilization.World.Persistence
             using var stream = new MemoryStream(section.Payload, writable: false);
             using var payloadReader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
-            var localX = 0;
-            var localY = 0;
-            var localZ = 0;
+            var localIndex = 0;
             void Store(CellData cell)
             {
-                chunk.SetCellRaw(localX, localY, localZ, cell);
-                localX++;
-                if (localX < chunk.SizeX)
-                {
-                    return;
-                }
-
-                localX = 0;
-                localZ++;
-                if (localZ < chunk.SizeZ)
-                {
-                    return;
-                }
-
-                localZ = 0;
-                localY++;
+                chunk.SetCellRaw(new LocalCellIndex(localIndex), cell);
+                localIndex++;
             }
 
             if (section.Encoding == ValueEncoding.Raw)
@@ -399,99 +354,6 @@ namespace MiniCivilization.World.Persistence
                     for (var runIndex = 0; runIndex < runLength; runIndex++)
                     {
                         Store(cell);
-                    }
-
-                    loaded += runLength;
-                }
-            }
-
-            EnsurePayloadConsumed(stream);
-        }
-
-        private static void WriteEnvironmentSection(
-            BinaryWriter writer,
-            WorldData world,
-            int chunkX,
-            int chunkZ)
-        {
-            var count = checked(world.ChunkSizeX * world.ChunkSizeZ);
-            var values = new EnvironmentData[count];
-            var startX = chunkX * world.ChunkSizeX;
-            var startZ = chunkZ * world.ChunkSizeZ;
-            var index = 0;
-            for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
-            for (var localX = 0; localX < world.ChunkSizeX; localX++)
-            {
-                values[index++] = world.GetEnvironment(startX + localX, startZ + localZ);
-            }
-
-            var rawLength = checked(count * EnvironmentByteSize);
-            var runLength = CalculateEnvironmentRunLengthSize(values);
-            var encoding = runLength < rawLength ? ValueEncoding.RunLength : ValueEncoding.Raw;
-
-            using var encodedStream = new MemoryStream(Math.Min(rawLength, runLength));
-            using (var encodedWriter = new BinaryWriter(encodedStream, Encoding.UTF8, leaveOpen: true))
-            {
-                if (encoding == ValueEncoding.Raw)
-                {
-                    for (var i = 0; i < values.Length; i++)
-                    {
-                        WriteEnvironment(encodedWriter, values[i]);
-                    }
-                }
-                else
-                {
-                    WriteEnvironmentRuns(encodedWriter, values);
-                }
-            }
-
-            WriteSection(writer, count, encoding, encodedStream.ToArray());
-        }
-
-        private static void ReadEnvironmentSection(
-            BinaryReader reader,
-            WorldData world,
-            int chunkX,
-            int chunkZ)
-        {
-            var expectedCount = checked(world.ChunkSizeX * world.ChunkSizeZ);
-            var section = ReadSection(reader, expectedCount, EnvironmentByteSize);
-            using var stream = new MemoryStream(section.Payload, writable: false);
-            using var payloadReader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
-            var startX = chunkX * world.ChunkSizeX;
-            var startZ = chunkZ * world.ChunkSizeZ;
-            var localIndex = 0;
-
-            void Store(EnvironmentData value)
-            {
-                var localX = localIndex % world.ChunkSizeX;
-                var localZ = localIndex / world.ChunkSizeX;
-                world.SetEnvironment(startX + localX, startZ + localZ, value);
-                localIndex++;
-            }
-
-            if (section.Encoding == ValueEncoding.Raw)
-            {
-                for (var i = 0; i < expectedCount; i++)
-                {
-                    Store(ReadEnvironment(payloadReader));
-                }
-            }
-            else
-            {
-                var loaded = 0;
-                while (loaded < expectedCount)
-                {
-                    var runLength = ReadVariableUInt(payloadReader);
-                    if (runLength == 0 || runLength > expectedCount - loaded)
-                    {
-                        throw new InvalidDataException("An environment run exceeds its chunk bounds.");
-                    }
-
-                    var value = ReadEnvironment(payloadReader);
-                    for (var runIndex = 0; runIndex < runLength; runIndex++)
-                    {
-                        Store(value);
                     }
 
                     loaded += runLength;
@@ -625,54 +487,9 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
-        private static int CalculateEnvironmentRunLengthSize(EnvironmentData[] values)
-        {
-            if (values.Length == 0)
-            {
-                return 0;
-            }
-
-            var length = 0;
-            var runStart = 0;
-            for (var i = 1; i <= values.Length; i++)
-            {
-                if (i < values.Length && EnvironmentEquals(values[i], values[runStart]))
-                {
-                    continue;
-                }
-
-                length = checked(length + VariableUIntByteCount(i - runStart) + EnvironmentByteSize);
-                runStart = i;
-            }
-
-            return length;
-        }
-
-        private static void WriteEnvironmentRuns(
-            BinaryWriter writer,
-            EnvironmentData[] values)
-        {
-            if (values.Length == 0)
-            {
-                return;
-            }
-
-            var runStart = 0;
-            for (var i = 1; i <= values.Length; i++)
-            {
-                if (i < values.Length && EnvironmentEquals(values[i], values[runStart]))
-                {
-                    continue;
-                }
-
-                WriteVariableUInt(writer, i - runStart);
-                WriteEnvironment(writer, values[runStart]);
-                runStart = i;
-            }
-        }
-
         private static void WriteCell(BinaryWriter writer, CellData cell)
         {
+            writer.Write(cell.Biome.Value);
             writer.Write((ushort)cell.Terrain.Material);
             writer.Write((ushort)cell.Terrain.Surface);
             writer.Write((ushort)cell.Terrain.Geology);
@@ -690,6 +507,7 @@ namespace MiniCivilization.World.Persistence
         {
             return new CellData
             {
+                Biome = CellBiome.FromValue(reader.ReadUInt16()),
                 Terrain = new TerrainData
                 {
                     Material = (MaterialType)reader.ReadUInt16(),
@@ -710,25 +528,6 @@ namespace MiniCivilization.World.Persistence
                     Type = (RoadType)reader.ReadUInt16(),
                     CrossesCenter = reader.ReadBoolean()
                 }
-            };
-        }
-
-        private static void WriteEnvironment(BinaryWriter writer, EnvironmentData value)
-        {
-            writer.Write((ushort)value.Biome);
-            writer.Write(value.Temperature);
-            writer.Write(value.Moisture);
-            writer.Write(value.Fertility);
-        }
-
-        private static EnvironmentData ReadEnvironment(BinaryReader reader)
-        {
-            return new EnvironmentData
-            {
-                Biome = (BiomeType)reader.ReadUInt16(),
-                Temperature = reader.ReadByte(),
-                Moisture = reader.ReadByte(),
-                Fertility = reader.ReadByte()
             };
         }
 
@@ -828,16 +627,6 @@ namespace MiniCivilization.World.Persistence
             return count;
         }
 
-        private static bool EnvironmentEquals(
-            EnvironmentData left,
-            EnvironmentData right)
-        {
-            return left.Biome == right.Biome
-                && left.Temperature == right.Temperature
-                && left.Moisture == right.Moisture
-                && left.Fertility == right.Fertility;
-        }
-
         private static byte[] ReadBytesExact(BinaryReader reader, int count)
         {
             var bytes = reader.ReadBytes(count);
@@ -894,10 +683,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.WaterFlowRules.SpreadAmountLoss);
             writer.Write(settings.WaterFlowRules.MinimumSpreadAmount);
             writer.Write(settings.WaterFlowRules.DissipationAmountLoss);
-            writer.Write(settings.DesertMoistureThreshold);
-            writer.Write(settings.WetlandMoistureThreshold);
-            writer.Write(settings.SnowTemperatureThreshold);
-            writer.Write(settings.WaterMoistureRadius);
+            writer.Write(settings.ColdClimateThreshold);
         }
 
         private static WorldSettingsData ReadSettings(BinaryReader reader)
@@ -954,10 +740,7 @@ namespace MiniCivilization.World.Persistence
                     reader.ReadByte(),
                     reader.ReadByte(),
                     reader.ReadByte()),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadInt32());
+                reader.ReadSingle());
 
             var cellCount = checked(
                 (long)settings.WorldSize

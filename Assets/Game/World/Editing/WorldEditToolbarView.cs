@@ -760,15 +760,6 @@ namespace MiniCivilization.World.Editing
                 return true;
             }
 
-            if (sectionIndex == 1
-                && detailIndex >= 0
-                && detailIndex < (int)BiomeType.Mountain)
-            {
-                action = WorldEditAction.SetBiome(
-                    (BiomeType)(detailIndex + 1));
-                return true;
-            }
-
             return false;
         }
 
@@ -784,11 +775,6 @@ namespace MiniCivilization.World.Editing
                 case WorldEditPropertyGroup.Terrain:
                     sectionIndex = 0;
                     detailIndex = (int)action.TerrainOperation;
-                    break;
-                case WorldEditPropertyGroup.Biome
-                    when action.Biome > BiomeType.None:
-                    sectionIndex = 1;
-                    detailIndex = (int)action.Biome - 1;
                     break;
                 default:
                     return false;
@@ -942,8 +928,8 @@ namespace MiniCivilization.World.Editing
         {
             return sectionIndex switch
             {
-                0 or 2 => terrainGroup != null && terrainGroup.IsExpanded,
-                1 or 3 => environmentGroup != null
+                0 or 1 => terrainGroup != null && terrainGroup.IsExpanded,
+                2 => environmentGroup != null
                     && environmentGroup.IsExpanded,
                 _ => false
             };

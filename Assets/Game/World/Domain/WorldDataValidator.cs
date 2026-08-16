@@ -19,13 +19,12 @@ namespace MiniCivilization.World.Domain
                 ValidateCell(world.GetCell(x, y, z), x, y, z);
             }
 
-            var cellCount = checked(world.Size * world.Size * world.Height);
             for (var index = 0;
-                 index < world.WaterFlowSchedule.FrontierCellIndices.Count;
+                 index < world.WaterFlowSchedule.FrontierCells.Count;
                  index++)
             {
-                if ((uint)world.WaterFlowSchedule.FrontierCellIndices[index]
-                    >= (uint)cellCount)
+                var cell = world.WaterFlowSchedule.FrontierCells[index];
+                if (!world.Contains(cell.X, cell.Y, cell.Z))
                 {
                     throw new InvalidOperationException(
                     "Water flow frontier contains a Cell outside the world.");
@@ -33,9 +32,8 @@ namespace MiniCivilization.World.Domain
             }
 
             var entityIds = new HashSet<EntityId>();
-            for (var index = 0; index < world.Entities.Count; index++)
+            foreach (var entity in world.EnumerateEntities())
             {
-                var entity = world.Entities[index];
                 if (entity == null)
                 {
                     throw new InvalidOperationException(
@@ -75,6 +73,12 @@ namespace MiniCivilization.World.Domain
 
         private static void ValidateCell(CellData cell, int x, int y, int z)
         {
+            if (!cell.Biome.IsValid)
+            {
+                throw new InvalidOperationException(
+                    $"Cell ({x}, {y}, {z}) has invalid Biome data.");
+            }
+
             if (cell.Terrain.SolidHeight > WorldGrid.HeightStepsPerCell)
             {
                 throw new InvalidOperationException(

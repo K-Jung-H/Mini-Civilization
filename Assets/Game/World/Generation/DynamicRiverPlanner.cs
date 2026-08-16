@@ -104,7 +104,9 @@ namespace MiniCivilization.World.Generation
 
             foreach (var pair in featurePlan.TerrainColumns)
             {
-                solidHeights[pair.Key] = pair.Value.TargetHeightUnits;
+                var columnIndex = pair.Key.X
+                    + featurePlan.WorldSize * pair.Key.Z;
+                solidHeights[columnIndex] = pair.Value.TargetHeightUnits;
             }
 
             InlandLakePlanner.ApplyPlans(
@@ -2482,7 +2484,7 @@ namespace MiniCivilization.World.Generation
                         solidHeights,
                         basins,
                         channel,
-                        validation.LeakedCellIndices))
+                        validation.LeakedCells))
                 {
                     return;
                 }
@@ -2494,10 +2496,10 @@ namespace MiniCivilization.World.Generation
             IReadOnlyList<int> solidHeights,
             IReadOnlyList<BasinPlan> basins,
             ChannelPlan channel,
-            IReadOnlyList<int> leakedCellIndices)
+            IReadOnlyList<CellCoordinate> leakedCells)
         {
-            if (leakedCellIndices == null
-                || leakedCellIndices.Count == 0)
+            if (leakedCells == null
+                || leakedCells.Count == 0)
             {
                 return false;
             }
@@ -2522,12 +2524,10 @@ namespace MiniCivilization.World.Generation
             var maximumWorldHeight = checked(
                 world.Height * WorldGrid.HeightStepsPerCell);
             for (var leakIndex = 0;
-                 leakIndex < leakedCellIndices.Count;
+                 leakIndex < leakedCells.Count;
                  leakIndex++)
             {
-                var coordinate = WorldIndex.DecodeCell(
-                    world,
-                    leakedCellIndices[leakIndex]);
+                var coordinate = leakedCells[leakIndex];
                 var columnIndex = coordinate.X
                     + world.Size * coordinate.Z;
                 if (channelColumns.Contains(columnIndex)
@@ -2560,7 +2560,9 @@ namespace MiniCivilization.World.Generation
                     solidHeights[pair.Key],
                     pair.Value);
                 if (channel.TerrainColumns.TryGetValue(
-                        pair.Key,
+                        new CellColumnCoordinate(
+                            pair.Key % world.Size,
+                            pair.Key / world.Size),
                         out var existingColumn))
                 {
                     targetHeight = Math.Max(

@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Meshing;
@@ -8,7 +7,7 @@ using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Presentation
 {
-    public sealed class WorldChunkView : MonoBehaviour
+    public sealed class WorldRenderPatchView : MonoBehaviour
     {
         private static readonly int RoadPatchMapProperty = Shader.PropertyToID(
             "_RoadPatchMap");
@@ -20,7 +19,6 @@ namespace MiniCivilization.World.Presentation
         [SerializeField, HideInInspector] private int patchX;
         [SerializeField, HideInInspector] private int patchZ;
         [SerializeField, HideInInspector] private int patchSize;
-        [SerializeField, HideInInspector] private bool preparedReadOnly;
 
         private MeshFilter terrainFilter;
         private MeshRenderer terrainRenderer;
@@ -35,7 +33,6 @@ namespace MiniCivilization.World.Presentation
         public int PatchX => patchX;
         public int PatchZ => patchZ;
         public int PatchSize => patchSize;
-        public bool IsPrepared => preparedReadOnly;
 
         internal void Build(
             WorldData world,
@@ -54,7 +51,7 @@ namespace MiniCivilization.World.Presentation
             this.patchX = patchX;
             this.patchZ = patchZ;
             this.patchSize = patchSize;
-            name = $"World Chunk [{patchX}, {patchZ}]";
+            name = $"World Patch [{patchX}, {patchZ}]";
             transform.localPosition = new Vector3(
                 patchX * patchSize * world.CellSize,
                 0f,
@@ -70,7 +67,6 @@ namespace MiniCivilization.World.Presentation
                     waterMaterial);
             }
 
-            var replacePreparedMeshes = preparedReadOnly;
             var terrainBuffers = TerrainChunkMeshBuilder.Build(
                 world,
                 patchX,
@@ -83,7 +79,7 @@ namespace MiniCivilization.World.Presentation
                 scratch.SolidCells);
             terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
                 $"Terrain [{patchX}, {patchZ}]",
-                replacePreparedMeshes ? null : terrainFilter.sharedMesh);
+                terrainFilter.sharedMesh);
             terrainRenderer.sharedMaterial = terrainMaterial;
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
@@ -100,16 +96,15 @@ namespace MiniCivilization.World.Presentation
                 exposureCache,
                 scratch.Water,
                 scratch.WaterCells,
-                scratch.WaterCellIndices);
+                scratch.WaterCellsSet);
             waterFilter.sharedMesh = waterBuffers.CreateMesh(
                 $"Water [{patchX}, {patchZ}]",
-                replacePreparedMeshes ? null : waterFilter.sharedMesh);
+                waterFilter.sharedMesh);
             waterRenderer.sharedMaterial = waterMaterial;
             waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
             waterRenderer.receiveShadows = true;
             waterRenderer.enabled = !waterBuffers.IsEmpty;
 
-            preparedReadOnly = false;
         }
 
         internal void RebuildWater(
@@ -120,12 +115,6 @@ namespace MiniCivilization.World.Presentation
             WorldExposureCache exposureCache,
             WorldMeshBuildScratch scratch)
         {
-            if (preparedReadOnly)
-            {
-                throw new System.InvalidOperationException(
-                    "Prepared patches must be converted with a full rebuild.");
-            }
-
             EnsureChildren();
             var waterBuffers = WaterChunkMeshBuilder.Build(
                 world,
@@ -137,7 +126,7 @@ namespace MiniCivilization.World.Presentation
                 exposureCache,
                 scratch.Water,
                 scratch.WaterCells,
-                scratch.WaterCellIndices);
+                scratch.WaterCellsSet);
             waterFilter.sharedMesh = waterBuffers.CreateMesh(
                 $"Water [{patchX}, {patchZ}]",
                 waterFilter.sharedMesh);
@@ -155,12 +144,6 @@ namespace MiniCivilization.World.Presentation
             WorldExposureCache exposureCache,
             WorldMeshBuildScratch scratch)
         {
-            if (preparedReadOnly)
-            {
-                throw new System.InvalidOperationException(
-                    "Prepared patches must be converted with a full rebuild.");
-            }
-
             EnsureChildren();
             var terrainBuffers = TerrainChunkMeshBuilder.Build(
                 world,
@@ -254,11 +237,6 @@ namespace MiniCivilization.World.Presentation
         public void ReleaseMeshes()
         {
             ReleaseRoadVisuals();
-            if (preparedReadOnly)
-            {
-                return;
-            }
-
             var filters = GetComponentsInChildren<MeshFilter>(true);
             for (var index = 0; index < filters.Length; index++)
             {
@@ -267,45 +245,6 @@ namespace MiniCivilization.World.Presentation
         }
 
         private void OnDestroy() => ReleaseMeshes();
-
-        public bool AdoptPrepared()
-        {
-            terrainFilter = FindFilter("Terrain", out terrainRenderer);
-            waterFilter = FindFilter("Water", out waterRenderer);
-            if (terrainFilter == null
-                || waterFilter == null
-                || terrainFilter.sharedMesh == null
-                || waterFilter.sharedMesh == null
-                || (waterFilter.sharedMesh.vertexCount > 0
-                    && !waterFilter.sharedMesh.HasVertexAttribute(
-                        VertexAttribute.TexCoord5)))
-            {
-                return false;
-            }
-
-            preparedReadOnly = true;
-            return true;
-        }
-
-        public void MarkPrepared()
-        {
-            preparedReadOnly = true;
-        }
-
-        public IEnumerable<Mesh> EnumerateMeshes()
-        {
-            CacheExistingChildren();
-            if (terrainFilter != null && terrainFilter.sharedMesh != null)
-            {
-                yield return terrainFilter.sharedMesh;
-            }
-
-            if (waterFilter != null && waterFilter.sharedMesh != null)
-            {
-                yield return waterFilter.sharedMesh;
-            }
-
-        }
 
         private void EnsureChildren()
         {
@@ -365,25 +304,6 @@ namespace MiniCivilization.World.Presentation
             roadPatchPixels = null;
             roadPortOffsetPixels = null;
             terrainProperties = null;
-        }
-
-        private void CacheExistingChildren()
-        {
-            terrainFilter = FindFilter("Terrain", out terrainRenderer);
-            waterFilter = FindFilter("Water", out waterRenderer);
-        }
-
-        private MeshFilter FindFilter(
-            string childName,
-            out MeshRenderer renderer)
-        {
-            var child = transform.Find(childName);
-            renderer = child != null
-                ? child.GetComponent<MeshRenderer>()
-                : null;
-            return child != null
-                ? child.GetComponent<MeshFilter>()
-                : null;
         }
 
         private void EnsureRenderChild(

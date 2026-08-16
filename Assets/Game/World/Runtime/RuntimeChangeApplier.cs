@@ -15,21 +15,21 @@ namespace MiniCivilization.World.Runtime
 
         public WorldChangeSet Apply(
             WorldChangeType changeTypes,
-            IReadOnlyList<int> changedCellIndices,
-            IReadOnlyList<int> changedColumnIndices,
+            IReadOnlyList<CellCoordinate> changedCells,
+            IReadOnlyList<CellColumnCoordinate> changedColumns,
             IReadOnlyList<ChunkCoordinate> affectedChunks,
             CellBounds affectedBounds,
             bool rebuildNavigationColumns,
             bool rebuildWaterDistances)
         {
-            if (changedCellIndices == null)
+            if (changedCells == null)
             {
-                throw new ArgumentNullException(nameof(changedCellIndices));
+                throw new ArgumentNullException(nameof(changedCells));
             }
 
-            if (changedColumnIndices == null)
+            if (changedColumns == null)
             {
-                throw new ArgumentNullException(nameof(changedColumnIndices));
+                throw new ArgumentNullException(nameof(changedColumns));
             }
 
             if (affectedChunks == null)
@@ -39,7 +39,7 @@ namespace MiniCivilization.World.Runtime
 
             RebuildDerived(
                 changeTypes,
-                changedColumnIndices,
+                changedColumns,
                 rebuildNavigationColumns,
                 rebuildWaterDistances);
 
@@ -49,21 +49,21 @@ namespace MiniCivilization.World.Runtime
                 runtime.Data,
                 changeId,
                 changeTypes,
-                changedCellIndices,
-                changedColumnIndices,
+                changedCells,
+                changedColumns,
                 affectedChunks,
                 affectedBounds);
         }
 
         public void RebuildDerived(
             WorldChangeType changeTypes,
-            IReadOnlyList<int> changedColumnIndices,
+            IReadOnlyList<CellColumnCoordinate> changedColumns,
             bool rebuildNavigationColumns,
             bool rebuildWaterDistances)
         {
-            if (changedColumnIndices == null)
+            if (changedColumns == null)
             {
-                throw new ArgumentNullException(nameof(changedColumnIndices));
+                throw new ArgumentNullException(nameof(changedColumns));
             }
 
             var surfaceChanged = (changeTypes & (
@@ -73,26 +73,22 @@ namespace MiniCivilization.World.Runtime
                 | WorldChangeType.WaterSurface)) != 0;
             if (surfaceChanged)
             {
-                for (var index = 0; index < changedColumnIndices.Count; index++)
+                for (var index = 0; index < changedColumns.Count; index++)
                 {
-                    WorldIndex.DecodeColumn(
-                        runtime.Data,
-                        changedColumnIndices[index],
-                        out var x,
-                        out var z);
-                    runtime.SurfaceCache.Rebuild(x, z);
+                    var column = changedColumns[index];
+                    runtime.SurfaceCache.Rebuild(column.X, column.Z);
                 }
             }
 
             if (rebuildNavigationColumns)
             {
-                runtime.NavigationCache.RebuildColumns(changedColumnIndices);
+                runtime.NavigationCache.RebuildColumns(changedColumns);
             }
 
             if (rebuildWaterDistances)
             {
                 runtime.NavigationCache.RebuildWaterDistances(
-                    changedColumnIndices);
+                    changedColumns);
             }
 
         }

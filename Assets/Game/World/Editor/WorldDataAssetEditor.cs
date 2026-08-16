@@ -22,12 +22,6 @@ namespace MiniCivilization.World.Editor
             EditorGUILayout.LabelField(
                 "Serialized Bytes",
                 EditorUtility.FormatBytes(asset.SerializedByteCount));
-            EditorGUILayout.LabelField(
-                "Prepared Cache",
-                asset.HasPreparedRenderCache
-                    ? $"{asset.PreparedPatchCount} patches, {asset.PreparedMeshes.Count} meshes"
-                    : "None");
-
             using (new EditorGUI.DisabledScope(!asset.HasData))
             {
                 if (GUILayout.Button("Export To World File..."))

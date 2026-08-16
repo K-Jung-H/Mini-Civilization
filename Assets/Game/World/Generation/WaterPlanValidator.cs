@@ -8,18 +8,18 @@ namespace MiniCivilization.World.Generation
 {
     internal sealed class WaterPlanValidationResult
     {
-        public IReadOnlyList<int> LeakedCellIndices { get; }
+        public IReadOnlyList<CellCoordinate> LeakedCells { get; }
         public bool IsValid { get; }
 
         public WaterPlanValidationResult(
             bool stabilized,
-            IReadOnlyList<int> leakedCellIndices,
-            IReadOnlyList<int> missingRequiredCellIndices)
+            IReadOnlyList<CellCoordinate> leakedCells,
+            IReadOnlyList<CellCoordinate> missingRequiredCells)
         {
-            LeakedCellIndices = leakedCellIndices ?? Array.Empty<int>();
+            LeakedCells = leakedCells ?? Array.Empty<CellCoordinate>();
             IsValid = stabilized
-                && LeakedCellIndices.Count == 0
-                && (missingRequiredCellIndices?.Count ?? 0) == 0;
+                && LeakedCells.Count == 0
+                && (missingRequiredCells?.Count ?? 0) == 0;
         }
     }
 
@@ -27,12 +27,12 @@ namespace MiniCivilization.World.Generation
     {
         internal WorldData SourceWorld { get; }
         internal int MaximumWaves { get; }
-        internal HashSet<int> BaselineWetCells { get; }
+        internal HashSet<CellCoordinate> BaselineWetCells { get; }
 
         internal WaterPlanValidationContext(
             WorldData sourceWorld,
             int maximumWaves,
-            HashSet<int> baselineWetCells)
+            HashSet<CellCoordinate> baselineWetCells)
         {
             SourceWorld = sourceWorld;
             MaximumWaves = maximumWaves;
@@ -106,18 +106,18 @@ namespace MiniCivilization.World.Generation
             var planMaximumWaves = Math.Max(
                 context.MaximumWaves,
                 checked(
-                    plan.AllowedWetCellIndices.Count
+                    plan.AllowedWetCells.Count
                     + sourceWorld.Height * 2));
             var stabilized = RunToStability(
                 preview,
                 planMaximumWaves);
             var leaked = FindLeakedCells(
                 preview.Data,
-                plan.AllowedWetCellIndices,
+                plan.AllowedWetCells,
                 context.BaselineWetCells);
             var missing = FindMissingRequiredCells(
                 preview.Data,
-                plan.RequiredWetCellIndices);
+                plan.RequiredWetCells);
             return new WaterPlanValidationResult(
                 stabilized,
                 leaked,
@@ -138,7 +138,7 @@ namespace MiniCivilization.World.Generation
             resolver.RestoreFrontier(
                 world,
                 flowState,
-                world.WaterFlowSchedule.FrontierCellIndices);
+                world.WaterFlowSchedule.FrontierCells);
             var parameters = new WaterFlowParameters(world.WaterFlowRules);
             var completedWaveCount = 0;
             while (resolver.HasWork && completedWaveCount < maximumWaves)
@@ -155,16 +155,16 @@ namespace MiniCivilization.World.Generation
             return !resolver.HasWork;
         }
 
-        private static HashSet<int> CaptureWetCells(WorldData world)
+        private static HashSet<CellCoordinate> CaptureWetCells(WorldData world)
         {
-            var result = new HashSet<int>();
+            var result = new HashSet<CellCoordinate>();
             for (var y = 0; y < world.Height; y++)
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
                 if (world.GetCell(x, y, z).HasWater)
                 {
-                    result.Add(WorldIndex.EncodeCell(world, x, y, z));
+                    result.Add(new CellCoordinate(x, y, z));
                 }
             }
 
@@ -237,14 +237,14 @@ namespace MiniCivilization.World.Generation
             }
         }
 
-        private static List<int> FindLeakedCells(
+        private static List<CellCoordinate> FindLeakedCells(
             WorldData preview,
-            IReadOnlyCollection<int> allowedCells,
-            HashSet<int> baselineWetCells)
+            IReadOnlyCollection<CellCoordinate> allowedCells,
+            HashSet<CellCoordinate> baselineWetCells)
         {
-            var allowed = allowedCells as HashSet<int>
-                ?? new HashSet<int>(allowedCells);
-            var result = new List<int>();
+            var allowed = allowedCells as HashSet<CellCoordinate>
+                ?? new HashSet<CellCoordinate>(allowedCells);
+            var result = new List<CellCoordinate>();
             for (var y = 0; y < preview.Height; y++)
             for (var z = 0; z < preview.Size; z++)
             for (var x = 0; x < preview.Size; x++)
@@ -254,11 +254,11 @@ namespace MiniCivilization.World.Generation
                     continue;
                 }
 
-                var index = WorldIndex.EncodeCell(preview, x, y, z);
-                if (!baselineWetCells.Contains(index)
-                    && !allowed.Contains(index))
+                var coordinate = new CellCoordinate(x, y, z);
+                if (!baselineWetCells.Contains(coordinate)
+                    && !allowed.Contains(coordinate))
                 {
-                    result.Add(index);
+                    result.Add(coordinate);
                 }
             }
 
@@ -266,21 +266,20 @@ namespace MiniCivilization.World.Generation
             return result;
         }
 
-        private static List<int> FindMissingRequiredCells(
+        private static List<CellCoordinate> FindMissingRequiredCells(
             WorldData preview,
-            IReadOnlyCollection<int> requiredCells)
+            IReadOnlyCollection<CellCoordinate> requiredCells)
         {
-            var result = new List<int>();
-            foreach (var index in requiredCells)
+            var result = new List<CellCoordinate>();
+            foreach (var coordinate in requiredCells)
             {
-                var coordinate = WorldIndex.DecodeCell(preview, index);
                 if (!preview.GetCell(
                         coordinate.X,
                         coordinate.Y,
                         coordinate.Z)
                     .HasWater)
                 {
-                    result.Add(index);
+                    result.Add(coordinate);
                 }
             }
 
@@ -380,6 +379,10 @@ namespace MiniCivilization.World.Generation
             public static WaterPreview Create(WorldData source)
             {
                 var data = new WorldData(source.Settings);
+                foreach (var column in source.EnumerateLoadedColumns())
+                {
+                    data.EnsureColumnLoaded(column.Coordinate);
+                }
 
                 for (var y = 0; y < source.Height; y++)
                 for (var z = 0; z < source.Size; z++)
@@ -402,7 +405,6 @@ namespace MiniCivilization.World.Generation
                 }
 
                 var surfaceCache = new SurfaceCache(data);
-                surfaceCache.RebuildAll();
                 return new WaterPreview(data, surfaceCache);
             }
         }

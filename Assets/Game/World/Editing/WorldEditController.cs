@@ -154,13 +154,6 @@ namespace MiniCivilization.World.Editing
             return Commit(transaction);
         }
 
-        public WorldChangeSet SetBiome(int x, int z, BiomeType biome)
-        {
-            var transaction = BeginTransaction();
-            transaction.SetBiome(x, z, biome);
-            return Commit(transaction);
-        }
-
         public bool Undo()
         {
             if (!CanUndo)
@@ -224,8 +217,7 @@ namespace MiniCivilization.World.Editing
             }
 
             var cellChanges = transaction.CopyCellChanges();
-            var environmentChanges = transaction.CopyEnvironmentChanges();
-            var changedColumns = new HashSet<int>();
+            var changedColumns = new HashSet<CellColumnCoordinate>();
 
             try
             {
@@ -237,52 +229,33 @@ namespace MiniCivilization.World.Editing
                         change.Coordinate.Y,
                         change.Coordinate.Z,
                         change.Current);
-                    changedColumns.Add(WorldIndex.EncodeColumn(
-                        boundWorld,
+                    changedColumns.Add(new CellColumnCoordinate(
                         change.Coordinate.X,
                         change.Coordinate.Z));
                 }
 
-                for (var index = 0; index < environmentChanges.Length; index++)
+                foreach (var column in changedColumns)
                 {
-                    var change = environmentChanges[index];
-                    WorldIndex.DecodeColumn(
-                        boundWorld,
-                        change.ColumnIndex,
-                        out var x,
-                        out var z);
-                    boundWorld.SetEnvironment(x, z, change.Current);
-                    changedColumns.Add(change.ColumnIndex);
-                }
-
-                foreach (var columnIndex in changedColumns)
-                {
-                    WorldIndex.DecodeColumn(
-                        boundWorld,
-                        columnIndex,
-                        out var x,
-                        out var z);
-                    if (!boundWorld.HasTerrainCell(x, z))
+                    if (!boundWorld.HasTerrainCell(column.X, column.Z))
                     {
                         throw new InvalidOperationException(
-                            $"World edit would remove every solid cell from column ({x}, {z}).");
+                            $"World edit would remove every solid cell from column {column}.");
                     }
 
                 }
             }
             catch
             {
-                RestorePreviousValues(cellChanges, environmentChanges);
+                RestorePreviousValues(cellChanges);
                 RebuildColumns(changedColumns);
                 transaction.Cancel();
                 activeTransaction = null;
                 throw;
             }
 
-            var affectedChunks = BuildAffectedChunks(cellChanges, environmentChanges);
+            var affectedChunks = BuildAffectedChunks(cellChanges);
             var changeSet = BuildChangeSet(
                 cellChanges,
-                environmentChanges,
                 changedColumns,
                 affectedChunks);
             transaction.Complete();
@@ -290,9 +263,7 @@ namespace MiniCivilization.World.Editing
 
             if (recordUndo)
             {
-                undoRecords.Push(new WorldEditRecord(
-                    cellChanges,
-                    environmentChanges));
+                undoRecords.Push(new WorldEditRecord(cellChanges));
                 TrimHistory(undoRecords);
                 redoRecords.Clear();
                 HistoryChanged?.Invoke();
@@ -332,26 +303,10 @@ namespace MiniCivilization.World.Editing
                     usePreviousValues ? change.Previous : change.Current);
             }
 
-            for (var index = 0; index < record.EnvironmentChanges.Length; index++)
-            {
-                var change = record.EnvironmentChanges[index];
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    change.ColumnIndex,
-                    out var x,
-                    out var z);
-                transaction.SetEnvironment(
-                    x,
-                    z,
-                    usePreviousValues ? change.Previous : change.Current);
-            }
-
             Commit(transaction, false);
         }
 
-        private void RestorePreviousValues(
-            CellEdit[] cellChanges,
-            EnvironmentEdit[] environmentChanges)
+        private void RestorePreviousValues(CellEdit[] cellChanges)
         {
             for (var index = 0; index < cellChanges.Length; index++)
             {
@@ -363,56 +318,27 @@ namespace MiniCivilization.World.Editing
                     change.Previous);
             }
 
-            for (var index = 0; index < environmentChanges.Length; index++)
-            {
-                var change = environmentChanges[index];
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    change.ColumnIndex,
-                    out var x,
-                    out var z);
-                boundWorld.SetEnvironment(x, z, change.Previous);
-            }
         }
 
-        private void RebuildColumns(IEnumerable<int> columnIndices)
+        private void RebuildColumns(IEnumerable<CellColumnCoordinate> columns)
         {
-            var changedColumns = columnIndices as IReadOnlyCollection<int>
-                ?? new HashSet<int>(columnIndices);
+            var changedColumns = columns as IReadOnlyCollection<CellColumnCoordinate>
+                ?? new HashSet<CellColumnCoordinate>(columns);
             boundRuntime.ChangeApplier.RebuildDerived(
                 WorldChangeType.CellStructure | WorldChangeType.Surface,
-                changedColumns as IReadOnlyList<int>
-                    ?? new List<int>(changedColumns),
+                changedColumns as IReadOnlyList<CellColumnCoordinate>
+                    ?? new List<CellColumnCoordinate>(changedColumns),
                 rebuildNavigationColumns: true,
                 rebuildWaterDistances: true);
         }
 
-        private ChunkCoordinate[] BuildAffectedChunks(
-            CellEdit[] cellChanges,
-            EnvironmentEdit[] environmentChanges)
+        private ChunkCoordinate[] BuildAffectedChunks(CellEdit[] cellChanges)
         {
             var chunks = new HashSet<ChunkCoordinate>();
             for (var index = 0; index < cellChanges.Length; index++)
             {
                 var cell = cellChanges[index].Coordinate;
                 AddCellAndBoundaryChunks(chunks, cell.X, cell.Y, cell.Z);
-            }
-
-            for (var index = 0; index < environmentChanges.Length; index++)
-            {
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    environmentChanges[index].ColumnIndex,
-                    out var x,
-                    out var z);
-                var chunkX = x / boundWorld.ChunkSizeX;
-                var chunkZ = z / boundWorld.ChunkSizeZ;
-                for (var chunkY = 0;
-                     chunkY < boundWorld.ChunkCountY;
-                     chunkY++)
-                {
-                    chunks.Add(new ChunkCoordinate(chunkX, chunkY, chunkZ));
-                }
             }
 
             var result = new ChunkCoordinate[chunks.Count];
@@ -427,12 +353,24 @@ namespace MiniCivilization.World.Editing
             int y,
             int z)
         {
-            var chunkX = x / boundWorld.ChunkSizeX;
-            var chunkY = y / boundWorld.ChunkSizeY;
-            var chunkZ = z / boundWorld.ChunkSizeZ;
-            var localX = x % boundWorld.ChunkSizeX;
-            var localY = y % boundWorld.ChunkSizeY;
-            var localZ = z % boundWorld.ChunkSizeZ;
+            var chunkX = WorldCoordinateUtility.FloorDivide(
+                x,
+                boundWorld.ChunkSizeX);
+            var chunkY = WorldCoordinateUtility.FloorDivide(
+                y,
+                boundWorld.ChunkSizeY);
+            var chunkZ = WorldCoordinateUtility.FloorDivide(
+                z,
+                boundWorld.ChunkSizeZ);
+            var localX = WorldCoordinateUtility.PositiveModulo(
+                x,
+                boundWorld.ChunkSizeX);
+            var localY = WorldCoordinateUtility.PositiveModulo(
+                y,
+                boundWorld.ChunkSizeY);
+            var localZ = WorldCoordinateUtility.PositiveModulo(
+                z,
+                boundWorld.ChunkSizeZ);
 
             var minimumX = localX == 0 ? chunkX - 1 : chunkX;
             var maximumX = localX == boundWorld.ChunkSizeX - 1
@@ -465,11 +403,10 @@ namespace MiniCivilization.World.Editing
 
         private WorldChangeSet BuildChangeSet(
             CellEdit[] cellChanges,
-            EnvironmentEdit[] environmentChanges,
-            HashSet<int> changedColumns,
+            HashSet<CellColumnCoordinate> changedColumns,
             ChunkCoordinate[] affectedChunks)
         {
-            var cellIndices = new int[cellChanges.Length];
+            var changedCells = new CellCoordinate[cellChanges.Length];
             var changeTypes = WorldChangeType.None;
             var hasBounds = false;
             var minimum = default(CellCoordinate);
@@ -478,7 +415,7 @@ namespace MiniCivilization.World.Editing
             for (var index = 0; index < cellChanges.Length; index++)
             {
                 var change = cellChanges[index];
-                cellIndices[index] = change.CellIndex;
+                changedCells[index] = change.Coordinate;
                 changeTypes |= ClassifyChange(change.Previous, change.Current);
                 ExpandBounds(
                     change.Coordinate,
@@ -487,38 +424,15 @@ namespace MiniCivilization.World.Editing
                     ref maximum);
             }
 
-            for (var index = 0; index < environmentChanges.Length; index++)
-            {
-                var change = environmentChanges[index];
-                changeTypes |= WorldChangeType.Environment
-                    | WorldChangeType.Material
-                    | WorldChangeType.Ecology;
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    change.ColumnIndex,
-                    out var x,
-                    out var z);
-                ExpandBounds(
-                    new CellCoordinate(x, 0, z),
-                    ref hasBounds,
-                    ref minimum,
-                    ref maximum);
-                ExpandBounds(
-                    new CellCoordinate(x, boundWorld.Height - 1, z),
-                    ref hasBounds,
-                    ref minimum,
-                    ref maximum);
-            }
-
-            Array.Sort(cellIndices);
-            var columnIndices = new int[changedColumns.Count];
-            changedColumns.CopyTo(columnIndices);
-            Array.Sort(columnIndices);
+            Array.Sort(changedCells);
+            var changedColumnArray = new CellColumnCoordinate[changedColumns.Count];
+            changedColumns.CopyTo(changedColumnArray);
+            Array.Sort(changedColumnArray);
 
             return boundRuntime.ChangeApplier.Apply(
                 changeTypes,
-                cellIndices,
-                columnIndices,
+                changedCells,
+                changedColumnArray,
                 affectedChunks,
                 new CellBounds(minimum, maximum),
                 rebuildNavigationColumns: true,
@@ -614,14 +528,10 @@ namespace MiniCivilization.World.Editing
         private sealed class WorldEditRecord
         {
             public readonly CellEdit[] CellChanges;
-            public readonly EnvironmentEdit[] EnvironmentChanges;
 
-            public WorldEditRecord(
-                CellEdit[] cellChanges,
-                EnvironmentEdit[] environmentChanges)
+            public WorldEditRecord(CellEdit[] cellChanges)
             {
                 CellChanges = cellChanges;
-                EnvironmentChanges = environmentChanges;
             }
         }
     }
@@ -631,16 +541,12 @@ namespace MiniCivilization.World.Editing
         private readonly WorldEditController owner;
         private readonly WorldRuntime runtime;
         private readonly WorldData world;
-        private readonly Dictionary<int, CellEdit> cellChanges = new();
-        private readonly Dictionary<int, EnvironmentEdit> environmentChanges =
-            new();
+        private readonly Dictionary<CellCoordinate, CellEdit> cellChanges = new();
 
         private bool completed;
 
         public int ChangedCellCount => cellChanges.Count;
-        public int ChangedColumnCount => environmentChanges.Count;
-        public bool HasChanges =>
-            cellChanges.Count > 0 || environmentChanges.Count > 0;
+        public bool HasChanges => cellChanges.Count > 0;
         public bool IsCompleted => completed;
 
         internal WorldEditTransaction(
@@ -667,18 +573,18 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            cell.Normalize();
-            var cellIndex = WorldIndex.EncodeCell(world, x, y, z);
-            if (cellChanges.TryGetValue(cellIndex, out var existing))
+            var coordinate = new CellCoordinate(x, y, z);
+            if (cellChanges.TryGetValue(coordinate, out var existing))
             {
+                cell.Biome = existing.Current.Biome;
+                cell.Normalize();
                 if (existing.Previous.Equals(cell))
                 {
-                    cellChanges.Remove(cellIndex);
+                    cellChanges.Remove(coordinate);
                 }
                 else
                 {
-                    cellChanges[cellIndex] = new CellEdit(
-                        cellIndex,
+                    cellChanges[coordinate] = new CellEdit(
                         existing.Coordinate,
                         existing.Previous,
                         cell);
@@ -688,16 +594,17 @@ namespace MiniCivilization.World.Editing
             }
 
             var previous = world.GetCell(x, y, z);
+            cell.Biome = previous.Biome;
+            cell.Normalize();
             if (previous.Equals(cell))
             {
                 return;
             }
 
             cellChanges.Add(
-                cellIndex,
+                coordinate,
                 new CellEdit(
-                    cellIndex,
-                    new CellCoordinate(x, y, z),
+                    coordinate,
                     previous,
                     cell));
         }
@@ -947,52 +854,6 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        public void SetBiome(int x, int z, BiomeType biome)
-        {
-            EnsureColumn(x, z);
-            var environment = GetPendingEnvironment(x, z);
-            environment.Biome = biome;
-            SetEnvironment(x, z, environment);
-        }
-
-        public void SetEnvironment(
-            int x,
-            int z,
-            EnvironmentData environment)
-        {
-            EnsureOpen();
-            EnsureColumn(x, z);
-            var columnIndex = WorldIndex.EncodeColumn(world, x, z);
-            if (environmentChanges.TryGetValue(
-                    columnIndex,
-                    out var existing))
-            {
-                if (EnvironmentEquals(existing.Previous, environment))
-                {
-                    environmentChanges.Remove(columnIndex);
-                }
-                else
-                {
-                    environmentChanges[columnIndex] = new EnvironmentEdit(
-                        columnIndex,
-                        existing.Previous,
-                        environment);
-                }
-
-                return;
-            }
-
-            var previous = world.GetEnvironment(x, z);
-            if (EnvironmentEquals(previous, environment))
-            {
-                return;
-            }
-
-            environmentChanges.Add(
-                columnIndex,
-                new EnvironmentEdit(columnIndex, previous, environment));
-        }
-
         public WorldChangeSet Commit()
         {
             EnsureOpen();
@@ -1010,16 +871,7 @@ namespace MiniCivilization.World.Editing
             var result = new CellEdit[cellChanges.Count];
             cellChanges.Values.CopyTo(result, 0);
             Array.Sort(result, (left, right) =>
-                left.CellIndex.CompareTo(right.CellIndex));
-            return result;
-        }
-
-        internal EnvironmentEdit[] CopyEnvironmentChanges()
-        {
-            var result = new EnvironmentEdit[environmentChanges.Count];
-            environmentChanges.Values.CopyTo(result, 0);
-            Array.Sort(result, (left, right) =>
-                left.ColumnIndex.CompareTo(right.ColumnIndex));
+                left.Coordinate.CompareTo(right.Coordinate));
             return result;
         }
 
@@ -1032,13 +884,12 @@ namespace MiniCivilization.World.Editing
         {
             completed = true;
             cellChanges.Clear();
-            environmentChanges.Clear();
         }
 
         private CellData GetPendingCell(int x, int y, int z)
         {
-            var cellIndex = WorldIndex.EncodeCell(world, x, y, z);
-            return cellChanges.TryGetValue(cellIndex, out var change)
+            var coordinate = new CellCoordinate(x, y, z);
+            return cellChanges.TryGetValue(coordinate, out var change)
                 ? change.Current
                 : world.GetCell(x, y, z);
         }
@@ -1134,14 +985,6 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private EnvironmentData GetPendingEnvironment(int x, int z)
-        {
-            var columnIndex = WorldIndex.EncodeColumn(world, x, z);
-            return environmentChanges.TryGetValue(columnIndex, out var change)
-                ? change.Current
-                : world.GetEnvironment(x, z);
-        }
-
         private void EnsureColumn(int x, int z)
         {
             EnsureOpen();
@@ -1162,51 +1005,23 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private static bool EnvironmentEquals(
-            EnvironmentData left,
-            EnvironmentData right)
-        {
-            return left.Biome == right.Biome
-                && left.Temperature == right.Temperature
-                && left.Moisture == right.Moisture
-                && left.Fertility == right.Fertility;
-        }
     }
 
     internal readonly struct CellEdit
     {
-        public readonly int CellIndex;
         public readonly CellCoordinate Coordinate;
         public readonly CellData Previous;
         public readonly CellData Current;
 
         public CellEdit(
-            int cellIndex,
             CellCoordinate coordinate,
             CellData previous,
             CellData current)
         {
-            CellIndex = cellIndex;
             Coordinate = coordinate;
             Previous = previous;
             Current = current;
         }
     }
 
-    internal readonly struct EnvironmentEdit
-    {
-        public readonly int ColumnIndex;
-        public readonly EnvironmentData Previous;
-        public readonly EnvironmentData Current;
-
-        public EnvironmentEdit(
-            int columnIndex,
-            EnvironmentData previous,
-            EnvironmentData current)
-        {
-            ColumnIndex = columnIndex;
-            Previous = previous;
-            Current = current;
-        }
-    }
 }

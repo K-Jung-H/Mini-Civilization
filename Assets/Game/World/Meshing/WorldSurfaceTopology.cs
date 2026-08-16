@@ -305,10 +305,11 @@ namespace MiniCivilization.World.Meshing
         }
 
         private readonly WorldData world;
+        private readonly Func<int, int, bool> canCacheColumn;
         private WaterFlowState flowState;
-        private readonly Dictionary<int, SolidSurfaceProfile> solidProfiles =
+        private readonly Dictionary<CellCoordinate, SolidSurfaceProfile> solidProfiles =
             new();
-        private readonly Dictionary<int, WaterSurfaceProfile> waterProfiles =
+        private readonly Dictionary<CellCoordinate, WaterSurfaceProfile> waterProfiles =
             new();
         private readonly Dictionary<WaterCornerKey, float>
             waterCornerHeights =
@@ -316,11 +317,13 @@ namespace MiniCivilization.World.Meshing
 
         public WorldSurfaceQuery(
             WorldData world,
-            WaterFlowState flowState = null)
+            WaterFlowState flowState = null,
+            Func<int, int, bool> canCacheColumn = null)
         {
             this.world = world
                 ?? throw new ArgumentNullException(nameof(world));
             this.flowState = flowState;
+            this.canCacheColumn = canCacheColumn;
         }
 
         public void SetWaterFlowState(WaterFlowState value)
@@ -364,9 +367,9 @@ namespace MiniCivilization.World.Meshing
             for (var z = minimumZ; z <= maximumZ; z++)
             for (var x = minimumX; x <= maximumX; x++)
             {
-                var cellIndex = WorldIndex.EncodeCell(world, x, y, z);
-                solidProfiles.Remove(cellIndex);
-                waterProfiles.Remove(cellIndex);
+                var cell = new CellCoordinate(x, y, z);
+                solidProfiles.Remove(cell);
+                waterProfiles.Remove(cell);
             }
 
             for (var y = 0; y < world.Height; y++)
@@ -377,10 +380,33 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
+        public void InvalidateColumn(
+            ChunkColumnCoordinate coordinate,
+            int chunkSizeXZ)
+        {
+            if (chunkSizeXZ <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(chunkSizeXZ));
+            }
+
+            var startX = coordinate.X * chunkSizeXZ;
+            var startZ = coordinate.Z * chunkSizeXZ;
+            var endX = Math.Min(startX + chunkSizeXZ, world.Size) - 1;
+            var endZ = Math.Min(startZ + chunkSizeXZ, world.Size) - 1;
+            if (startX > endX || startZ > endZ)
+            {
+                return;
+            }
+
+            InvalidateRegion(new CellBounds(
+                new CellCoordinate(startX, 0, startZ),
+                new CellCoordinate(endX, world.Height - 1, endZ)));
+        }
+
         public SolidSurfaceProfile ResolveSolid(int x, int y, int z)
         {
-            var index = WorldIndex.EncodeCell(world, x, y, z);
-            if (solidProfiles.TryGetValue(index, out var cached))
+            var coordinate = new CellCoordinate(x, y, z);
+            if (solidProfiles.TryGetValue(coordinate, out var cached))
             {
                 return cached;
             }
@@ -440,7 +466,11 @@ namespace MiniCivilization.World.Meshing
                     positiveZ);
             }
 
-            solidProfiles[index] = profile;
+            if (CanCacheColumn(x, z))
+            {
+                solidProfiles[coordinate] = profile;
+            }
+
             return profile;
         }
 
@@ -483,8 +513,8 @@ namespace MiniCivilization.World.Meshing
                 return false;
             }
 
-            var index = WorldIndex.EncodeCell(world, x, y, z);
-            if (waterProfiles.TryGetValue(index, out profile))
+            var coordinate = new CellCoordinate(x, y, z);
+            if (waterProfiles.TryGetValue(coordinate, out profile))
             {
                 return true;
             }
@@ -504,7 +534,11 @@ namespace MiniCivilization.World.Meshing
                 positiveZ,
                 IsWaterTopExposed(x, y, z, interval),
                 FallsWater(x, y + 1, z));
-            waterProfiles[index] = profile;
+            if (CanCacheColumn(x, z))
+            {
+                waterProfiles[coordinate] = profile;
+            }
+
             return true;
         }
 
@@ -943,8 +977,37 @@ namespace MiniCivilization.World.Meshing
                 height = highestWaterBottom;
             }
 
-            waterCornerHeights[key] = height;
+            if (CanCacheCorner(key))
+            {
+                waterCornerHeights[key] = height;
+            }
+
             return height;
+        }
+
+        private bool CanCacheColumn(int x, int z) =>
+            canCacheColumn == null || canCacheColumn(x, z);
+
+        private bool CanCacheCorner(in WaterCornerKey key)
+        {
+            if (canCacheColumn == null)
+            {
+                return true;
+            }
+
+            for (var offsetZ = -1; offsetZ <= 0; offsetZ++)
+            for (var offsetX = -1; offsetX <= 0; offsetX++)
+            {
+                var x = key.X + offsetX;
+                var z = key.Z + offsetZ;
+                if (world.ContainsColumn(x, z)
+                    && canCacheColumn(x, z))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool IsDirectedIntoCornerSpace(

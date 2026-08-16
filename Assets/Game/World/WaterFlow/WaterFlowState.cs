@@ -9,9 +9,10 @@ namespace MiniCivilization.World.WaterFlow
         private readonly WorldData world;
         private readonly int worldSize;
         private readonly int worldHeight;
-        private readonly int[] waterBodyIdsByColumn;
+        private readonly Dictionary<CellColumnCoordinate, int>
+            waterBodyIdsByColumn = new();
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
-        private readonly Dictionary<int, WaterData> stagedCells = new();
+        private readonly Dictionary<CellCoordinate, WaterData> stagedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
 
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
@@ -28,7 +29,6 @@ namespace MiniCivilization.World.WaterFlow
                 ?? throw new ArgumentNullException(nameof(world));
             worldSize = world.Size;
             worldHeight = world.Height;
-            waterBodyIdsByColumn = new int[checked(world.Size * world.Size)];
             ReplaceWaterBodies(bodies);
         }
 
@@ -39,7 +39,11 @@ namespace MiniCivilization.World.WaterFlow
                 return 0;
             }
 
-            return waterBodyIdsByColumn[x + worldSize * z];
+            return waterBodyIdsByColumn.TryGetValue(
+                new CellColumnCoordinate(x, z),
+                out var id)
+                ? id
+                : 0;
         }
 
         public bool TryGetWaterBody(int x, int z, out WaterBody waterBody)
@@ -62,49 +66,40 @@ namespace MiniCivilization.World.WaterFlow
             int y,
             int z) =>
             ContainsCell(x, y, z)
-                ? GetWater(WorldIndex.EncodeCell(world, x, y, z)).Flow
+                ? GetWater(new CellCoordinate(x, y, z)).Flow
                 : FlowDirection.None;
 
-        internal WaterData GetWater(int cellIndex)
-        {
-            var coordinate = WorldIndex.DecodeCell(world, cellIndex);
-            return world.GetCell(
-                coordinate.X,
-                coordinate.Y,
-                coordinate.Z).Water;
-        }
+        internal WaterData GetWater(CellCoordinate cell) =>
+            world.GetCell(cell.X, cell.Y, cell.Z).Water;
 
-        internal FlowDirection GetFlowDirection(int cellIndex) =>
-            GetWater(cellIndex).Flow;
+        internal FlowDirection GetFlowDirection(CellCoordinate cell) =>
+            GetWater(cell).Flow;
 
-        internal bool StageResolvedCell(int cellIndex, WaterData water)
+        internal bool StageResolvedCell(CellCoordinate cell, WaterData water)
         {
             water.Normalize();
-            if (GetWater(cellIndex).Equals(water))
+            if (GetWater(cell).Equals(water))
             {
-                stagedCells.Remove(cellIndex);
+                stagedCells.Remove(cell);
                 return false;
             }
 
-            stagedCells[cellIndex] = water;
+            stagedCells[cell] = water;
             return true;
         }
 
         internal void CancelResolutionPass() => stagedCells.Clear();
 
-        internal void SynchronizeFromPersistent(int cellIndex) =>
-            stagedCells.Remove(cellIndex);
+        internal void SynchronizeFromPersistent(CellCoordinate cell) =>
+            stagedCells.Remove(cell);
 
-        internal IEnumerable<KeyValuePair<int, WaterData>>
+        internal IEnumerable<KeyValuePair<CellCoordinate, WaterData>>
             EnumerateStagedCells() => stagedCells;
 
         internal void ReplaceWaterBodies(IReadOnlyList<WaterBody> bodies)
         {
             waterBodies = bodies ?? Array.Empty<WaterBody>();
-            Array.Clear(
-                waterBodyIdsByColumn,
-                0,
-                waterBodyIdsByColumn.Length);
+            waterBodyIdsByColumn.Clear();
             waterBodiesById.Clear();
             for (var bodyIndex = 0;
                  bodyIndex < waterBodies.Count;
@@ -118,7 +113,7 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     var cell = body.Cells[cellIndex];
                     waterBodyIdsByColumn[
-                        cell.X + worldSize * cell.Z] = body.Id;
+                        new CellColumnCoordinate(cell.X, cell.Z)] = body.Id;
                 }
             }
         }

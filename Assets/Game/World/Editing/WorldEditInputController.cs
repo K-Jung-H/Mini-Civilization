@@ -63,7 +63,7 @@ namespace MiniCivilization.World.Editing
         private TilePickResult dragStart;
         private TilePickResult dragCurrent;
         private WorldEditToolSnapshot dragTool;
-        private readonly HashSet<int> brushCellIndices = new();
+        private readonly HashSet<CellCoordinate> brushCellIndices = new();
         private readonly List<CellCoordinate> brushCells = new();
         private TilePickResult? idlePreviewAnchor;
         private int brushPreviewSize;
@@ -580,12 +580,7 @@ namespace MiniCivilization.World.Editing
                 }
 
                 var coordinate = new CellCoordinate(x, anchor.Y, z);
-                var index = WorldCellIndex.Encode(
-                    world,
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
-                if (brushCellIndices.Add(index))
+                if (brushCellIndices.Add(coordinate))
                 {
                     brushCells.Add(coordinate);
                 }

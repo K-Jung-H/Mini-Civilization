@@ -82,6 +82,9 @@ namespace MiniCivilization.World.Editor
             var uiObject = EnsureRoleObject(worldObject, "World UI");
 
             var manager = GetOrAdd<WorldManager>(managementObject, out _);
+            var streamingController = GetOrAdd<WorldChunkStreamingController>(
+                managementObject,
+                out _);
             var generator = GetOrAdd<WorldGenerationController>(
                 generationObject,
                 out var generatorCreated);
@@ -142,6 +145,7 @@ namespace MiniCivilization.World.Editor
                 renderRoot);
             entityRenderer.Configure(entityRoot);
             entityManager.Configure(entityCatalog, entityRenderer);
+            streamingController.Configure(null, renderRoot, 1, 0);
             saveController.Configure("Worlds", "default.mcw", true);
             manager.Configure(
                 generator,
@@ -150,7 +154,8 @@ namespace MiniCivilization.World.Editor
                 renderer,
                 saveController,
                 entityManager,
-                uiManager);
+                uiManager,
+                streamingController);
             uiManager.Configure(
                 editToolState,
                 editApplyController,
@@ -172,6 +177,7 @@ namespace MiniCivilization.World.Editor
 
             EditorUtility.SetDirty(worldObject);
             EditorUtility.SetDirty(manager);
+            EditorUtility.SetDirty(streamingController);
             EditorUtility.SetDirty(generator);
             EditorUtility.SetDirty(editController);
             EditorUtility.SetDirty(editToolState);

@@ -12,7 +12,6 @@ namespace MiniCivilization.World.Presentation
     public enum WorldRenderBindingMode : byte
     {
         None,
-        PreparedScene,
         RuntimeGenerated
     }
 
@@ -32,26 +31,30 @@ namespace MiniCivilization.World.Presentation
         private readonly HashSet<Vector2Int> pendingTerrainPatches = new();
         private readonly HashSet<Vector2Int> pendingWaterPatches = new();
         private readonly HashSet<Vector2Int> pendingRoadPatches = new();
+        private readonly HashSet<Vector2Int> pendingCreatePatches = new();
+        private readonly Dictionary<Vector2Int, WorldRenderPatchView>
+            renderedPatchViews = new();
+        private readonly Stack<WorldRenderPatchView> patchViewPool = new();
         private readonly WorldMeshBuildScratch meshBuildScratch = new();
-        private WorldChunkView[,] chunkViews;
         private WorldData boundWorld;
         private WorldRuntime boundRuntime;
         private WaterFlowState boundWaterFlowState;
         private WorldExposureCache exposureCache;
         private WorldSurfaceQuery surfaceQuery;
         private int activeRenderPatchSize;
+        private int activeChunksPerPatch;
 
         public WorldRenderBindingMode BindingMode { get; private set; }
         public WorldChangeId LastAppliedChangeId { get; private set; }
         public int ActiveRenderPatchSize => activeRenderPatchSize;
         public Transform RenderRoot => renderRoot;
         internal WorldSurfaceQuery SurfaceQuery => surfaceQuery;
-        public int RenderedPatchCount => chunkViews == null
-            ? 0
-            : chunkViews.GetLength(0) * chunkViews.GetLength(1);
+        public int RenderedPatchCount => renderedPatchViews.Count;
+        public int PooledPatchCount => patchViewPool.Count;
 
         private void LateUpdate()
         {
+            BuildPendingStreamPatches();
             RebuildPendingPatches();
         }
 
@@ -79,101 +82,18 @@ namespace MiniCivilization.World.Presentation
             exposureCache = new WorldExposureCache(world);
             surfaceQuery = new WorldSurfaceQuery(
                 world,
-                boundWaterFlowState);
+                boundWaterFlowState,
+                runtime.IsColumnPrepared);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
+            activeChunksPerPatch = world.Settings.RenderChunksPerPatch;
             roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             LastAppliedChangeId = runtime.CurrentChangeId;
-            BuildAllPatches(persistentSceneObjects: false);
-        }
-
-        public void PrepareWorldInScene(WorldRuntime runtime)
-        {
-            var world = runtime?.Data;
-            if (world == null)
+            runtime.ColumnStateChanged += OnColumnStateChanged;
+            foreach (var pair in runtime.ColumnRuntimes)
             {
-                throw new ArgumentNullException(nameof(world));
+                OnColumnStateChanged(pair.Value);
             }
-
-            ValidateReferences();
-            Unbind();
-            boundWorld = world;
-            boundRuntime = runtime;
-            exposureCache = new WorldExposureCache(world);
-            surfaceQuery = new WorldSurfaceQuery(world);
-            activeRenderPatchSize = ResolveRenderPatchSize(world);
-            roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
-            BindingMode = WorldRenderBindingMode.PreparedScene;
-            LastAppliedChangeId = runtime.CurrentChangeId;
-            BuildAllPatches(persistentSceneObjects: true);
-        }
-
-        public bool TryAdoptPreparedWorld(
-            WorldRuntime runtime,
-            int preparedPatchSize,
-            int preparedPatchCount)
-        {
-            var world = runtime?.Data;
-            if (world == null
-                || preparedPatchSize <= 0
-                || preparedPatchCount <= 0)
-            {
-                return false;
-            }
-
-            ValidateReferences();
-            DetachBoundWorld(clearViews: false);
-            var countPerAxis = world.Size / preparedPatchSize;
-            if (world.Size % preparedPatchSize != 0
-                || checked(countPerAxis * countPerAxis) != preparedPatchCount)
-            {
-                return false;
-            }
-
-            var preparedViews = renderRoot.GetComponentsInChildren<WorldChunkView>(
-                includeInactive: true);
-            if (preparedViews.Length != preparedPatchCount)
-            {
-                return false;
-            }
-
-            var adoptedViews = new WorldChunkView[countPerAxis, countPerAxis];
-            for (var index = 0; index < preparedViews.Length; index++)
-            {
-                var view = preparedViews[index];
-                if (view.PatchSize != preparedPatchSize
-                    || (uint)view.PatchX >= countPerAxis
-                    || (uint)view.PatchZ >= countPerAxis
-                    || adoptedViews[view.PatchX, view.PatchZ] != null
-                    || !view.AdoptPrepared())
-                {
-                    return false;
-                }
-
-                adoptedViews[view.PatchX, view.PatchZ] = view;
-            }
-
-            boundWorld = world;
-            boundRuntime = runtime;
-            boundWaterFlowState = runtime.WaterFlowState;
-            exposureCache = new WorldExposureCache(world);
-            surfaceQuery = new WorldSurfaceQuery(
-                world,
-                boundWaterFlowState);
-            activeRenderPatchSize = preparedPatchSize;
-            chunkViews = adoptedViews;
-            roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
-            for (var z = 0; z < chunkViews.GetLength(1); z++)
-            for (var x = 0; x < chunkViews.GetLength(0); x++)
-            {
-                chunkViews[x, z].RebuildRoad(
-                    boundWorld,
-                    boundRuntime.RoadTopology,
-                    roadVisualCatalog);
-            }
-            BindingMode = WorldRenderBindingMode.PreparedScene;
-            LastAppliedChangeId = runtime.CurrentChangeId;
-            return true;
         }
 
         public void SetWaterFlowState(WaterFlowState waterFlowState)
@@ -185,6 +105,148 @@ namespace MiniCivilization.World.Presentation
 
             boundWaterFlowState = waterFlowState;
             surfaceQuery?.SetWaterFlowState(waterFlowState);
+        }
+
+        private void OnColumnStateChanged(
+            WorldChunkColumnRuntime columnRuntime)
+        {
+            if (boundRuntime == null
+                || columnRuntime == null
+                || activeChunksPerPatch <= 0)
+            {
+                return;
+            }
+
+            var patch = ToPatchCoordinate(columnRuntime.Coordinate);
+            if (columnRuntime.State == WorldChunkColumnState.Unloaded)
+            {
+                exposureCache?.ReleaseColumn(columnRuntime.Coordinate);
+                surfaceQuery?.InvalidateColumn(
+                    columnRuntime.Coordinate,
+                    boundWorld.ChunkSizeX);
+                QueueBoundaryPatchRebuilds(columnRuntime.Coordinate);
+                if (!boundRuntime.HasPresentedColumnInPatch(
+                        patch.x,
+                        patch.y,
+                        activeChunksPerPatch))
+                {
+                    pendingCreatePatches.Remove(patch);
+                    ReturnPatchToPool(patch);
+                }
+
+                return;
+            }
+
+            if (columnRuntime.State != WorldChunkColumnState.Preparing)
+            {
+                return;
+            }
+
+            exposureCache?.PrepareColumn(columnRuntime.Coordinate);
+            surfaceQuery?.InvalidateColumn(
+                columnRuntime.Coordinate,
+                boundWorld.ChunkSizeX);
+            QueueBoundaryPatchRebuilds(columnRuntime.Coordinate);
+
+            if (renderedPatchViews.ContainsKey(patch))
+            {
+                boundRuntime.MarkColumnRendered(columnRuntime.Coordinate);
+                return;
+            }
+
+            pendingCreatePatches.Add(patch);
+        }
+
+        private void QueueBoundaryPatchRebuilds(
+            ChunkColumnCoordinate coordinate)
+        {
+            if (activeChunksPerPatch <= 0)
+            {
+                return;
+            }
+
+            for (var z = coordinate.Z - 1; z <= coordinate.Z + 1; z++)
+            for (var x = coordinate.X - 1; x <= coordinate.X + 1; x++)
+            {
+                if ((uint)x >= boundWorld.ChunkCountX
+                    || (uint)z >= boundWorld.ChunkCountZ)
+                {
+                    continue;
+                }
+
+                var patch = ToPatchCoordinate(
+                    new ChunkColumnCoordinate(x, z));
+                if (!renderedPatchViews.ContainsKey(patch))
+                {
+                    continue;
+                }
+
+                pendingFullPatches.Add(patch);
+                pendingTerrainPatches.Remove(patch);
+                pendingWaterPatches.Remove(patch);
+                pendingRoadPatches.Remove(patch);
+            }
+        }
+
+        private void BuildPendingStreamPatches()
+        {
+            if (boundWorld == null
+                || boundRuntime == null
+                || BindingMode != WorldRenderBindingMode.RuntimeGenerated)
+            {
+                return;
+            }
+
+            for (var buildIndex = 0;
+                 buildIndex < maxPatchRebuildsPerFrame;
+                 buildIndex++)
+            {
+                if (!TryTakePatch(pendingCreatePatches, out var patch))
+                {
+                    return;
+                }
+
+                if (!IsPatchInsideFiniteBounds(patch)
+                    || !boundRuntime.HasPresentedColumnInPatch(
+                        patch.x,
+                        patch.y,
+                        activeChunksPerPatch))
+                {
+                    continue;
+                }
+
+                if (!renderedPatchViews.TryGetValue(patch, out var view))
+                {
+                    view = AcquirePatchView();
+                    renderedPatchViews.Add(patch, view);
+                    BuildPatch(view, patch.x, patch.y);
+                    pendingFullPatches.Remove(patch);
+                    pendingTerrainPatches.Remove(patch);
+                    pendingWaterPatches.Remove(patch);
+                    pendingRoadPatches.Remove(patch);
+                }
+
+                boundRuntime.MarkPatchRendered(
+                    patch.x,
+                    patch.y,
+                    activeChunksPerPatch);
+            }
+        }
+
+        private Vector2Int ToPatchCoordinate(
+            ChunkColumnCoordinate coordinate) => new(
+            WorldCoordinateUtility.FloorDivide(
+                coordinate.X,
+                activeChunksPerPatch),
+            WorldCoordinateUtility.FloorDivide(
+                coordinate.Z,
+                activeChunksPerPatch));
+
+        private bool IsPatchInsideFiniteBounds(Vector2Int patch)
+        {
+            var countPerAxis = boundWorld.ChunkCountX / activeChunksPerPatch;
+            return (uint)patch.x < countPerAxis
+                && (uint)patch.y < countPerAxis;
         }
 
         public void ApplyChanges(WorldChangeSet changeSet)
@@ -209,8 +271,7 @@ namespace MiniCivilization.World.Presentation
                 WorldChangeType.CellStructure
                 | WorldChangeType.Surface;
             const WorldChangeType materialChanges =
-                WorldChangeType.Material
-                | WorldChangeType.Environment;
+                WorldChangeType.Material;
             const WorldChangeType waterChanges =
                 WorldChangeType.WaterTopology
                 | WorldChangeType.WaterSurface;
@@ -266,7 +327,7 @@ namespace MiniCivilization.World.Presentation
 
             if (rebuildRoad && activeRenderPatchSize > 0)
             {
-                QueueRoadPatches(changeSet.ChangedColumnIndices);
+                QueueRoadPatches(changeSet.ChangedColumns);
             }
 
             LastAppliedChangeId = changeSet.ChangeId;
@@ -275,7 +336,6 @@ namespace MiniCivilization.World.Presentation
         public void RebuildPendingPatches()
         {
             if (boundWorld == null
-                || chunkViews == null
                 || (pendingFullPatches.Count == 0
                     && pendingTerrainPatches.Count == 0
                     && pendingWaterPatches.Count == 0
@@ -295,8 +355,9 @@ namespace MiniCivilization.World.Presentation
                     pendingRoadPatches.Remove(patch);
                     if (ContainsPatch(patch))
                     {
+                        var view = renderedPatchViews[patch];
                         BuildPatch(
-                            chunkViews[patch.x, patch.y],
+                            view,
                             patch.x,
                             patch.y);
                     }
@@ -315,23 +376,16 @@ namespace MiniCivilization.World.Presentation
                         continue;
                     }
 
-                    var terrainView = chunkViews[patch.x, patch.y];
-                    if (terrainView.IsPrepared)
+                    var terrainView = renderedPatchViews[patch];
+                    RebuildTerrainPatch(terrainView);
+                    if (rebuildWaterWithTerrain)
                     {
-                        BuildPatch(terrainView, patch.x, patch.y);
+                        RebuildWaterPatch(terrainView);
                     }
-                    else
-                    {
-                        RebuildTerrainPatch(terrainView);
-                        if (rebuildWaterWithTerrain)
-                        {
-                            RebuildWaterPatch(terrainView);
-                        }
 
-                        if (rebuildRoadWithTerrain)
-                        {
-                            RebuildRoadPatch(terrainView);
-                        }
+                    if (rebuildRoadWithTerrain)
+                    {
+                        RebuildRoadPatch(terrainView);
                     }
 
                     continue;
@@ -344,15 +398,8 @@ namespace MiniCivilization.World.Presentation
                         continue;
                     }
 
-                    var view = chunkViews[patch.x, patch.y];
-                    if (view.IsPrepared)
-                    {
-                        BuildPatch(view, patch.x, patch.y);
-                    }
-                    else
-                    {
-                        RebuildWaterPatch(view);
-                    }
+                    var view = renderedPatchViews[patch];
+                    RebuildWaterPatch(view);
 
                     continue;
                 }
@@ -360,14 +407,13 @@ namespace MiniCivilization.World.Presentation
                 if (TryTakePatch(pendingRoadPatches, out patch)
                     && ContainsPatch(patch))
                 {
-                    RebuildRoadPatch(chunkViews[patch.x, patch.y]);
+                    RebuildRoadPatch(renderedPatchViews[patch]);
                 }
             }
         }
 
         private bool ContainsPatch(Vector2Int patch) =>
-            (uint)patch.x < chunkViews.GetLength(0)
-            && (uint)patch.y < chunkViews.GetLength(1);
+            renderedPatchViews.ContainsKey(patch);
 
         private static bool TryTakePatch(
             HashSet<Vector2Int> patches,
@@ -387,7 +433,7 @@ namespace MiniCivilization.World.Presentation
             return true;
         }
 
-        private void RebuildWaterPatch(WorldChunkView view)
+        private void RebuildWaterPatch(WorldRenderPatchView view)
         {
             view.RebuildWater(
                 boundWorld,
@@ -398,7 +444,7 @@ namespace MiniCivilization.World.Presentation
                 meshBuildScratch);
         }
 
-        private void RebuildTerrainPatch(WorldChunkView view)
+        private void RebuildTerrainPatch(WorldRenderPatchView view)
         {
             view.RebuildTerrain(
                 boundWorld,
@@ -409,7 +455,7 @@ namespace MiniCivilization.World.Presentation
                 meshBuildScratch);
         }
 
-        private void RebuildRoadPatch(WorldChunkView view)
+        private void RebuildRoadPatch(WorldRenderPatchView view)
         {
             view.RebuildRoad(
                 boundWorld,
@@ -427,32 +473,25 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            var columns = new HashSet<int>();
+            var columns = new HashSet<CellColumnCoordinate>();
             for (var index = 0;
-                 index < changeSet.AffectedCellIndices.Count;
+                 index < changeSet.AffectedCells.Count;
                  index++)
             {
-                var cell = WorldIndex.DecodeCell(
-                    boundWorld,
-                    changeSet.AffectedCellIndices[index]);
-                columns.Add(WorldIndex.EncodeColumn(
-                    boundWorld,
-                    cell.X,
-                    cell.Z));
+                var cell = changeSet.AffectedCells[index];
+                columns.Add(new CellColumnCoordinate(cell.X, cell.Z));
             }
 
             QueueRoadPatches(columns);
         }
 
-        private void QueueRoadPatches(IReadOnlyCollection<int> changedColumns)
+        private void QueueRoadPatches(
+            IReadOnlyCollection<CellColumnCoordinate> changedColumns)
         {
             foreach (var column in changedColumns)
             {
-                WorldIndex.DecodeColumn(
-                    boundWorld,
-                    column,
-                    out var centerX,
-                    out var centerZ);
+                var centerX = column.X;
+                var centerZ = column.Z;
                 for (var z = centerZ - 1; z <= centerZ + 1; z++)
                 for (var x = centerX - 1; x <= centerX + 1; x++)
                 {
@@ -462,8 +501,12 @@ namespace MiniCivilization.World.Presentation
                     }
 
                     var patch = new Vector2Int(
-                        x / activeRenderPatchSize,
-                        z / activeRenderPatchSize);
+                        WorldCoordinateUtility.FloorDivide(
+                            x,
+                            activeRenderPatchSize),
+                        WorldCoordinateUtility.FloorDivide(
+                            z,
+                            activeRenderPatchSize));
                     if (!pendingFullPatches.Contains(patch)
                         && !pendingTerrainPatches.Contains(patch))
                     {
@@ -477,12 +520,10 @@ namespace MiniCivilization.World.Presentation
             WorldChangeSet changeSet)
         {
             for (var index = 0;
-                 index < changeSet.ChangedCellIndices.Count;
+                 index < changeSet.ChangedCells.Count;
                  index++)
             {
-                var changed = WorldIndex.DecodeCell(
-                    boundWorld,
-                    changeSet.ChangedCellIndices[index]);
+                var changed = changeSet.ChangedCells[index];
                 var minimumY = Math.Max(0, changed.Y - 1);
                 for (var y = minimumY; y <= changed.Y; y++)
                 for (var z = changed.Z - 1; z <= changed.Z + 1; z++)
@@ -510,44 +551,43 @@ namespace MiniCivilization.World.Presentation
             DetachBoundWorld(clearViews: true);
         }
 
-        public IEnumerable<WorldChunkView> EnumerateChunkViews()
+        public IEnumerable<WorldRenderPatchView> EnumeratePatchViews()
         {
-            if (chunkViews == null)
+            foreach (var view in renderedPatchViews.Values)
             {
-                yield break;
-            }
-
-            for (var z = 0; z < chunkViews.GetLength(1); z++)
-            for (var x = 0; x < chunkViews.GetLength(0); x++)
-            {
-                if (chunkViews[x, z] != null)
-                {
-                    yield return chunkViews[x, z];
-                }
+                yield return view;
             }
         }
 
         private void DetachBoundWorld(bool clearViews)
         {
+            if (boundRuntime != null)
+            {
+                boundRuntime.ColumnStateChanged -= OnColumnStateChanged;
+            }
+
             boundWorld = null;
             boundRuntime = null;
             boundWaterFlowState = null;
             exposureCache = null;
             surfaceQuery = null;
             activeRenderPatchSize = 0;
+            activeChunksPerPatch = 0;
             BindingMode = WorldRenderBindingMode.None;
             LastAppliedChangeId = WorldChangeId.None;
             pendingFullPatches.Clear();
             pendingTerrainPatches.Clear();
             pendingWaterPatches.Clear();
             pendingRoadPatches.Clear();
+            pendingCreatePatches.Clear();
             if (clearViews)
             {
                 ClearViews();
             }
             else
             {
-                chunkViews = null;
+                renderedPatchViews.Clear();
+                patchViewPool.Clear();
             }
         }
 
@@ -568,28 +608,8 @@ namespace MiniCivilization.World.Presentation
             renderRoot = root;
         }
 
-        private void BuildAllPatches(bool persistentSceneObjects)
-        {
-            var patchCount = boundWorld.Size / activeRenderPatchSize;
-            chunkViews = new WorldChunkView[patchCount, patchCount];
-            for (var patchZ = 0; patchZ < patchCount; patchZ++)
-            for (var patchX = 0; patchX < patchCount; patchX++)
-            {
-                var chunkObject = new GameObject
-                {
-                    hideFlags = persistentSceneObjects
-                        ? HideFlags.None
-                        : HideFlags.DontSave
-                };
-                chunkObject.transform.SetParent(renderRoot, false);
-                var view = chunkObject.AddComponent<WorldChunkView>();
-                chunkViews[patchX, patchZ] = view;
-                BuildPatch(view, patchX, patchZ);
-            }
-        }
-
         private void BuildPatch(
-            WorldChunkView view,
+            WorldRenderPatchView view,
             int patchX,
             int patchZ)
         {
@@ -633,18 +653,54 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
+        private WorldRenderPatchView AcquirePatchView()
+        {
+            WorldRenderPatchView view;
+            if (patchViewPool.Count > 0)
+            {
+                view = patchViewPool.Pop();
+                view.gameObject.SetActive(true);
+                return view;
+            }
+
+            var chunkObject = new GameObject
+            {
+                hideFlags = HideFlags.DontSave
+            };
+            chunkObject.transform.SetParent(renderRoot, false);
+            view = chunkObject.AddComponent<WorldRenderPatchView>();
+            return view;
+        }
+
+        private void ReturnPatchToPool(Vector2Int patch)
+        {
+            if (!renderedPatchViews.Remove(patch, out var view)
+                || view == null)
+            {
+                return;
+            }
+
+            pendingFullPatches.Remove(patch);
+            pendingTerrainPatches.Remove(patch);
+            pendingWaterPatches.Remove(patch);
+            pendingRoadPatches.Remove(patch);
+            view.gameObject.SetActive(false);
+            patchViewPool.Push(view);
+        }
+
         private void ClearViews()
         {
             if (renderRoot == null)
             {
-                chunkViews = null;
+                renderedPatchViews.Clear();
+                patchViewPool.Clear();
                 return;
             }
 
             for (var index = renderRoot.childCount - 1; index >= 0; index--)
             {
                 var child = renderRoot.GetChild(index);
-                if (child.TryGetComponent<WorldChunkView>(out var view))
+                if (child.TryGetComponent<WorldRenderPatchView>(out var view))
                 {
                     child.gameObject.SetActive(false);
                     view.ReleaseMeshes();
@@ -652,7 +708,8 @@ namespace MiniCivilization.World.Presentation
                 }
             }
 
-            chunkViews = null;
+            renderedPatchViews.Clear();
+            patchViewPool.Clear();
         }
 
         private void OnDestroy()

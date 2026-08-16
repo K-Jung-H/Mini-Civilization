@@ -21,6 +21,7 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldEditController editController;
         [SerializeField] private WorldWaterFlowController waterFlowController;
         [SerializeField] private WorldRenderer worldRenderer;
+        [SerializeField] private WorldChunkStreamingController streamingController;
         [SerializeField] private EntityManager entityManager;
         [SerializeField] private WorldSaveController saveController;
         [SerializeField] private WorldUIManager uiManager;
@@ -30,6 +31,8 @@ namespace MiniCivilization.World.Runtime
         public WorldWaterFlowController WaterFlowController =>
             waterFlowController;
         public WorldRenderer Renderer => worldRenderer;
+        public WorldChunkStreamingController StreamingController =>
+            streamingController;
         public EntityManager EntityManager => entityManager;
         public WorldSaveController SaveController => saveController;
         public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
@@ -74,7 +77,6 @@ namespace MiniCivilization.World.Runtime
                         : currentWorldDataAsset;
                     ActivateWorldAsset(
                         startupAsset,
-                        preferPreparedScene: true,
                         markDirty: false);
                     return true;
                 }
@@ -202,7 +204,6 @@ namespace MiniCivilization.World.Runtime
 
         public void SetCurrentWorldAsset(
             WorldDataAsset asset,
-            bool preferPreparedScene = true,
             bool markDirty = false)
         {
             if (asset == null)
@@ -212,7 +213,7 @@ namespace MiniCivilization.World.Runtime
             }
 
             CancelActiveWorldOperation();
-            ActivateWorldAsset(asset, preferPreparedScene, markDirty);
+            ActivateWorldAsset(asset, markDirty);
         }
 
         public void MarkDirty()
@@ -239,7 +240,8 @@ namespace MiniCivilization.World.Runtime
             WorldRenderer renderer,
             WorldSaveController saveLoad,
             EntityManager entitiesManager = null,
-            WorldUIManager userInterface = null)
+            WorldUIManager userInterface = null,
+            WorldChunkStreamingController streaming = null)
         {
             generator = generationController;
             editController = worldEditor;
@@ -248,11 +250,11 @@ namespace MiniCivilization.World.Runtime
             saveController = saveLoad;
             entityManager = entitiesManager;
             uiManager = userInterface;
+            streamingController = streaming;
         }
 
         private void ActivateWorldAsset(
             WorldDataAsset nextAsset,
-            bool preferPreparedScene,
             bool markDirty)
         {
             if (nextAsset == null)
@@ -277,14 +279,12 @@ namespace MiniCivilization.World.Runtime
             ActivatePreparedWorldAsset(
                 nextAsset,
                 WorldRuntime.CreatePrepared(nextAsset.Data),
-                preferPreparedScene,
                 markDirty);
         }
 
         private void ActivatePreparedWorldAsset(
             WorldDataAsset nextAsset,
             WorldRuntime runtime,
-            bool preferPreparedScene,
             bool markDirty)
         {
             if (nextAsset == null)
@@ -301,7 +301,7 @@ namespace MiniCivilization.World.Runtime
 
             var previousAsset = currentWorldDataAsset;
             UnbindRuntime();
-            BindRuntime(runtime, nextAsset, preferPreparedScene);
+            BindRuntime(runtime);
             currentWorldDataAsset = nextAsset;
             CurrentWorldRuntime = runtime;
 
@@ -354,7 +354,6 @@ namespace MiniCivilization.World.Runtime
                 ActivatePreparedWorldAsset(
                     asset,
                     runtime,
-                    preferPreparedScene: false,
                     markDirty: operation.Kind == WorldOperationKind.Generate);
                 if (operation.Kind == WorldOperationKind.Generate)
                 {
@@ -388,7 +387,6 @@ namespace MiniCivilization.World.Runtime
                 saveController.ClearActiveSavePath();
                 ActivateWorldAsset(
                     generatedAsset,
-                    preferPreparedScene: false,
                     markDirty: true);
                 return true;
             }
@@ -406,7 +404,6 @@ namespace MiniCivilization.World.Runtime
                 var loadedAsset = saveController.LoadDataAsset(path);
                 ActivateWorldAsset(
                     loadedAsset,
-                    preferPreparedScene: false,
                     markDirty: false);
                 return true;
             }
@@ -483,6 +480,7 @@ namespace MiniCivilization.World.Runtime
                 && editController != null
                 && waterFlowController != null
                 && worldRenderer != null
+                && streamingController != null
                 && entityManager != null
                 && saveController != null)
             {
@@ -491,7 +489,7 @@ namespace MiniCivilization.World.Runtime
 
             Debug.LogError(
                 "WorldManager requires assigned Generation, Editing, Water Flow, " +
-                "Renderer, Entity Manager, and Save components.",
+                "Renderer, Streaming, Entity Manager, and Save components.",
                 this);
             return false;
         }
@@ -524,27 +522,15 @@ namespace MiniCivilization.World.Runtime
             UnbindRuntime();
         }
 
-        private void BindRuntime(
-            WorldRuntime runtime,
-            WorldDataAsset asset,
-            bool preferPreparedScene)
+        private void BindRuntime(WorldRuntime runtime)
         {
             try
             {
                 editController.Bind(runtime);
                 waterFlowController.Bind(runtime);
-                var adoptedPreparedScene = preferPreparedScene
-                    && asset.HasPreparedRenderCache
-                    && worldRenderer.TryAdoptPreparedWorld(
-                        runtime,
-                        asset.PreparedPatchSize,
-                        asset.PreparedPatchCount);
-                if (!adoptedPreparedScene)
-                {
-                    worldRenderer.Bind(runtime);
-                }
-
+                worldRenderer.Bind(runtime);
                 entityManager.Bind(runtime);
+                streamingController.Bind(runtime, worldRenderer.RenderRoot);
 
                 editController.ChangeCommitted += OnEditChanged;
                 waterFlowController.ChangeCommitted += OnWaterChanged;
@@ -560,6 +546,8 @@ namespace MiniCivilization.World.Runtime
 
         private void UnbindRuntime()
         {
+            streamingController?.Unbind();
+
             if (editController != null)
             {
                 editController.ChangeCommitted -= OnEditChanged;

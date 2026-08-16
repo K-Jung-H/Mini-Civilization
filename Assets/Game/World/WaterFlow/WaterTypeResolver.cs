@@ -18,10 +18,12 @@ namespace MiniCivilization.World.WaterFlow
                 throw new ArgumentNullException(nameof(world));
             }
 
-            var columns = new int[checked(world.Size * world.Size)];
-            for (var index = 0; index < columns.Length; index++)
+            var columns = new List<CellColumnCoordinate>(
+                checked(world.Size * world.Size));
+            for (var z = 0; z < world.Size; z++)
+            for (var x = 0; x < world.Size; x++)
             {
-                columns[index] = index;
+                columns.Add(new CellColumnCoordinate(x, z));
             }
 
             RefreshChanged(world, columns, null, null, null, null);
@@ -29,11 +31,11 @@ namespace MiniCivilization.World.WaterFlow
 
         public static void RefreshChanged(
             WorldData world,
-            IEnumerable<int> changedColumns,
-            ISet<int> changedCells,
-            ISet<int> renderCells,
-            ISet<int> typeChangedCells,
-            ISet<int> classifiedColumns)
+            IEnumerable<CellColumnCoordinate> changedColumns,
+            ISet<CellCoordinate> changedCells,
+            ISet<CellCoordinate> renderCells,
+            ISet<CellCoordinate> typeChangedCells,
+            ISet<CellColumnCoordinate> classifiedColumns)
         {
             if (world == null)
             {
@@ -45,83 +47,79 @@ namespace MiniCivilization.World.WaterFlow
                 return;
             }
 
-            var seeds = new HashSet<int>();
-            foreach (var columnIndex in changedColumns)
+            var seeds = new HashSet<CellColumnCoordinate>();
+            foreach (var column in changedColumns)
             {
-                if ((uint)columnIndex >= (uint)(world.Size * world.Size))
+                if (!world.ContainsColumn(column.X, column.Z))
                 {
                     continue;
                 }
 
-                seeds.Add(columnIndex);
-                var x = columnIndex % world.Size;
-                var z = columnIndex / world.Size;
+                seeds.Add(column);
                 for (var directionIndex = 0;
                      directionIndex < Directions.Length;
                      directionIndex++)
                 {
                     var direction = Directions[directionIndex];
-                    var nextX = x + direction.x;
-                    var nextZ = z + direction.z;
+                    var nextX = column.X + direction.x;
+                    var nextZ = column.Z + direction.z;
                     if (world.ContainsColumn(nextX, nextZ))
                     {
-                        seeds.Add(nextX + world.Size * nextZ);
+                        seeds.Add(new CellColumnCoordinate(nextX, nextZ));
                     }
                 }
             }
 
-            var visited = new bool[checked(world.Size * world.Size)];
-            var queue = new Queue<int>();
-            var component = new List<int>();
+            var visited = new HashSet<CellColumnCoordinate>();
+            var queue = new Queue<CellColumnCoordinate>();
+            var component = new List<CellColumnCoordinate>();
             foreach (var seed in seeds)
             {
-                if (visited[seed])
+                if (visited.Contains(seed))
                 {
                     continue;
                 }
 
                 if (!HasClassifiableWater(world, seed))
                 {
-                    visited[seed] = true;
+                    visited.Add(seed);
                     continue;
                 }
 
                 component.Clear();
                 queue.Enqueue(seed);
-                visited[seed] = true;
+                visited.Add(seed);
                 var touchesEdge = false;
                 while (queue.Count > 0)
                 {
-                    var columnIndex = queue.Dequeue();
-                    component.Add(columnIndex);
-                    var x = columnIndex % world.Size;
-                    var z = columnIndex / world.Size;
-                    touchesEdge |= x == 0
-                        || z == 0
-                        || x == world.Size - 1
-                        || z == world.Size - 1;
+                    var column = queue.Dequeue();
+                    component.Add(column);
+                    touchesEdge |= column.X == 0
+                        || column.Z == 0
+                        || column.X == world.Size - 1
+                        || column.Z == world.Size - 1;
 
                     for (var directionIndex = 0;
                          directionIndex < Directions.Length;
                          directionIndex++)
                     {
                         var direction = Directions[directionIndex];
-                        var nextX = x + direction.x;
-                        var nextZ = z + direction.z;
+                        var nextX = column.X + direction.x;
+                        var nextZ = column.Z + direction.z;
                         if (!world.ContainsColumn(nextX, nextZ))
                         {
                             continue;
                         }
 
-                        var nextIndex = nextX + world.Size * nextZ;
-                        if (visited[nextIndex]
-                            || !HasClassifiableWater(world, nextIndex))
+                        var nextColumn = new CellColumnCoordinate(nextX, nextZ);
+                        if (visited.Contains(nextColumn)
+                            || !HasClassifiableWater(world, nextColumn))
                         {
                             continue;
                         }
 
-                        visited[nextIndex] = true;
-                        queue.Enqueue(nextIndex);
+                        visited.Add(nextColumn);
+                        queue.Enqueue(nextColumn);
                     }
                 }
 
@@ -148,13 +146,11 @@ namespace MiniCivilization.World.WaterFlow
 
         private static bool HasClassifiableWater(
             WorldData world,
-            int columnIndex)
+            CellColumnCoordinate column)
         {
-            var x = columnIndex % world.Size;
-            var z = columnIndex / world.Size;
             for (var y = 0; y < world.Height; y++)
             {
-                var water = world.GetCell(x, y, z).Water;
+                var water = world.GetCell(column.X, y, column.Z).Water;
                 if (water.HasWater && water.Type != WaterType.River)
                 {
                     return true;
@@ -166,19 +162,17 @@ namespace MiniCivilization.World.WaterFlow
 
         private static void ApplyType(
             WorldData world,
-            int columnIndex,
+            CellColumnCoordinate column,
             WaterType type,
-            ISet<int> changedCells,
-            ISet<int> renderCells,
-            ISet<int> typeChangedCells,
-            ISet<int> classifiedColumns)
+            ISet<CellCoordinate> changedCells,
+            ISet<CellCoordinate> renderCells,
+            ISet<CellCoordinate> typeChangedCells,
+            ISet<CellColumnCoordinate> classifiedColumns)
         {
-            var x = columnIndex % world.Size;
-            var z = columnIndex / world.Size;
             var columnChanged = false;
             for (var y = 0; y < world.Height; y++)
             {
-                var cell = world.GetCell(x, y, z);
+                var cell = world.GetCell(column.X, y, column.Z);
                 if (!cell.HasWater
                     || cell.Water.Type == WaterType.River
                     || cell.Water.Type == type)
@@ -187,17 +181,17 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 cell.Water.Type = type;
-                world.SetCellForEdit(x, y, z, cell);
-                var cellIndex = WorldIndex.EncodeCell(world, x, y, z);
-                changedCells?.Add(cellIndex);
-                renderCells?.Add(cellIndex);
-                typeChangedCells?.Add(cellIndex);
+                world.SetCellForEdit(column.X, y, column.Z, cell);
+                var coordinate = new CellCoordinate(column.X, y, column.Z);
+                changedCells?.Add(coordinate);
+                renderCells?.Add(coordinate);
+                typeChangedCells?.Add(coordinate);
                 columnChanged = true;
             }
 
             if (columnChanged)
             {
-                classifiedColumns?.Add(columnIndex);
+                classifiedColumns?.Add(column);
             }
         }
     }

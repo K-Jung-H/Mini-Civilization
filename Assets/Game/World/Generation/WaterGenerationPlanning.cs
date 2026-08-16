@@ -195,22 +195,24 @@ namespace MiniCivilization.World.Generation
 
     internal class WaterFeaturePlan
     {
-        private readonly Dictionary<int, PlannedTerrainColumn>
+        private readonly Dictionary<CellColumnCoordinate, PlannedTerrainColumn>
             terrainColumns = new();
-        private readonly Dictionary<int, PlannedWaterCell> sourceCells = new();
-        private readonly HashSet<int> allowedWetCellIndices = new();
-        private readonly HashSet<int> requiredWetCellIndices = new();
+        private readonly Dictionary<CellCoordinate, PlannedWaterCell>
+            sourceCells = new();
+        private readonly HashSet<CellCoordinate> allowedWetCells = new();
+        private readonly HashSet<CellCoordinate> requiredWetCells = new();
 
         public int WorldSize { get; }
         public int WorldHeight { get; }
-        public IReadOnlyDictionary<int, PlannedTerrainColumn> TerrainColumns =>
+        public IReadOnlyDictionary<CellColumnCoordinate, PlannedTerrainColumn>
+            TerrainColumns =>
             terrainColumns;
-        public IReadOnlyDictionary<int, PlannedWaterCell> SourceCells =>
+        public IReadOnlyDictionary<CellCoordinate, PlannedWaterCell> SourceCells =>
             sourceCells;
-        public IReadOnlyCollection<int> AllowedWetCellIndices =>
-            allowedWetCellIndices;
-        public IReadOnlyCollection<int> RequiredWetCellIndices =>
-            requiredWetCellIndices;
+        public IReadOnlyCollection<CellCoordinate> AllowedWetCells =>
+            allowedWetCells;
+        public IReadOnlyCollection<CellCoordinate> RequiredWetCells =>
+            requiredWetCells;
 
         protected WaterFeaturePlan(
             int worldSize,
@@ -225,41 +227,31 @@ namespace MiniCivilization.World.Generation
             WorldHeight = worldHeight;
         }
 
-        public int EncodeColumn(int x, int z)
-        {
-            ValidateColumn(x, z);
-            return x + WorldSize * z;
-        }
-
-        public int EncodeCell(CellCoordinate coordinate)
-        {
-            ValidateCell(coordinate);
-            return coordinate.X
-                + WorldSize * (coordinate.Z + WorldSize * coordinate.Y);
-        }
-
         public void SetTerrainColumn(in PlannedTerrainColumn column)
         {
-            var index = EncodeColumn(column.X, column.Z);
-            terrainColumns[index] = column;
+            ValidateColumn(column.X, column.Z);
+            terrainColumns[new CellColumnCoordinate(column.X, column.Z)] = column;
         }
 
         public void AddSourceCell(in PlannedWaterCell source)
         {
-            var index = EncodeCell(source.Coordinate);
-            sourceCells[index] = source;
-            allowedWetCellIndices.Add(index);
-            requiredWetCellIndices.Add(index);
+            ValidateCell(source.Coordinate);
+            sourceCells[source.Coordinate] = source;
+            allowedWetCells.Add(source.Coordinate);
+            requiredWetCells.Add(source.Coordinate);
         }
 
-        public void AddAllowedWetCell(CellCoordinate coordinate) =>
-            allowedWetCellIndices.Add(EncodeCell(coordinate));
+        public void AddAllowedWetCell(CellCoordinate coordinate)
+        {
+            ValidateCell(coordinate);
+            allowedWetCells.Add(coordinate);
+        }
 
         public void AddRequiredWetCell(CellCoordinate coordinate)
         {
-            var index = EncodeCell(coordinate);
-            requiredWetCellIndices.Add(index);
-            allowedWetCellIndices.Add(index);
+            ValidateCell(coordinate);
+            requiredWetCells.Add(coordinate);
+            allowedWetCells.Add(coordinate);
         }
 
         private void ValidateColumn(int x, int z)
@@ -589,14 +581,14 @@ namespace MiniCivilization.World.Generation
                 AddSourceCell(pair.Value);
             }
 
-            foreach (var cellIndex in source.AllowedWetCellIndices)
+            foreach (var cell in source.AllowedWetCells)
             {
-                AddAllowedWetCell(DecodeCell(cellIndex));
+                AddAllowedWetCell(cell);
             }
 
-            foreach (var cellIndex in source.RequiredWetCellIndices)
+            foreach (var cell in source.RequiredWetCells)
             {
-                AddRequiredWetCell(DecodeCell(cellIndex));
+                AddRequiredWetCell(cell);
             }
 
             return true;
@@ -607,13 +599,5 @@ namespace MiniCivilization.World.Generation
             && plan.WorldSize == WorldSize
             && plan.WorldHeight == WorldHeight;
 
-        private CellCoordinate DecodeCell(int index)
-        {
-            var y = index / (WorldSize * WorldSize);
-            var remainder = index - y * WorldSize * WorldSize;
-            var z = remainder / WorldSize;
-            var x = remainder - z * WorldSize;
-            return new CellCoordinate(x, y, z);
-        }
     }
 }

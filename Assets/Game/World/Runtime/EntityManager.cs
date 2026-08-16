@@ -52,7 +52,7 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(nameof(worldRuntime));
             }
 
-            if (entityCatalog == null && worldRuntime.Data.Entities.Count != 0)
+            if (entityCatalog == null && worldRuntime.Data.EntityCount != 0)
             {
                 throw new MissingReferenceException(
                     "EntityManager requires an Entity Catalog when the world contains entities.");

@@ -43,8 +43,7 @@ namespace MiniCivilization.World.Interaction
             text.AppendLine(
                 $"Column tops: ground {Cell.SurfaceHeight.GroundHeight}, water {Cell.SurfaceHeight.WaterHeight}");
             text.AppendLine(
-                $"Biome: {Cell.Environment.Biome}, Temperature: {Cell.Environment.Temperature}, " +
-                $"Moisture: {Cell.Environment.Moisture}, Fertility: {Cell.Environment.Fertility}");
+                $"Biome: {Cell.Biome}");
             text.AppendLine(
                 $"Path: open {Cell.Path.OpenHeight}, water distance {Cell.Path.WaterDistance}");
             if (WaterBody != null)

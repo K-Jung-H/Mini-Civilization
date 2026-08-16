@@ -15,15 +15,114 @@ namespace MiniCivilization.World.Domain
         Rock = 2
     }
 
-    public enum BiomeType : ushort
+    public enum ClimateBiome : byte
     {
         None = 0,
-        Grassland = 1,
+        Temperate = 1,
+        Warm = 2,
+        Cold = 3
+    }
+
+    public enum TerrainBiome : byte
+    {
+        None = 0,
+        Field = 1,
         Forest = 2,
         Desert = 3,
         Snow = 4,
         Wetland = 5,
-        Mountain = 6
+        Mountain = 6,
+        Cave = 7
+    }
+
+    public enum WaterBiome : byte
+    {
+        None = 0,
+        Pond = 1,
+        Lake = 2,
+        Sea = 3,
+        River = 4
+    }
+
+    [Serializable]
+    public readonly struct CellBiome : IEquatable<CellBiome>
+    {
+        private const int ClimateBits = 3;
+        private const int TerrainBits = 5;
+        private const int WaterBits = 3;
+        private const int TerrainShift = ClimateBits;
+        private const int WaterShift = ClimateBits + TerrainBits;
+        private const ushort ClimateMask = (1 << ClimateBits) - 1;
+        private const ushort TerrainMask = (1 << TerrainBits) - 1;
+        private const ushort WaterMask = (1 << WaterBits) - 1;
+        private const ushort UsedMask =
+            ClimateMask
+            | (ushort)(TerrainMask << TerrainShift)
+            | (ushort)(WaterMask << WaterShift);
+
+        private readonly ushort value;
+
+        public ushort Value => value;
+        public ClimateBiome Climate =>
+            (ClimateBiome)(value & ClimateMask);
+        public TerrainBiome Terrain =>
+            (TerrainBiome)((value >> TerrainShift) & TerrainMask);
+        public WaterBiome Water =>
+            (WaterBiome)((value >> WaterShift) & WaterMask);
+        public bool IsValid =>
+            (value & ~UsedMask) == 0
+            && Enum.IsDefined(typeof(ClimateBiome), Climate)
+            && Enum.IsDefined(typeof(TerrainBiome), Terrain)
+            && Enum.IsDefined(typeof(WaterBiome), Water);
+
+        public CellBiome(
+            ClimateBiome climate,
+            TerrainBiome terrain,
+            WaterBiome water)
+        {
+            if (!Enum.IsDefined(typeof(ClimateBiome), climate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(climate));
+            }
+
+            if (!Enum.IsDefined(typeof(TerrainBiome), terrain))
+            {
+                throw new ArgumentOutOfRangeException(nameof(terrain));
+            }
+
+            if (!Enum.IsDefined(typeof(WaterBiome), water))
+            {
+                throw new ArgumentOutOfRangeException(nameof(water));
+            }
+
+            value = (ushort)(
+                (byte)climate
+                | (byte)terrain << TerrainShift
+                | (byte)water << WaterShift);
+        }
+
+        private CellBiome(ushort packedValue)
+        {
+            value = packedValue;
+        }
+
+        public static CellBiome FromValue(ushort packedValue)
+        {
+            var result = new CellBiome(packedValue);
+            if (!result.IsValid)
+            {
+                throw new ArgumentOutOfRangeException(nameof(packedValue));
+            }
+
+            return result;
+        }
+
+        public bool Equals(CellBiome other) => value == other.value;
+        public override bool Equals(object obj) =>
+            obj is CellBiome other && Equals(other);
+        public override int GetHashCode() => value;
+        public override string ToString() =>
+            $"{Climate}-{Terrain}-{Water}";
     }
 
     public enum SurfaceType : ushort
@@ -313,6 +412,7 @@ namespace MiniCivilization.World.Domain
     [Serializable]
     public struct CellData : IEquatable<CellData>
     {
+        public CellBiome Biome;
         public TerrainData Terrain;
         public WaterData Water;
         public RoadData Road;
@@ -347,13 +447,15 @@ namespace MiniCivilization.World.Domain
 
         public readonly bool Equals(CellData other)
         {
-            return Terrain.Equals(other.Terrain)
+            return Biome.Equals(other.Biome)
+                && Terrain.Equals(other.Terrain)
                 && Water.Equals(other.Water)
                 && Road.Equals(other.Road);
         }
 
         public override readonly bool Equals(object obj) => obj is CellData other && Equals(other);
         public override readonly int GetHashCode() => HashCode.Combine(
+            Biome,
             Terrain,
             Water,
             Road);
@@ -375,22 +477,15 @@ namespace MiniCivilization.World.Domain
             : -1;
     }
 
-    [Serializable]
-    public struct EnvironmentData
-    {
-        public BiomeType Biome;
-        public byte Temperature;
-        public byte Moisture;
-        public byte Fertility;
-    }
-
     public struct PathData
     {
         public ushort OpenHeight;
         public ushort WaterDistance;
     }
 
-    public readonly struct CellCoordinate : IEquatable<CellCoordinate>
+    public readonly struct CellCoordinate :
+        IEquatable<CellCoordinate>,
+        IComparable<CellCoordinate>
     {
         public readonly int X;
         public readonly int Y;
@@ -403,13 +498,106 @@ namespace MiniCivilization.World.Domain
             Z = z;
         }
 
+        public int CompareTo(CellCoordinate other)
+        {
+            var y = Y.CompareTo(other.Y);
+            if (y != 0)
+            {
+                return y;
+            }
+
+            var z = Z.CompareTo(other.Z);
+            return z != 0 ? z : X.CompareTo(other.X);
+        }
+
         public bool Equals(CellCoordinate other) => X == other.X && Y == other.Y && Z == other.Z;
         public override bool Equals(object obj) => obj is CellCoordinate other && Equals(other);
         public override int GetHashCode() => HashCode.Combine(X, Y, Z);
         public override string ToString() => $"({X}, {Y}, {Z})";
     }
 
-    public readonly struct ChunkCoordinate : IEquatable<ChunkCoordinate>
+    public readonly struct CellColumnCoordinate :
+        IEquatable<CellColumnCoordinate>,
+        IComparable<CellColumnCoordinate>
+    {
+        public readonly int X;
+        public readonly int Z;
+
+        public CellColumnCoordinate(int x, int z)
+        {
+            X = x;
+            Z = z;
+        }
+
+        public int CompareTo(CellColumnCoordinate other)
+        {
+            var z = Z.CompareTo(other.Z);
+            return z != 0 ? z : X.CompareTo(other.X);
+        }
+
+        public bool Equals(CellColumnCoordinate other) =>
+            X == other.X && Z == other.Z;
+        public override bool Equals(object obj) =>
+            obj is CellColumnCoordinate other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(X, Z);
+        public override string ToString() => $"({X}, {Z})";
+    }
+
+    public readonly struct ChunkColumnCoordinate :
+        IEquatable<ChunkColumnCoordinate>,
+        IComparable<ChunkColumnCoordinate>
+    {
+        public readonly int X;
+        public readonly int Z;
+
+        public ChunkColumnCoordinate(int x, int z)
+        {
+            X = x;
+            Z = z;
+        }
+
+        public int CompareTo(ChunkColumnCoordinate other)
+        {
+            var z = Z.CompareTo(other.Z);
+            return z != 0 ? z : X.CompareTo(other.X);
+        }
+
+        public bool Equals(ChunkColumnCoordinate other) =>
+            X == other.X && Z == other.Z;
+        public override bool Equals(object obj) =>
+            obj is ChunkColumnCoordinate other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(X, Z);
+        public override string ToString() => $"({X}, {Z})";
+    }
+
+    public readonly struct LocalCellIndex :
+        IEquatable<LocalCellIndex>,
+        IComparable<LocalCellIndex>
+    {
+        public int Value { get; }
+
+        public LocalCellIndex(int value)
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            Value = value;
+        }
+
+        public int CompareTo(LocalCellIndex other) =>
+            Value.CompareTo(other.Value);
+        public bool Equals(LocalCellIndex other) => Value == other.Value;
+        public override bool Equals(object obj) =>
+            obj is LocalCellIndex other && Equals(other);
+        public override int GetHashCode() => Value;
+        public override string ToString() => Value.ToString();
+    }
+
+    public readonly struct ChunkCoordinate :
+        IEquatable<ChunkCoordinate>,
+        IComparable<ChunkCoordinate>
     {
         public readonly int X;
         public readonly int Y;
@@ -422,9 +610,104 @@ namespace MiniCivilization.World.Domain
             Z = z;
         }
 
+        public int CompareTo(ChunkCoordinate other)
+        {
+            var y = Y.CompareTo(other.Y);
+            if (y != 0)
+            {
+                return y;
+            }
+
+            var z = Z.CompareTo(other.Z);
+            return z != 0 ? z : X.CompareTo(other.X);
+        }
+
         public bool Equals(ChunkCoordinate other) => X == other.X && Y == other.Y && Z == other.Z;
         public override bool Equals(object obj) => obj is ChunkCoordinate other && Equals(other);
         public override int GetHashCode() => HashCode.Combine(X, Y, Z);
         public override string ToString() => $"({X}, {Y}, {Z})";
     }
+
+    public static class WorldCoordinateUtility
+    {
+        public static int FloorDivide(int value, int divisor)
+        {
+            if (divisor <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(divisor));
+            }
+
+            var quotient = value / divisor;
+            if (value % divisor < 0)
+            {
+                quotient--;
+            }
+
+            return quotient;
+        }
+
+        public static int PositiveModulo(int value, int divisor)
+        {
+            if (divisor <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(divisor));
+            }
+
+            var remainder = value % divisor;
+            return remainder < 0 ? remainder + divisor : remainder;
+        }
+
+        public static ChunkColumnCoordinate ToChunkColumn(
+            int cellX,
+            int cellZ,
+            int chunkCellCountXZ) =>
+            new(
+                FloorDivide(cellX, chunkCellCountXZ),
+                FloorDivide(cellZ, chunkCellCountXZ));
+
+        public static ChunkCoordinate ToChunk(
+            CellCoordinate cell,
+            int chunkCellCountXZ,
+            int chunkCellCountY) =>
+            new(
+                FloorDivide(cell.X, chunkCellCountXZ),
+                FloorDivide(cell.Y, chunkCellCountY),
+                FloorDivide(cell.Z, chunkCellCountXZ));
+
+        public static LocalCellIndex ToLocalCellIndex(
+            CellCoordinate cell,
+            int chunkCellCountXZ,
+            int chunkCellCountY)
+        {
+            var localX = PositiveModulo(cell.X, chunkCellCountXZ);
+            var localY = PositiveModulo(cell.Y, chunkCellCountY);
+            var localZ = PositiveModulo(cell.Z, chunkCellCountXZ);
+            return new LocalCellIndex(
+                localX
+                + chunkCellCountXZ
+                    * (localZ + chunkCellCountXZ * localY));
+        }
+
+        public static CellCoordinate ToAbsoluteCell(
+            ChunkCoordinate chunk,
+            int localX,
+            int localY,
+            int localZ,
+            int chunkCellCountXZ,
+            int chunkCellCountY)
+        {
+            if ((uint)localX >= chunkCellCountXZ
+                || (uint)localY >= chunkCellCountY
+                || (uint)localZ >= chunkCellCountXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(localX));
+            }
+
+            return new CellCoordinate(
+                checked(chunk.X * chunkCellCountXZ + localX),
+                checked(chunk.Y * chunkCellCountY + localY),
+                checked(chunk.Z * chunkCellCountXZ + localZ));
+        }
+    }
+
 }

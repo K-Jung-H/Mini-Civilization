@@ -20,7 +20,7 @@ namespace MiniCivilization.World.Meshing
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
             List<ExposedCell> cells,
-            HashSet<int> candidateIndices)
+            HashSet<CellCoordinate> candidateCells)
         {
             buffers.Clear();
             var startX = patchX * patchSize;
@@ -40,7 +40,7 @@ namespace MiniCivilization.World.Meshing
                 endX,
                 endZ,
                 cells,
-                candidateIndices);
+                candidateCells);
 
             for (var index = 0; index < cells.Count; index++)
             {
@@ -108,9 +108,9 @@ namespace MiniCivilization.World.Meshing
             int endX,
             int endZ,
             List<ExposedCell> cells,
-            HashSet<int> candidateIndices)
+            HashSet<CellCoordinate> candidateCells)
         {
-            candidateIndices.Clear();
+            candidateCells.Clear();
             for (var sourceIndex = 0;
                  sourceIndex < cells.Count;
                  sourceIndex++)
@@ -133,16 +133,15 @@ namespace MiniCivilization.World.Meshing
                         continue;
                     }
 
-                    candidateIndices.Add(
-                        WorldIndex.EncodeCell(world, x, y, z));
+                    candidateCells.Add(new CellCoordinate(x, y, z));
                 }
             }
 
             cells.Clear();
-            foreach (var cellIndex in candidateIndices)
+            foreach (var cell in candidateCells)
             {
                 cells.Add(new ExposedCell(
-                    WorldIndex.DecodeCell(world, cellIndex),
+                    cell,
                     CellExposureFlags.None));
             }
 

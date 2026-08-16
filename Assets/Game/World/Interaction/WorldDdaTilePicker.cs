@@ -132,11 +132,8 @@ namespace MiniCivilization.World.Interaction
                         worldPoint);
                     if (worldDistance <= maxDistance + BoundaryEpsilon)
                     {
-                        var cellIndex = WorldCellIndex.Encode(
-                            world, x, y, z);
                         result = new TilePickResult(
                             coordinate,
-                            cellIndex,
                             surfaceHit.SurfaceType,
                             surfaceHit.Face,
                             worldPoint,

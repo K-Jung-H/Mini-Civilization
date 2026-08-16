@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Persistence;
 using UnityEngine;
@@ -11,15 +10,8 @@ namespace MiniCivilization.World.Runtime
         menuName = "Mini Civilization/World Data")]
     public sealed class WorldDataAsset : ScriptableObject
     {
-        private const int CurrentPreparedMeshSchema = 3;
-
         [SerializeField, HideInInspector] private byte[] serializedWorld =
             Array.Empty<byte>();
-        [SerializeField, HideInInspector] private bool hasPreparedRenderCache;
-        [SerializeField, HideInInspector] private int preparedPatchSize;
-        [SerializeField, HideInInspector] private int preparedPatchCount;
-        [SerializeField, HideInInspector] private int preparedMeshSchema;
-        [SerializeField, HideInInspector] private List<Mesh> preparedMeshes = new();
 
         [NonSerialized] private WorldData runtimeData;
 
@@ -33,12 +25,6 @@ namespace MiniCivilization.World.Runtime
         public int ChunkSizeY => HasData ? Data.ChunkSizeY : 0;
         public int ChunkSizeZ => HasData ? Data.ChunkSizeZ : 0;
         public int SerializedByteCount => serializedWorld?.Length ?? 0;
-        public bool HasPreparedRenderCache => hasPreparedRenderCache
-            && preparedMeshSchema == CurrentPreparedMeshSchema;
-        public int PreparedPatchSize => preparedPatchSize;
-        public int PreparedPatchCount => preparedPatchCount;
-        public IReadOnlyList<Mesh> PreparedMeshes => preparedMeshes;
-
         public WorldData Data
         {
             get
@@ -78,7 +64,6 @@ namespace MiniCivilization.World.Runtime
 
             serializedWorld = (byte[])bytes.Clone();
             runtimeData = WorldSaveCodec.FromBytes(serializedWorld);
-            ClearPreparedRenderCache();
         }
 
         public byte[] ExportBytes()
@@ -97,46 +82,7 @@ namespace MiniCivilization.World.Runtime
             copy.name = name + " (Runtime)";
             copy.hideFlags = HideFlags.DontSave;
             copy.InitializeFromBytes(ExportBytes());
-            copy.hasPreparedRenderCache = hasPreparedRenderCache;
-            copy.preparedPatchSize = preparedPatchSize;
-            copy.preparedPatchCount = preparedPatchCount;
-            copy.preparedMeshSchema = preparedMeshSchema;
-            copy.preparedMeshes = new List<Mesh>(preparedMeshes);
             return copy;
-        }
-
-        public void SetPreparedRenderCache(
-            int patchSize,
-            int patchCount,
-            IEnumerable<Mesh> meshes)
-        {
-            preparedPatchSize = Mathf.Max(0, patchSize);
-            preparedPatchCount = Mathf.Max(0, patchCount);
-            preparedMeshSchema = CurrentPreparedMeshSchema;
-            preparedMeshes.Clear();
-            if (meshes != null)
-            {
-                foreach (var mesh in meshes)
-                {
-                    if (mesh != null && !preparedMeshes.Contains(mesh))
-                    {
-                        preparedMeshes.Add(mesh);
-                    }
-                }
-            }
-
-            hasPreparedRenderCache = preparedPatchSize > 0
-                && preparedPatchCount > 0
-                && preparedMeshes.Count > 0;
-        }
-
-        public void ClearPreparedRenderCache()
-        {
-            hasPreparedRenderCache = false;
-            preparedPatchSize = 0;
-            preparedPatchCount = 0;
-            preparedMeshSchema = 0;
-            preparedMeshes.Clear();
         }
 
     }

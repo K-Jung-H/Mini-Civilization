@@ -40,10 +40,7 @@ namespace MiniCivilization.World.Generation
         public int MinimumInlandLakeDepthSteps => Settings.MinimumInlandLakeDepthSteps;
         public int PondMaximumArea => Settings.PondMaximumArea;
         public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
-        public float DesertMoistureThreshold => Settings.DesertMoistureThreshold;
-        public float WetlandMoistureThreshold => Settings.WetlandMoistureThreshold;
-        public float SnowTemperatureThreshold => Settings.SnowTemperatureThreshold;
-        public int WaterMoistureRadius => Settings.WaterMoistureRadius;
+        public float ColdClimateThreshold => Settings.ColdClimateThreshold;
 
         public static WorldBuildInput Create(WorldGenerationSettings settings, int seed)
         {
@@ -68,7 +65,7 @@ namespace MiniCivilization.World.Generation
             WaterTypes = new WaterType[columns];
             WaterBedSurfaces = new SurfaceType[columns];
             TopSurfaces = new SurfaceType[columns];
-            Environments = new EnvironmentData[columns];
+            Biomes = new CellBiome[columns];
         }
 
         public WorldBuildInput Input { get; }
@@ -81,7 +78,7 @@ namespace MiniCivilization.World.Generation
         public WaterType[] WaterTypes { get; }
         public SurfaceType[] WaterBedSurfaces { get; }
         public SurfaceType[] TopSurfaces { get; }
-        public EnvironmentData[] Environments { get; }
+        public CellBiome[] Biomes { get; }
         public WaterFlowRules WaterFlowRules => Input.WaterFlowRules;
         public int PondMaximumArea => Input.PondMaximumArea;
         public bool ContainsColumn(int x, int z) => (uint)x < Size && (uint)z < Size;
@@ -110,8 +107,8 @@ namespace MiniCivilization.World.Generation
                         : build.TopSurfaces[index],
                     build.WaterSurfaces[index],
                     build.WaterRoles[index],
-                    build.WaterTypes[index]);
-                world.SetEnvironment(x, z, build.Environments[index]);
+                    build.WaterTypes[index],
+                    build.Biomes[index]);
             }
 
             return world;
@@ -125,7 +122,8 @@ namespace MiniCivilization.World.Generation
             SurfaceType surface,
             int waterSurfaceUnits,
             WaterRole waterRole,
-            WaterType waterType)
+            WaterType waterType,
+            CellBiome biome)
         {
             solidHeightUnits = Math.Clamp(solidHeightUnits, 0, world.Height * WorldGrid.HeightStepsPerCell);
             waterSurfaceUnits = Math.Clamp(waterSurfaceUnits, 0, world.Height * WorldGrid.HeightStepsPerCell);
@@ -162,6 +160,11 @@ namespace MiniCivilization.World.Generation
                         Type = waterType,
                         Flow = FlowDirection.None
                     };
+                }
+
+                if (cell.HasTerrain || cell.HasWater)
+                {
+                    cell.Biome = biome;
                 }
 
                 world.SetCellBulk(x, y, z, cell);
@@ -298,60 +301,7 @@ namespace MiniCivilization.World.Generation
 
         public static void Build(WorldBuildData build)
         {
-            Apply(build, BuildWaterDistanceField(build));
-        }
-
-        internal static int[] BuildWaterDistanceField(WorldBuildData build)
-        {
             if (build == null) throw new ArgumentNullException(nameof(build));
-
-            var radius = build.Input.WaterMoistureRadius;
-            var result = new int[build.Size * build.Size];
-            Array.Fill(result, radius + 1);
-            var queue = new Queue<int>();
-            for (var index = 0; index < result.Length; index++)
-            {
-                if (build.WaterSurfaces[index] > build.SolidHeights[index]
-                    || build.WaterBedSurfaces[index] != SurfaceType.None)
-                {
-                    result[index] = 0;
-                    queue.Enqueue(index);
-                }
-            }
-
-            while (queue.Count > 0)
-            {
-                var index = queue.Dequeue();
-                if (result[index] >= radius) continue;
-                var x = index % build.Size;
-                var z = index / build.Size;
-                for (var directionIndex = 0; directionIndex < Directions.Length; directionIndex++)
-                {
-                    var nextX = x + Directions[directionIndex].x;
-                    var nextZ = z + Directions[directionIndex].z;
-                    if (!build.ContainsColumn(nextX, nextZ)) continue;
-                    var next = build.ToColumnIndex(nextX, nextZ);
-                    if (result[next] <= result[index] + 1) continue;
-                    result[next] = result[index] + 1;
-                    queue.Enqueue(next);
-                }
-            }
-
-            return result;
-        }
-
-        internal static void Apply(
-            WorldBuildData build,
-            IReadOnlyList<int> distances)
-        {
-            if (build == null) throw new ArgumentNullException(nameof(build));
-            if (distances == null
-                || distances.Count != build.Size * build.Size)
-            {
-                throw new ArgumentException(
-                    "Water distance data does not match the world size.",
-                    nameof(distances));
-            }
 
             var input = build.Input;
             var climateSeed = DeterministicNoise.DeriveSeed(build.Seed, "climate");
@@ -360,27 +310,22 @@ namespace MiniCivilization.World.Generation
             {
                 var index = build.ToColumnIndex(x, z);
                 var groundHeight = build.SolidHeights[index];
-                var latitude = build.Size > 1 ? MathF.Abs(z / (float)(build.Size - 1) * 2f - 1f) : 0f;
-                var altitude = groundHeight / (float)(build.Height * WorldGrid.HeightStepsPerCell);
-                var temperature = Math.Clamp(1f - latitude * 0.7f - altitude * 0.45f, 0f, 1f);
-                var moistureNoise = DeterministicNoise.FractalNoise(x * 0.025f, z * 0.025f, climateSeed, 3, 2f, 0.5f);
-                var distance = distances[index];
-                var waterInfluence = distance > input.WaterMoistureRadius
-                    ? 0f : 1f - distance / (float)(input.WaterMoistureRadius + 1);
-                var moisture = Math.Clamp(moistureNoise * 0.65f + waterInfluence * 0.55f, 0f, 1f);
-                var biome = temperature <= input.SnowTemperatureThreshold ? BiomeType.Snow
-                    : altitude >= 0.72f ? BiomeType.Mountain
-                    : moisture <= input.DesertMoistureThreshold ? BiomeType.Desert
-                    : moisture >= input.WetlandMoistureThreshold && waterInfluence > 0f ? BiomeType.Wetland
-                    : BiomeType.Grassland;
-                build.Environments[index] = new EnvironmentData
-                {
-                    Biome = biome,
-                    Temperature = (byte)MathF.Round(temperature * byte.MaxValue),
-                    Moisture = (byte)MathF.Round(moisture * byte.MaxValue),
-                    Fertility = (byte)MathF.Round(Math.Clamp(
-                        moisture * (1f - MathF.Abs(temperature - 0.58f)), 0f, 1f) * byte.MaxValue)
-                };
+                var altitude = groundHeight /
+                    (float)(build.Height * WorldGrid.HeightStepsPerCell);
+                var temperature = CalculateTemperature(
+                    build.Size,
+                    build.Height,
+                    climateSeed,
+                    x,
+                    z,
+                    groundHeight);
+                var climate = ResolveClimate(
+                    temperature,
+                    input.ColdClimateThreshold);
+                build.Biomes[index] = new CellBiome(
+                    climate,
+                    ResolveTerrain(climate, altitude),
+                    ResolveWater(build.WaterTypes[index]));
                 build.TopSurfaces[index] = build.WaterBedSurfaces[index] != SurfaceType.None
                     ? build.WaterBedSurfaces[index]
                     : IsAdjacentToWater(build, x, z)
@@ -388,6 +333,74 @@ namespace MiniCivilization.World.Generation
                             ? SurfaceType.Shore : SurfaceType.Ground;
             }
         }
+
+        internal static float CalculateTemperature(
+            int size,
+            int height,
+            int climateSeed,
+            int x,
+            int z,
+            int groundHeight)
+        {
+            var latitude = size > 1
+                ? MathF.Abs(z / (float)(size - 1) * 2f - 1f)
+                : 0f;
+            var altitude = groundHeight /
+                (float)(height * WorldGrid.HeightStepsPerCell);
+            var variation = DeterministicNoise.FractalNoise(
+                x * 0.0125f,
+                z * 0.0125f,
+                climateSeed,
+                3,
+                2f,
+                0.5f) - 0.5f;
+            return Math.Clamp(
+                1f - latitude * 0.7f - altitude * 0.45f
+                + variation * 0.3f,
+                0f,
+                1f);
+        }
+
+        internal static ClimateBiome ResolveClimate(
+            float temperature,
+            float coldThreshold)
+        {
+            if (temperature <= coldThreshold)
+            {
+                return ClimateBiome.Cold;
+            }
+
+            return temperature >= 1f - coldThreshold
+                ? ClimateBiome.Warm
+                : ClimateBiome.Temperate;
+        }
+
+        internal static TerrainBiome ResolveTerrain(
+            ClimateBiome climate,
+            float altitude)
+        {
+            if (altitude >= 0.72f)
+            {
+                return TerrainBiome.Mountain;
+            }
+
+            return climate switch
+            {
+                ClimateBiome.Cold => TerrainBiome.Snow,
+                ClimateBiome.Warm => TerrainBiome.Desert,
+                _ => TerrainBiome.Field
+            };
+        }
+
+        internal static WaterBiome ResolveWater(WaterType waterType) =>
+            waterType switch
+            {
+                WaterType.Pond => WaterBiome.Pond,
+                WaterType.Lake => WaterBiome.Lake,
+                WaterType.Sea => WaterBiome.Sea,
+                WaterType.River => WaterBiome.River,
+                _ => WaterBiome.None
+            };
 
         private static bool IsAdjacentToWater(WorldBuildData build, int x, int z)
         {

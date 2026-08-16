@@ -23,7 +23,6 @@ namespace MiniCivilization.World.Editing
     {
         None,
         Terrain,
-        Biome,
         Water,
         Road
     }
@@ -40,23 +39,19 @@ namespace MiniCivilization.World.Editing
     {
         public readonly WorldEditPropertyGroup PropertyGroup;
         public readonly TerrainEditOperation TerrainOperation;
-        public readonly BiomeType Biome;
         public readonly RoadType RoadType;
 
         public bool IsSupported =>
             PropertyGroup == WorldEditPropertyGroup.Terrain
-            || PropertyGroup == WorldEditPropertyGroup.Biome
             || PropertyGroup == WorldEditPropertyGroup.Road;
 
         private WorldEditAction(
             WorldEditPropertyGroup propertyGroup,
             TerrainEditOperation terrainOperation,
-            BiomeType biome,
             RoadType roadType)
         {
             PropertyGroup = propertyGroup;
             TerrainOperation = terrainOperation;
-            Biome = biome;
             RoadType = roadType;
         }
 
@@ -64,27 +59,17 @@ namespace MiniCivilization.World.Editing
             new(
                 WorldEditPropertyGroup.Terrain,
                 operation,
-                BiomeType.None,
-                default);
-
-        public static WorldEditAction SetBiome(BiomeType biome) =>
-            new(
-                WorldEditPropertyGroup.Biome,
-                default,
-                biome,
                 default);
 
         public static WorldEditAction SetRoad(RoadType roadType) =>
             new(
                 WorldEditPropertyGroup.Road,
                 default,
-                BiomeType.None,
                 roadType);
 
         public bool Equals(WorldEditAction other) =>
             PropertyGroup == other.PropertyGroup
             && TerrainOperation == other.TerrainOperation
-            && Biome == other.Biome
             && RoadType == other.RoadType;
 
         public override bool Equals(object obj) =>
@@ -94,7 +79,6 @@ namespace MiniCivilization.World.Editing
             HashCode.Combine(
                 (byte)PropertyGroup,
                 (byte)TerrainOperation,
-                (ushort)Biome,
                 (ushort)RoadType);
     }
 

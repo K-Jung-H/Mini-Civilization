@@ -15,27 +15,39 @@ namespace MiniCivilization.World.WaterFlow
             WorldData world,
             SurfaceCache surfaceCache)
         {
-            var visited = new bool[world.Size * world.Size];
+            var visited = new HashSet<CellColumnCoordinate>();
+            var dryColumns = new HashSet<CellColumnCoordinate>();
+            var wetSurfaceHeights =
+                new Dictionary<CellColumnCoordinate, SurfaceHeightData>();
             var result = new List<WaterBody>();
             var queue = new Queue<(int x, int z)>();
 
             for (var z = 0; z < world.Size; z++)
             for (var x = 0; x < world.Size; x++)
             {
-                var index = ToIndex(world, x, z);
-                if (visited[index] || !surfaceCache.GetSurfaceHeight(x, z).HasWater)
+                var column = new CellColumnCoordinate(x, z);
+                if (visited.Contains(column)
+                    || !TryGetWaterSurface(column, out _))
                 {
                     continue;
                 }
 
                 var body = new WaterBody(result.Count + 1);
                 queue.Enqueue((x, z));
-                visited[index] = true;
+                visited.Add(column);
 
                 while (queue.Count > 0)
                 {
                     var current = queue.Dequeue();
-                    AddExposedColumn(world, surfaceCache, current.x, current.z, body);
+                    var currentColumn = new CellColumnCoordinate(
+                        current.x,
+                        current.z);
+                    AddExposedColumn(
+                        world,
+                        wetSurfaceHeights[currentColumn],
+                        current.x,
+                        current.z,
+                        body);
                     body.SurfaceCellCount++;
                     body.TouchesWorldEdge |= current.x == 0
                         || current.z == 0
@@ -51,13 +63,14 @@ namespace MiniCivilization.World.WaterFlow
                             continue;
                         }
 
-                        var nextIndex = ToIndex(world, nextX, nextZ);
-                        if (visited[nextIndex] || !surfaceCache.GetSurfaceHeight(nextX, nextZ).HasWater)
+                        var nextColumn = new CellColumnCoordinate(nextX, nextZ);
+                        if (visited.Contains(nextColumn)
+                            || !TryGetWaterSurface(nextColumn, out _))
                         {
                             continue;
                         }
 
-                        visited[nextIndex] = true;
+                        visited.Add(nextColumn);
                         queue.Enqueue((nextX, nextZ));
                     }
                 }
@@ -66,28 +79,55 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             return result;
+
+            bool TryGetWaterSurface(
+                CellColumnCoordinate coordinate,
+                out SurfaceHeightData height)
+            {
+                if (wetSurfaceHeights.TryGetValue(coordinate, out height))
+                {
+                    return true;
+                }
+
+                if (dryColumns.Contains(coordinate))
+                {
+                    height = default;
+                    return false;
+                }
+
+                height = surfaceCache.GetSurfaceHeight(
+                    coordinate.X,
+                    coordinate.Z);
+                if (height.HasWater)
+                {
+                    wetSurfaceHeights.Add(coordinate, height);
+                    return true;
+                }
+
+                dryColumns.Add(coordinate);
+                return false;
+            }
         }
 
         internal static void RefreshMetrics(
             WorldData world,
             SurfaceCache surfaceCache,
             WaterFlowState state,
-            IReadOnlyCollection<int> changedColumnIndices,
+            IReadOnlyCollection<CellColumnCoordinate> changedColumns,
             HashSet<int> affectedBodyIds)
         {
             affectedBodyIds.Clear();
             if (world == null
                 || state == null
-                || changedColumnIndices == null
-                || changedColumnIndices.Count == 0)
+                || changedColumns == null
+                || changedColumns.Count == 0)
             {
                 return;
             }
 
-            foreach (var columnIndex in changedColumnIndices)
+            foreach (var column in changedColumns)
             {
-                WorldIndex.DecodeColumn(world, columnIndex, out var x, out var z);
-                var bodyId = state.GetWaterBodyId(x, z);
+                var bodyId = state.GetWaterBodyId(column.X, column.Z);
                 if (bodyId != 0)
                 {
                     affectedBodyIds.Add(bodyId);
@@ -116,12 +156,11 @@ namespace MiniCivilization.World.WaterFlow
 
         private static void AddExposedColumn(
             WorldData world,
-            SurfaceCache surfaceCache,
+            SurfaceHeightData column,
             int x,
             int z,
             WaterBody body)
         {
-            var column = surfaceCache.GetSurfaceHeight(x, z);
             var solidTopUnits = column.GroundHeight;
 
             for (var y = 0; y <= column.WaterCellY; y++)
@@ -183,6 +222,5 @@ namespace MiniCivilization.World.WaterFlow
                     solidTopUnits));
         }
 
-        private static int ToIndex(WorldData world, int x, int z) => x + world.Size * z;
     }
 }

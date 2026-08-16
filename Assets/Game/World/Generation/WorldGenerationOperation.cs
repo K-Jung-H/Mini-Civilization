@@ -14,7 +14,6 @@ namespace MiniCivilization.World.Generation
             NotStarted,
             Terrain,
             WaterFeatures,
-            BiomeDistances,
             Biome,
             BuildWorldData,
             PrepareRuntime,
@@ -30,13 +29,12 @@ namespace MiniCivilization.World.Generation
         private bool terrainJobScheduled;
 
         private Task waterFeaturesTask;
-        private Task<int[]> biomeDistanceTask;
         private JobHandle biomeJob;
         private NativeArray<int> biomeSolidHeights;
         private NativeArray<int> biomeWaterSurfaces;
-        private NativeArray<int> biomeWaterDistances;
         private NativeArray<SurfaceType> biomeWaterBedSurfaces;
-        private NativeArray<EnvironmentData> biomeEnvironments;
+        private NativeArray<WaterType> biomeWaterTypes;
+        private NativeArray<CellBiome> biomeCells;
         private NativeArray<SurfaceType> biomeTopSurfaces;
         private bool biomeJobScheduled;
 
@@ -69,9 +67,6 @@ namespace MiniCivilization.World.Generation
                         break;
                     case Phase.WaterFeatures:
                         FinishWaterFeatures();
-                        break;
-                    case Phase.BiomeDistances:
-                        StartBiomeJob();
                         break;
                     case Phase.Biome:
                         FinishBiomeJob();
@@ -173,33 +168,25 @@ namespace MiniCivilization.World.Generation
             CompleteCurrentStage();
 
             BeginStage(WorldOperationStage.Biome);
-            biomeDistanceTask = Task.Run(
-                () => BiomeStage.BuildWaterDistanceField(build));
-            phase = Phase.BiomeDistances;
+            StartBiomeJob();
         }
 
         private void StartBiomeJob()
         {
-            if (!biomeDistanceTask.IsCompleted)
-            {
-                return;
-            }
-
-            var distances = biomeDistanceTask.GetAwaiter().GetResult();
             biomeSolidHeights = new NativeArray<int>(
                 build.SolidHeights,
                 Allocator.Persistent);
             biomeWaterSurfaces = new NativeArray<int>(
                 build.WaterSurfaces,
                 Allocator.Persistent);
-            biomeWaterDistances = new NativeArray<int>(
-                distances,
-                Allocator.Persistent);
             biomeWaterBedSurfaces = new NativeArray<SurfaceType>(
                 build.WaterBedSurfaces,
                 Allocator.Persistent);
-            biomeEnvironments = new NativeArray<EnvironmentData>(
-                build.Environments.Length,
+            biomeWaterTypes = new NativeArray<WaterType>(
+                build.WaterTypes,
+                Allocator.Persistent);
+            biomeCells = new NativeArray<CellBiome>(
+                build.Biomes.Length,
                 Allocator.Persistent);
             biomeTopSurfaces = new NativeArray<SurfaceType>(
                 build.TopSurfaces.Length,
@@ -210,17 +197,14 @@ namespace MiniCivilization.World.Generation
                 Height = build.Height,
                 SeaLevelUnits = input.SeaLevelUnits,
                 ClimateSeed = DeterministicNoise.DeriveSeed(build.Seed, "climate"),
-                DesertMoistureThreshold = input.DesertMoistureThreshold,
-                WetlandMoistureThreshold = input.WetlandMoistureThreshold,
-                SnowTemperatureThreshold = input.SnowTemperatureThreshold,
-                WaterMoistureRadius = input.WaterMoistureRadius,
+                ColdClimateThreshold = input.ColdClimateThreshold,
                 SolidHeights = biomeSolidHeights,
                 WaterSurfaces = biomeWaterSurfaces,
-                WaterDistances = biomeWaterDistances,
                 WaterBedSurfaces = biomeWaterBedSurfaces,
-                Environments = biomeEnvironments,
+                WaterTypes = biomeWaterTypes,
+                Biomes = biomeCells,
                 TopSurfaces = biomeTopSurfaces
-            }.Schedule(biomeEnvironments.Length, innerloopBatchCount: 64);
+            }.Schedule(biomeCells.Length, innerloopBatchCount: 64);
             biomeJobScheduled = true;
             phase = Phase.Biome;
         }
@@ -233,7 +217,7 @@ namespace MiniCivilization.World.Generation
             }
 
             biomeJob.Complete();
-            biomeEnvironments.CopyTo(build.Environments);
+            biomeCells.CopyTo(build.Biomes);
             biomeTopSurfaces.CopyTo(build.TopSurfaces);
             DisposeBiomeBuffers();
             biomeJobScheduled = false;
@@ -289,9 +273,9 @@ namespace MiniCivilization.World.Generation
         {
             if (biomeSolidHeights.IsCreated) biomeSolidHeights.Dispose();
             if (biomeWaterSurfaces.IsCreated) biomeWaterSurfaces.Dispose();
-            if (biomeWaterDistances.IsCreated) biomeWaterDistances.Dispose();
             if (biomeWaterBedSurfaces.IsCreated) biomeWaterBedSurfaces.Dispose();
-            if (biomeEnvironments.IsCreated) biomeEnvironments.Dispose();
+            if (biomeWaterTypes.IsCreated) biomeWaterTypes.Dispose();
+            if (biomeCells.IsCreated) biomeCells.Dispose();
             if (biomeTopSurfaces.IsCreated) biomeTopSurfaces.Dispose();
         }
 
@@ -364,15 +348,12 @@ namespace MiniCivilization.World.Generation
             public int Height;
             public int SeaLevelUnits;
             public int ClimateSeed;
-            public float DesertMoistureThreshold;
-            public float WetlandMoistureThreshold;
-            public float SnowTemperatureThreshold;
-            public int WaterMoistureRadius;
+            public float ColdClimateThreshold;
             [ReadOnly] public NativeArray<int> SolidHeights;
             [ReadOnly] public NativeArray<int> WaterSurfaces;
-            [ReadOnly] public NativeArray<int> WaterDistances;
             [ReadOnly] public NativeArray<SurfaceType> WaterBedSurfaces;
-            public NativeArray<EnvironmentData> Environments;
+            [ReadOnly] public NativeArray<WaterType> WaterTypes;
+            public NativeArray<CellBiome> Biomes;
             public NativeArray<SurfaceType> TopSurfaces;
 
             public void Execute(int index)
@@ -380,44 +361,22 @@ namespace MiniCivilization.World.Generation
                 var x = index % Size;
                 var z = index / Size;
                 var groundHeight = SolidHeights[index];
-                var latitude = Size > 1
-                    ? MathF.Abs(z / (float)(Size - 1) * 2f - 1f) : 0f;
                 var altitude = groundHeight /
                     (float)(Height * WorldGrid.HeightStepsPerCell);
-                var temperature = Math.Clamp(
-                    1f - latitude * 0.7f - altitude * 0.45f,
-                    0f,
-                    1f);
-                var moistureNoise = DeterministicNoise.FractalNoise(
-                    x * 0.025f,
-                    z * 0.025f,
+                var temperature = BiomeStage.CalculateTemperature(
+                    Size,
+                    Height,
                     ClimateSeed,
-                    3,
-                    2f,
-                    0.5f);
-                var distance = WaterDistances[index];
-                var waterInfluence = distance > WaterMoistureRadius
-                    ? 0f : 1f - distance / (float)(WaterMoistureRadius + 1);
-                var moisture = Math.Clamp(
-                    moistureNoise * 0.65f + waterInfluence * 0.55f,
-                    0f,
-                    1f);
-                var biome = temperature <= SnowTemperatureThreshold ? BiomeType.Snow
-                    : altitude >= 0.72f ? BiomeType.Mountain
-                    : moisture <= DesertMoistureThreshold ? BiomeType.Desert
-                    : moisture >= WetlandMoistureThreshold && waterInfluence > 0f
-                        ? BiomeType.Wetland
-                        : BiomeType.Grassland;
-                Environments[index] = new EnvironmentData
-                {
-                    Biome = biome,
-                    Temperature = (byte)MathF.Round(temperature * byte.MaxValue),
-                    Moisture = (byte)MathF.Round(moisture * byte.MaxValue),
-                    Fertility = (byte)MathF.Round(Math.Clamp(
-                        moisture * (1f - MathF.Abs(temperature - 0.58f)),
-                        0f,
-                        1f) * byte.MaxValue)
-                };
+                    x,
+                    z,
+                    groundHeight);
+                var climate = BiomeStage.ResolveClimate(
+                    temperature,
+                    ColdClimateThreshold);
+                Biomes[index] = new CellBiome(
+                    climate,
+                    BiomeStage.ResolveTerrain(climate, altitude),
+                    BiomeStage.ResolveWater(WaterTypes[index]));
                 TopSurfaces[index] = WaterBedSurfaces[index] != SurfaceType.None
                     ? WaterBedSurfaces[index]
                     : IsAdjacentToWater(x, z)

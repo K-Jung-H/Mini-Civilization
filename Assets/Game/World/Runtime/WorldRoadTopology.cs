@@ -34,13 +34,13 @@ namespace MiniCivilization.World.Runtime
     internal readonly struct RoadPortConnection
     {
         public readonly RoadConnectionTarget Target;
-        public readonly int NeighborColumn;
+        public readonly CellColumnCoordinate NeighborColumn;
         public readonly BuildingWayLocation BuildingLocation;
         public readonly byte BoundaryOffsetIndex;
 
         public RoadPortConnection(
             RoadConnectionTarget target,
-            int neighborColumn,
+            CellColumnCoordinate neighborColumn,
             BuildingWayLocation buildingLocation,
             byte boundaryOffsetIndex)
         {
@@ -99,14 +99,13 @@ namespace MiniCivilization.World.Runtime
 
     internal sealed class WorldRoadTopology
     {
-        private readonly Dictionary<int, RoadTopologyCell> cellsByColumn;
+        private readonly Dictionary<CellColumnCoordinate, RoadTopologyCell>
+            cellsByColumn;
 
         private WorldRoadTopology(
-            WorldData world,
             List<RoadTopologyCell> cells,
-            Dictionary<int, RoadTopologyCell> cellsByColumn)
+            Dictionary<CellColumnCoordinate, RoadTopologyCell> cellsByColumn)
         {
-            this.world = world;
             Cells = cells;
             this.cellsByColumn = cellsByColumn;
         }
@@ -117,11 +116,7 @@ namespace MiniCivilization.World.Runtime
             int x,
             int z,
             out RoadTopologyCell cell) =>
-            cellsByColumn.TryGetValue(
-                WorldIndex.EncodeColumn(world, x, z),
-                out cell);
-
-        private readonly WorldData world;
+            cellsByColumn.TryGetValue(new CellColumnCoordinate(x, z), out cell);
 
         internal static WorldRoadTopology Build(
             WorldRuntime runtime,
@@ -137,7 +132,8 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(nameof(entities));
             }
 
-            var roadsByColumn = new Dictionary<int, RoadCellTopology>();
+            var roadsByColumn =
+                new Dictionary<CellColumnCoordinate, RoadCellTopology>();
             var roads = new List<RoadCellTopology>();
             for (var z = 0; z < runtime.Data.Size; z++)
             for (var x = 0; x < runtime.Data.Size; x++)
@@ -147,13 +143,14 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                roadsByColumn.Add(WorldIndex.EncodeColumn(runtime.Data, x, z), road);
+                roadsByColumn.Add(new CellColumnCoordinate(x, z), road);
                 roads.Add(road);
             }
 
             var ports = CollectBuildingPorts(runtime, entities);
             var cells = new List<RoadTopologyCell>(roads.Count);
-            var cellsByColumn = new Dictionary<int, RoadTopologyCell>(roads.Count);
+            var cellsByColumn =
+                new Dictionary<CellColumnCoordinate, RoadTopologyCell>(roads.Count);
             for (var index = 0; index < roads.Count; index++)
             {
                 var road = roads[index];
@@ -165,11 +162,11 @@ namespace MiniCivilization.World.Runtime
                     ResolveConnection(runtime, roadsByColumn, ports, road, RoadDirection.North));
                 cells.Add(cell);
                 cellsByColumn.Add(
-                    WorldIndex.EncodeColumn(runtime.Data, road.Cell.X, road.Cell.Z),
+                    new CellColumnCoordinate(road.Cell.X, road.Cell.Z),
                     cell);
             }
 
-            return new WorldRoadTopology(runtime.Data, cells, cellsByColumn);
+            return new WorldRoadTopology(cells, cellsByColumn);
         }
 
         private static List<BuildingRoadPort> CollectBuildingPorts(
@@ -229,7 +226,8 @@ namespace MiniCivilization.World.Runtime
 
         private static RoadPortConnection ResolveConnection(
             WorldRuntime runtime,
-            IReadOnlyDictionary<int, RoadCellTopology> roadsByColumn,
+            IReadOnlyDictionary<CellColumnCoordinate, RoadCellTopology>
+                roadsByColumn,
             IReadOnlyList<BuildingRoadPort> ports,
             RoadCellTopology road,
             RoadDirection direction)
@@ -242,8 +240,7 @@ namespace MiniCivilization.World.Runtime
                 return default;
             }
 
-            var neighborColumn = WorldIndex.EncodeColumn(
-                runtime.Data,
+            var neighborColumn = new CellColumnCoordinate(
                 neighborX,
                 neighborZ);
             if (roadsByColumn.TryGetValue(neighborColumn, out var neighborRoad)
@@ -276,7 +273,7 @@ namespace MiniCivilization.World.Runtime
 
                 return new RoadPortConnection(
                     RoadConnectionTarget.Building,
-                    -1,
+                    default,
                     port.Location,
                     port.BoundaryOffsetIndex);
             }

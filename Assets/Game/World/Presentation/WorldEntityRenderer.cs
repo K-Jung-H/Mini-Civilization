@@ -262,7 +262,7 @@ namespace MiniCivilization.World.Presentation
             pendingEntityIds.Clear();
             AddChangedEntities(changeSet.AddedEntityIds);
             AddChangedEntities(changeSet.MovedEntityIds);
-            AddEntitiesAtAffectedCells(changeSet.AffectedCellIndices);
+            AddEntitiesAtAffectedCells(changeSet.AffectedCells);
 
             foreach (var id in pendingEntityIds)
             {
@@ -282,12 +282,12 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private void AddEntitiesAtAffectedCells(IReadOnlyList<int> cellIndices)
+        private void AddEntitiesAtAffectedCells(
+            IReadOnlyList<CellCoordinate> cells)
         {
-            for (var index = 0; index < cellIndices.Count; index++)
+            for (var index = 0; index < cells.Count; index++)
             {
-                var coordinate = WorldIndex.DecodeCell(runtime.Data, cellIndices[index]);
-                var ids = runtime.Entities.GetEntitiesAt(coordinate);
+                var ids = runtime.Entities.GetEntitiesAt(cells[index]);
                 for (var entityIndex = 0; entityIndex < ids.Count; entityIndex++)
                 {
                     pendingEntityIds.Add(ids[entityIndex]);

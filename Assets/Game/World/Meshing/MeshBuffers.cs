@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System;
 using MiniCivilization.World.Definitions;
+using MiniCivilization.World.Domain;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -12,7 +13,7 @@ namespace MiniCivilization.World.Meshing
         public MeshBuffers Water { get; } = new();
         public List<ExposedCell> SolidCells { get; } = new();
         public List<ExposedCell> WaterCells { get; } = new();
-        public HashSet<int> WaterCellIndices { get; } = new();
+        public HashSet<CellCoordinate> WaterCellsSet { get; } = new();
     }
 
     internal readonly struct SurfaceVertex
