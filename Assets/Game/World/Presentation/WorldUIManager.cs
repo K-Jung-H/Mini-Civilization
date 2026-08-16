@@ -1,3 +1,4 @@
+using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Editing;
 using MiniCivilization.World.Interaction;
 using MiniCivilization.World.Runtime;
@@ -19,6 +20,8 @@ namespace MiniCivilization.World.Presentation
         [Header("World UI")]
         [SerializeField] private WorldEditToolbarView toolbarView;
         [SerializeField] private WorldEntityCatalogView entityCatalogView;
+        [SerializeField] private WorldRoadCatalogView roadCatalogView;
+        [SerializeField] private RoadVisualCatalog roadVisualCatalog;
         [SerializeField] private WorldEditConfirmationView editConfirmationView;
         [SerializeField] private WorldOperationProgressView operationProgressView;
         [SerializeField] private WorldTileInfoPresenter tileInfoPresenter;
@@ -61,7 +64,11 @@ namespace MiniCivilization.World.Presentation
 
             if (toolbarView != null)
             {
-                editToolState?.Configure(toolbarView, entityCatalogView);
+                roadCatalogView?.Initialize(roadVisualCatalog);
+                editToolState?.Configure(
+                    toolbarView,
+                    entityCatalogView,
+                    roadCatalogView);
                 editInputController?.Configure(
                     manager,
                     editToolState,

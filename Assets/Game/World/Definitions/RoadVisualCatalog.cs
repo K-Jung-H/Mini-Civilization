@@ -10,6 +10,8 @@ namespace MiniCivilization.World.Definitions
     public sealed class RoadVisualDefinition
     {
         public RoadType Type = RoadType.Basic;
+        public string DisplayName;
+        public Sprite Thumbnail;
         [FormerlySerializedAs("CenterMask")]
         [FormerlySerializedAs("Turn2Mask")]
         public Texture2D CornerMask;
@@ -22,6 +24,10 @@ namespace MiniCivilization.World.Definitions
         public bool HasShapeMasks => CornerMask != null
             && QuarterMask != null
             && StraightMask != null;
+
+        public string Name => string.IsNullOrWhiteSpace(DisplayName)
+            ? Type.ToString()
+            : DisplayName;
     }
 
     public readonly struct RoadVisualAppearance
@@ -214,6 +220,7 @@ namespace MiniCivilization.World.Definitions
                 new()
                 {
                     Type = RoadType.Basic,
+                    DisplayName = "기본 도로",
                     Surface = new SurfaceTextureProfile
                     {
                         Tint = new Color(0.34f, 0.24f, 0.14f),

@@ -95,6 +95,8 @@ MonoBehaviour:
   surfaceTextureArrayMipMaps: 1
   roads:
   - Type: 1
+    DisplayName: "\uAE30\uBCF8 \uB3C4\uB85C"
+    Thumbnail: {fileID: 10907, guid: 0000000000000000f000000000000000, type: 0}
     CornerMask: {fileID: 2800000, guid: 510d1c1d1a9c9e0469fbfb91c3139f53, type: 3}
     QuarterMask: {fileID: 2800000, guid: 2a2f13fcb4cbab44bab52992598f3869, type: 3}
     StraightMask: {fileID: 2800000, guid: 847709f40c0d0fe40aa74e53267f4e54, type: 3}

@@ -240,7 +240,7 @@ namespace MiniCivilization.World.Editing
                 return RefreshRoadPreview(
                     world,
                     selection,
-                    tool.Action.RoadOperation);
+                    tool.Action.RoadType);
             }
 
             selectedCells.Clear();
@@ -280,7 +280,7 @@ namespace MiniCivilization.World.Editing
                 case WorldEditPropertyGroup.Road:
                     return ApplyRoad(
                         world,
-                        action.RoadOperation);
+                        action.RoadType);
                 default:
                     return false;
             }
@@ -289,7 +289,7 @@ namespace MiniCivilization.World.Editing
         private bool RefreshRoadPreview(
             WorldData world,
             IWorldCellSelection selection,
-            RoadEditOperation operation)
+            RoadType roadType)
         {
             selectedCells.Clear();
             validCells.Clear();
@@ -303,7 +303,7 @@ namespace MiniCivilization.World.Editing
                     coordinate.X,
                     coordinate.Y,
                     coordinate.Z);
-                if (operation == RoadEditOperation.Remove)
+                if (roadType == RoadType.None)
                 {
                     if (cell.HasRoad)
                     {
@@ -339,7 +339,7 @@ namespace MiniCivilization.World.Editing
 
         private bool ApplyRoad(
             WorldData world,
-            RoadEditOperation operation)
+            RoadType roadType)
         {
             var transaction = editController.BeginTransaction();
             var changed = false;
@@ -354,7 +354,7 @@ namespace MiniCivilization.World.Editing
                         coordinate.X,
                         coordinate.Y,
                         coordinate.Z);
-                    if (operation == RoadEditOperation.Remove)
+                    if (roadType == RoadType.None)
                     {
                         if (cell.HasRoad)
                         {
@@ -386,7 +386,7 @@ namespace MiniCivilization.World.Editing
                         coordinate.Z,
                         new RoadData
                         {
-                            Type = RoadType.Basic,
+                            Type = roadType,
                             CrossesCenter = true
                         });
                 }

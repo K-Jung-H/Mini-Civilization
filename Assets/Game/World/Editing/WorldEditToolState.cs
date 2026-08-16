@@ -36,18 +36,12 @@ namespace MiniCivilization.World.Editing
         Remove
     }
 
-    public enum RoadEditOperation : byte
-    {
-        Place,
-        Remove
-    }
-
     public readonly struct WorldEditAction : IEquatable<WorldEditAction>
     {
         public readonly WorldEditPropertyGroup PropertyGroup;
         public readonly TerrainEditOperation TerrainOperation;
         public readonly BiomeType Biome;
-        public readonly RoadEditOperation RoadOperation;
+        public readonly RoadType RoadType;
 
         public bool IsSupported =>
             PropertyGroup == WorldEditPropertyGroup.Terrain
@@ -58,12 +52,12 @@ namespace MiniCivilization.World.Editing
             WorldEditPropertyGroup propertyGroup,
             TerrainEditOperation terrainOperation,
             BiomeType biome,
-            RoadEditOperation roadOperation)
+            RoadType roadType)
         {
             PropertyGroup = propertyGroup;
             TerrainOperation = terrainOperation;
             Biome = biome;
-            RoadOperation = roadOperation;
+            RoadType = roadType;
         }
 
         public static WorldEditAction Terrain(TerrainEditOperation operation) =>
@@ -80,18 +74,18 @@ namespace MiniCivilization.World.Editing
                 biome,
                 default);
 
-        public static WorldEditAction Road(RoadEditOperation operation) =>
+        public static WorldEditAction SetRoad(RoadType roadType) =>
             new(
                 WorldEditPropertyGroup.Road,
                 default,
                 BiomeType.None,
-                operation);
+                roadType);
 
         public bool Equals(WorldEditAction other) =>
             PropertyGroup == other.PropertyGroup
             && TerrainOperation == other.TerrainOperation
             && Biome == other.Biome
-            && RoadOperation == other.RoadOperation;
+            && RoadType == other.RoadType;
 
         public override bool Equals(object obj) =>
             obj is WorldEditAction other && Equals(other);
@@ -101,7 +95,7 @@ namespace MiniCivilization.World.Editing
                 (byte)PropertyGroup,
                 (byte)TerrainOperation,
                 (ushort)Biome,
-                (byte)RoadOperation);
+                (ushort)RoadType);
     }
 
     public readonly struct WorldEditToolSnapshot :
@@ -159,6 +153,7 @@ namespace MiniCivilization.World.Editing
     {
         private WorldEditToolbarView toolbarView;
         private WorldEntityCatalogView catalogView;
+        private WorldRoadCatalogView roadCatalogView;
         private WorldEditToolSnapshot current;
         private bool isSubscribed;
         private bool isSynchronizingSelection;
@@ -189,11 +184,13 @@ namespace MiniCivilization.World.Editing
 
         public void Configure(
             WorldEditToolbarView toolbar,
-            WorldEntityCatalogView catalog = null)
+            WorldEntityCatalogView catalog = null,
+            WorldRoadCatalogView roadCatalog = null)
         {
             Unsubscribe();
             toolbarView = toolbar;
             catalogView = catalog;
+            roadCatalogView = roadCatalog;
             Subscribe();
             SynchronizeEntityToolAvailability();
             Refresh();
@@ -213,6 +210,12 @@ namespace MiniCivilization.World.Editing
             {
                 catalogView.ActiveCategoryChanged += OnActiveCategoryChanged;
                 catalogView.DefinitionSelected += OnDefinitionSelected;
+            }
+
+            if (roadCatalogView != null)
+            {
+                roadCatalogView.ActionSelectionChanged +=
+                    OnRoadActionSelectionChanged;
             }
 
             isSubscribed = true;
@@ -239,19 +242,51 @@ namespace MiniCivilization.World.Editing
                 catalogView.DefinitionSelected -= OnDefinitionSelected;
             }
 
+            if (roadCatalogView != null)
+            {
+                roadCatalogView.ActionSelectionChanged -=
+                    OnRoadActionSelectionChanged;
+            }
+
             isSubscribed = false;
         }
 
         private void OnEditActionSelected(WorldEditAction _)
         {
-            ClearEntitySelection();
+            RunSynchronizing(() =>
+            {
+                roadCatalogView?.ClearSelection();
+                ClearEntitySelection();
+            });
             toolbarView?.EnsureSelectModeGroupExpanded();
             Refresh();
         }
 
         private void OnPropertyCategorySelected()
         {
-            ClearEntitySelection();
+            RunSynchronizing(ClearEntitySelection);
+            Refresh();
+        }
+
+        private void OnRoadActionSelectionChanged(
+            WorldEditAction _,
+            bool isSelected)
+        {
+            if (isSynchronizingSelection)
+            {
+                return;
+            }
+
+            if (isSelected)
+            {
+                RunSynchronizing(() =>
+                {
+                    ClearEntitySelection();
+                    toolbarView?.ClearActiveEditAction();
+                });
+                toolbarView?.EnsureSelectModeGroupExpanded();
+            }
+
             Refresh();
         }
 
@@ -266,10 +301,12 @@ namespace MiniCivilization.World.Editing
                 IsBuildingDefinition(definition));
             if (definition != null)
             {
-                isSynchronizingSelection = true;
-                toolbarView?.ClearActiveEditAction();
+                RunSynchronizing(() =>
+                {
+                    toolbarView?.ClearActiveEditAction();
+                    roadCatalogView?.ClearSelection();
+                });
                 toolbarView?.EnsureSelectModeGroupExpanded();
-                isSynchronizingSelection = false;
             }
 
             Refresh();
@@ -279,9 +316,11 @@ namespace MiniCivilization.World.Editing
         {
             if (category.HasValue)
             {
-                isSynchronizingSelection = true;
-                toolbarView?.ClearActiveEditAction();
-                isSynchronizingSelection = false;
+                RunSynchronizing(() =>
+                {
+                    toolbarView?.ClearActiveEditAction();
+                    roadCatalogView?.ClearSelection();
+                });
             }
 
             toolbarView?.SetBuildingDefinitionSelected(
@@ -297,10 +336,22 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            isSynchronizingSelection = true;
             catalogView.ClearSelectedDefinition();
-            isSynchronizingSelection = false;
             toolbarView?.SetBuildingDefinitionSelected(false);
+        }
+
+        private void RunSynchronizing(Action action)
+        {
+            var wasSynchronizing = isSynchronizingSelection;
+            isSynchronizingSelection = true;
+            try
+            {
+                action?.Invoke();
+            }
+            finally
+            {
+                isSynchronizingSelection = wasSynchronizing;
+            }
         }
 
         private void SynchronizeEntityToolAvailability()
@@ -345,6 +396,16 @@ namespace MiniCivilization.World.Editing
             };
             var brushSize = toolbarView.GetSelectedBrushSize();
             if (toolbarView.TryGetSelectedEditAction(out var action))
+            {
+                return new WorldEditToolSnapshot(
+                    mode,
+                    action,
+                    null,
+                    brushSize);
+            }
+
+            if (roadCatalogView != null
+                && roadCatalogView.TryGetSelectedAction(out action))
             {
                 return new WorldEditToolSnapshot(
                     mode,

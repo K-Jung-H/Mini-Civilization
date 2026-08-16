@@ -769,14 +769,6 @@ namespace MiniCivilization.World.Editing
                 return true;
             }
 
-            if (sectionIndex == 3
-                && (uint)detailIndex <= (uint)RoadEditOperation.Remove)
-            {
-                action = WorldEditAction.Road(
-                    (RoadEditOperation)detailIndex);
-                return true;
-            }
-
             return false;
         }
 
@@ -797,10 +789,6 @@ namespace MiniCivilization.World.Editing
                     when action.Biome > BiomeType.None:
                     sectionIndex = 1;
                     detailIndex = (int)action.Biome - 1;
-                    break;
-                case WorldEditPropertyGroup.Road:
-                    sectionIndex = 3;
-                    detailIndex = (int)action.RoadOperation;
                     break;
                 default:
                     return false;
