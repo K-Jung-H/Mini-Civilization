@@ -389,9 +389,9 @@ namespace MiniCivilization.World.Editing
             for (var affectedZ = minimumZ; affectedZ <= maximumZ; affectedZ++)
             for (var affectedX = minimumX; affectedX <= maximumX; affectedX++)
             {
-                if ((uint)affectedX < boundWorld.ChunkCountX
-                    && (uint)affectedY < boundWorld.ChunkSectionCountY
-                    && (uint)affectedZ < boundWorld.ChunkCountZ)
+                if ((uint)affectedY < boundWorld.ChunkSectionCountY
+                    && boundWorld.IsChunkWithinBounds(
+                        new ChunkCoordinate(affectedX, affectedZ)))
                 {
                     sections.Add(new ChunkSectionCoordinate(
                         affectedX,

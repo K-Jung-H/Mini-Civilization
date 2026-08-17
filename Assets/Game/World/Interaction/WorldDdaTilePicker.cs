@@ -47,13 +47,26 @@ namespace MiniCivilization.World.Interaction
                 localDirectionUnnormalized / directionScale);
             var maximumLocalDistance = maxDistance * directionScale;
             var cellSize = world.CellSize;
+            if (!TryResolveHorizontalBounds(
+                    world,
+                    out var minimumCellX,
+                    out var maximumCellX,
+                    out var minimumCellZ,
+                    out var maximumCellZ))
+            {
+                return false;
+            }
+
             if (!TryIntersectBounds(
                     localRay,
-                    Vector3.zero,
                     new Vector3(
-                        world.Size * cellSize,
+                        minimumCellX * cellSize,
+                        0f,
+                        minimumCellZ * cellSize),
+                    new Vector3(
+                        (maximumCellX + 1) * cellSize,
                         world.Height * cellSize,
-                        world.Size * cellSize),
+                        (maximumCellZ + 1) * cellSize),
                     out var boundsEntry,
                     out var boundsExit)
                 || boundsExit < 0f
@@ -70,16 +83,16 @@ namespace MiniCivilization.World.Interaction
                     traversalStart + BoundaryEpsilon));
             var x = Mathf.Clamp(
                 Mathf.FloorToInt(startPoint.x / cellSize),
-                0,
-                world.Size - 1);
+                minimumCellX,
+                maximumCellX);
             var y = Mathf.Clamp(
                 Mathf.FloorToInt(startPoint.y / cellSize),
                 0,
                 world.Height - 1);
             var z = Mathf.Clamp(
                 Mathf.FloorToInt(startPoint.z / cellSize),
-                0,
-                world.Size - 1);
+                minimumCellZ,
+                maximumCellZ);
 
             InitializeAxis(
                 localRay.origin.x,
@@ -113,7 +126,8 @@ namespace MiniCivilization.World.Interaction
                 var cellExit = Mathf.Min(nextX, Mathf.Min(nextY, nextZ));
                 cellExit = Mathf.Min(cellExit, traversalEnd);
                 var coordinate = new CellCoordinate(x, y, z);
-                if (renderer.SurfaceQuery.TryRaycastCell(
+                if (world.IsChunkLoaded(x, z)
+                    && renderer.SurfaceQuery.TryRaycastCell(
                         localRay,
                         coordinate,
                         cellEntry - BoundaryEpsilon,
@@ -171,6 +185,51 @@ namespace MiniCivilization.World.Interaction
             }
 
             return false;
+        }
+
+        private static bool TryResolveHorizontalBounds(
+            WorldData world,
+            out int minimumCellX,
+            out int maximumCellX,
+            out int minimumCellZ,
+            out int maximumCellZ)
+        {
+            if (!world.IsInfinite)
+            {
+                minimumCellX = world.MinimumCellX;
+                maximumCellX = world.MaximumCellXExclusive - 1;
+                minimumCellZ = world.MinimumCellZ;
+                maximumCellZ = world.MaximumCellZExclusive - 1;
+                return true;
+            }
+
+            var hasChunk = false;
+            var minimumChunkX = int.MaxValue;
+            var maximumChunkX = int.MinValue;
+            var minimumChunkZ = int.MaxValue;
+            var maximumChunkZ = int.MinValue;
+            foreach (var chunk in world.EnumerateLoadedChunks())
+            {
+                hasChunk = true;
+                minimumChunkX = System.Math.Min(
+                    minimumChunkX,
+                    chunk.Coordinate.X);
+                maximumChunkX = System.Math.Max(
+                    maximumChunkX,
+                    chunk.Coordinate.X);
+                minimumChunkZ = System.Math.Min(
+                    minimumChunkZ,
+                    chunk.Coordinate.Z);
+                maximumChunkZ = System.Math.Max(
+                    maximumChunkZ,
+                    chunk.Coordinate.Z);
+            }
+
+            minimumCellX = minimumChunkX * world.ChunkSizeX;
+            maximumCellX = (maximumChunkX + 1) * world.ChunkSizeX - 1;
+            minimumCellZ = minimumChunkZ * world.ChunkSizeZ;
+            maximumCellZ = (maximumChunkZ + 1) * world.ChunkSizeZ - 1;
+            return hasChunk;
         }
 
         private static void InitializeAxis(

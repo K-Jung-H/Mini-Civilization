@@ -23,17 +23,19 @@
 | 6. Chunk별 Cache와 경계 갱신 | 완료·테스트 통과 | Surface·Navigation·Exposure Cache를 준비된 Chunk 단위로 관리하고 준비·해제 시 경계를 갱신한다. |
 | 7. Entity·Building·Road/Way 스트리밍 | 완료·테스트 통과 | Minecraft 용어 통일, Entity 소유·Tick·렌더 범위, 다중 Chunk Building 참조, 준비된 Chunk의 Way Graph를 적용했다. |
 | 8. Water 스트리밍 | 구현 완료·직접 테스트 필요 | Chunk별 Frontier 소유, Active 범위 실행, 비활성 경계 보류, 준비된 Chunk 한정 WaterBody 해석을 적용했다. |
-| 9~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
+| 9. 절대 좌표 Field 생성 | 구현 완료·직접 테스트 필요 | WorldType, 원점 중심 초기 범위, 절대 좌표 Terrain·Climate·Continental·River·Lake Field와 요청 Chunk 추가 생성을 적용했다. |
+| 10~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
 
 현재 런타임 범위는 다음과 같다.
 
-- 유한 월드의 `WorldData`는 아직 생성 시 전체 범위를 만든다. 필요한 범위만 생성하는 구조는 9단계에서 적용한다.
+- Finite는 원점 Chunk를 중심으로 한 초기 N×N 범위를 Bounds로 사용한다.
+- Infinite는 같은 초기 N×N을 만들고 스트리밍 요청 시 Bounds 밖 Chunk를 같은 Seed와 절대 좌표로 추가 생성한다.
 - 렌더 객체와 Runtime Cache는 Target 반경에 따라 준비·반환된다.
 - Entity Controller와 Visual은 EntityRenderRadius에만 유지되고, Entity Tick은 Active 범위에만 적용된다.
 - Water Frontier는 Chunk 좌표별로 분리하고 Active Chunk의 처리 가능한 Cell만 파동에 참여시킨다. 파동의 Stage와 Commit은 전역 Resolver가 한 번에 처리해 기존 확산 결과의 원자성을 유지한다.
 - Cache가 없는 Chunk의 Cell 사실은 `WorldData`에서 직접 조회하며, Unloaded 영역을 Empty 또는 막힌 Cell로 해석하지 않는다.
 - 런타임 전체 Cache `RebuildAll` 경로는 제거했다. 생성 후보 검증용 독립 Preview는 런타임 Cache 스트리밍 대상이 아니다.
-- 1~7단계의 직접 빌드·플레이 테스트가 통과했다. 8단계는 코드 적용과 컴파일 검증을 완료했으며 직접 플레이 테스트가 필요하다. Save/Load는 현재 테스트 범위에서 제외한다.
+- 1~7단계의 직접 빌드·플레이 테스트가 통과했다. 8~9단계는 코드 적용과 컴파일 검증을 완료했으며 직접 플레이 테스트가 필요하다. Save/Load는 현재 테스트 범위에서 제외한다.
 
 ## 확정 원칙
 
@@ -41,6 +43,8 @@
 - Y 높이와 ChunkSection 수는 현재처럼 고정한다.
 - Chunk `(0,0)`과 ChunkSection `(0,0,0)`은 월드 원점 `(0,0,0)`에서 시작한다.
 - 모든 생성 결과는 `Seed + GenerationSettings + 절대 XYZ 좌표`로 결정한다.
+- `WorldType`은 `Finite`와 `Infinite`이며 지형 생성 규칙은 같고 추가 Chunk 요청 허용 여부만 다르다.
+- `InitialChunkCountXZ`는 항상 홀수다. 0은 1, 짝수는 즉시 다음 홀수로 보정한다.
 - Chunk 생성·로드 순서와 주변 Chunk 활성 여부가 생성 결과를 바꾸면 안 된다.
 - 같은 X/Z의 세로 `ChunkSection`은 하나의 `Chunk`가 관리한다.
 - 완전히 빈 Y Section은 생성하지 않는다.
@@ -265,10 +269,9 @@ Chunk 준비가 끝나면 필요한 RenderPatch를 계산하고 Pool에서 View�
 
 ```text
 Chunk 요청
-→ 절대 좌표 기반 Terrain 생성
-→ 광역 Feature용 Generation Region 준비
-→ Sea·River·Lake·Pond 계획
-→ 계획 검증과 실패 결과 롤백
+→ 절대 좌표 기반 Terrain·Mountain·Continental Field 계산
+→ Sea·Lake/Pond·River Field 계산
+→ River 실행 정책(Source/Dynamic) 결정
 → 최종 Terrain·Water 구조 확정
 → CellBiome 확정
 → 필요한 Y Section만 조립
@@ -279,12 +282,17 @@ Chunk 요청
 ### 생성 계약
 
 - 생성기는 월드 전체 Size나 가장자리 좌표를 입력으로 사용하지 않는다.
-- 현재 `EdgeLowering` 기반 유한 가장자리 규칙은 제거한다.
-- Terrain과 기본 지역 분류는 Seed와 절대 좌표를 사용한다.
-- 특정 Continental Noise 방식은 미리 강제하지 않는다.
-- Sea·River·Lake·Pond 등 광역 구조는 고정 Generation Region에서 계획한다.
-- Generation Region도 좌표와 Seed로 결정하며 생성 순서에 영향을 받지 않는다.
-- 주변 정보가 필요한 계산은 고정 Margin을 사용한다.
+- `EdgeLowering`, 유한 외곽 Flood Fill, 월드 크기 기반 Latitude를 사용하지 않는다.
+- Terrain·Mountain·Climate·Continental·River Channel·Lake Basin은 Seed와 절대 좌표를 사용한다.
+- Sea는 Continental Field가 Ocean이고 최종 지형이 Sea Level보다 낮은 Cell에만 생성한다.
+- Lake와 Pond는 같은 Lake Basin Field를 사용하며 크기로 구분하고, 크기가 클수록 중심부 최대 깊이가 커진다.
+- 수역 우선순위는 `Sea > Lake/Pond > River > None`이다.
+- River Channel은 연속 Field로 만들며 하류로 갈수록 폭이 넓고 수심은 얕아진다.
+- River가 끝나는 구간은 폭과 절삭 깊이를 완만하게 줄여 주변 지형으로 닫는다.
+- River 경로 생성은 하나이며 `Source/Dynamic`은 마지막 실행 정책이다.
+- 급한 하강 구간은 실제 WaterFlow 확산 가능 범위가 있을 때 Dynamic을 사용하고, 완만하거나 긴 수평 구간은 Source를 사용한다.
+- Dynamic 구간의 WaterData를 직접 배치하지 않고 Source에서 기존 WaterFlow가 확산한다.
+- Chunk 샘플은 이웃 절대 좌표를 직접 조회하며 생성 순서나 활성 Chunk에 의존하지 않는다.
 - Biome은 Feature 후보가 아니라 모든 검증과 롤백 이후의 최종 Terrain·Water 결과로 확정한다.
 
 ## 경계 처리
@@ -520,31 +528,34 @@ Dirty Chunk Unload
 - 이웃 Chunk 활성화 전후 물이 Unloaded 영역을 Empty나 벽으로 오판하지 않는다.
 - 빈 Cell을 Source로 보정하는 경로가 존재하지 않는다.
 
-### 9. 절대 좌표 생성과 Generation Region 적용
+### 9. 절대 좌표 Field 생성 적용
 
 적용:
 
-- Terrain Noise 입력을 절대 XYZ로 교체
-- `EdgeLowering`과 전체 월드 경계 의존 제거
-- Sea 생성의 유한 외곽 Flood Fill 의존 제거
-- River·Lake·Pond 계획을 고정 Generation Region과 Margin 기반으로 교체
-- Region Seed와 Feature 소유 규칙으로 생성 순서 독립성 확보
+- `WorldType(Finite/Infinite)`과 홀수 `InitialChunkCountXZ` 적용
+- Chunk `(0,0)`을 중심으로 초기 N×N 범위 생성
+- Terrain Noise 입력을 절대 X/Z로 교체
+- `EdgeLowering`, 전체 월드 경계, 유한 외곽 Sea Flood Fill 의존 제거
+- Continental Field 기반 Sea 적용
+- 크기·깊이가 연결된 Lake/Pond Basin Field 적용
+- 연속 River Channel Field와 공통 경로·폭·깊이 적용
+- River 경로와 분리된 Source/Dynamic 실행 정책 적용
 - 최종 생성 결과에 대해 CellBiome 확정
 - 필요한 Y Section만 조립
+- Infinite에서 스트리밍 요청 Chunk를 같은 Field 경로로 추가 생성
 
 완료 기준:
 
 - 같은 Seed와 Chunk 좌표는 요청 순서와 관계없이 같은 결과를 만든다.
 - 인접 Chunk Terrain·수역·Biome이 경계에서 연속된다.
-- River·Lake가 Chunk 또는 Generation Region 경계에서 중복·단절되지 않는다.
+- Finite와 Infinite의 같은 좌표 생성 결과가 일치한다.
+- Sea·River·Lake/Pond가 Chunk 경계에서 중복·단절되지 않는다.
+- 완전히 빈 Y ChunkSection을 생성하지 않는다.
 
-### 10. 무한 X/Z 전환과 Floating Origin 적용
+### 10. Floating Origin과 원거리 좌표 정밀도 적용
 
 적용:
 
-- 유한 X/Z Bounds 제한 제거
-- 음수 Chunk 생성·활성화 적용
-- 스트리밍 좌표 범위를 signed Chunk 좌표로 확장
 - 논리 좌표와 Unity 표현 좌표 분리
 - 거리 기준 Floating Origin 이동 적용
 

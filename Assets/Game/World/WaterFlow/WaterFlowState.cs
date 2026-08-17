@@ -115,9 +115,9 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         private bool ContainsColumn(int x, int z) =>
-            world.ContainsColumn(x, z);
+            world.IsColumnLoaded(x, z);
 
         private bool ContainsCell(int x, int y, int z) =>
-            world.Contains(x, y, z);
+            world.IsValidHeight(y) && world.IsColumnLoaded(x, z);
     }
 }

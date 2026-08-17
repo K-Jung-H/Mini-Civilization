@@ -62,9 +62,11 @@ namespace MiniCivilization.World.Interaction
             var ray = interactionCamera.ScreenPointToRay(
                 mouse.position.ReadValue());
             var world = worldManager.CurrentWorldData;
-            var effectiveMaxDistance = Mathf.Max(
-                maxDistance,
-                world.Size * world.CellSize * 4f);
+            var effectiveMaxDistance = world.IsInfinite
+                ? maxDistance
+                : Mathf.Max(
+                    maxDistance,
+                    world.Size * world.CellSize * 4f);
             if (WorldDdaTilePicker.TryPick(
                     world,
                     worldManager.Renderer,

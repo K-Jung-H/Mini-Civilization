@@ -282,15 +282,41 @@ namespace MiniCivilization.World.WaterFlow
             for (var index = 0; index < cells.Length; index++)
             {
                 var cell = cells[index];
-                var minX = Math.Max(0, cell.X - 1) / boundWorld.ChunkSizeX;
-                var maxX = Math.Min(boundWorld.Size - 1, cell.X + 1)
-                    / boundWorld.ChunkSizeX;
+                var minimumCellX = cell.X - 1;
+                var maximumCellX = cell.X + 1;
+                var minimumCellZ = cell.Z - 1;
+                var maximumCellZ = cell.Z + 1;
+                if (!boundWorld.IsInfinite)
+                {
+                    minimumCellX = Math.Max(
+                        boundWorld.MinimumCellX,
+                        minimumCellX);
+                    maximumCellX = Math.Min(
+                        boundWorld.MaximumCellXExclusive - 1,
+                        maximumCellX);
+                    minimumCellZ = Math.Max(
+                        boundWorld.MinimumCellZ,
+                        minimumCellZ);
+                    maximumCellZ = Math.Min(
+                        boundWorld.MaximumCellZExclusive - 1,
+                        maximumCellZ);
+                }
+
+                var minX = WorldCoordinateUtility.FloorDivide(
+                    minimumCellX,
+                    boundWorld.ChunkSizeX);
+                var maxX = WorldCoordinateUtility.FloorDivide(
+                    maximumCellX,
+                    boundWorld.ChunkSizeX);
                 var minY = Math.Max(0, cell.Y - 1) / boundWorld.ChunkSectionSizeY;
                 var maxY = Math.Min(boundWorld.Height - 1, cell.Y + 1)
                     / boundWorld.ChunkSectionSizeY;
-                var minZ = Math.Max(0, cell.Z - 1) / boundWorld.ChunkSizeZ;
-                var maxZ = Math.Min(boundWorld.Size - 1, cell.Z + 1)
-                    / boundWorld.ChunkSizeZ;
+                var minZ = WorldCoordinateUtility.FloorDivide(
+                    minimumCellZ,
+                    boundWorld.ChunkSizeZ);
+                var maxZ = WorldCoordinateUtility.FloorDivide(
+                    maximumCellZ,
+                    boundWorld.ChunkSizeZ);
                 for (var chunkY = minY; chunkY <= maxY; chunkY++)
                 for (var chunkZ = minZ; chunkZ <= maxZ; chunkZ++)
                 for (var chunkX = minX; chunkX <= maxX; chunkX++)

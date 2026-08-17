@@ -145,12 +145,8 @@ namespace MiniCivilization.World.Runtime
                 var coordinate = pair.Key;
                 var startX = coordinate.X * runtime.Data.ChunkSizeX;
                 var startZ = coordinate.Z * runtime.Data.ChunkSizeZ;
-                var endX = Math.Min(
-                    startX + runtime.Data.ChunkSizeX,
-                    runtime.Data.Size);
-                var endZ = Math.Min(
-                    startZ + runtime.Data.ChunkSizeZ,
-                    runtime.Data.Size);
+                var endX = startX + runtime.Data.ChunkSizeX;
+                var endZ = startZ + runtime.Data.ChunkSizeZ;
                 for (var z = startZ; z < endZ; z++)
                 for (var x = startX; x < endX; x++)
                 {
@@ -265,7 +261,7 @@ namespace MiniCivilization.World.Runtime
             var offset = GetOffset(direction);
             var neighborX = road.Cell.X + offset.x;
             var neighborZ = road.Cell.Z + offset.y;
-            if (!runtime.Data.ContainsColumn(neighborX, neighborZ))
+            if (!runtime.Data.IsColumnLoaded(neighborX, neighborZ))
             {
                 return default;
             }

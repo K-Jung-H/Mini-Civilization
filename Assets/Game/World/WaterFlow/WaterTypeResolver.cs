@@ -18,12 +18,18 @@ namespace MiniCivilization.World.WaterFlow
                 throw new ArgumentNullException(nameof(world));
             }
 
-            var columns = new List<CellColumnCoordinate>(
-                checked(world.Size * world.Size));
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            var columns = new List<CellColumnCoordinate>();
+            foreach (var chunk in world.EnumerateLoadedChunks())
             {
-                columns.Add(new CellColumnCoordinate(x, z));
+                var startX = chunk.Coordinate.X * world.ChunkSizeX;
+                var startZ = chunk.Coordinate.Z * world.ChunkSizeZ;
+                for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
+                for (var localX = 0; localX < world.ChunkSizeX; localX++)
+                {
+                    columns.Add(new CellColumnCoordinate(
+                        startX + localX,
+                        startZ + localZ));
+                }
             }
 
             RefreshChanged(world, columns, null, null, null, null);
@@ -50,7 +56,7 @@ namespace MiniCivilization.World.WaterFlow
             var seeds = new HashSet<CellColumnCoordinate>();
             foreach (var column in changedColumns)
             {
-                if (!world.ContainsColumn(column.X, column.Z))
+                if (!IsLoadedColumn(world, column.X, column.Z))
                 {
                     continue;
                 }
@@ -63,7 +69,7 @@ namespace MiniCivilization.World.WaterFlow
                     var direction = Directions[directionIndex];
                     var nextX = column.X + direction.x;
                     var nextZ = column.Z + direction.z;
-                    if (world.ContainsColumn(nextX, nextZ))
+                    if (IsLoadedColumn(world, nextX, nextZ))
                     {
                         seeds.Add(new CellColumnCoordinate(nextX, nextZ));
                     }
@@ -90,14 +96,21 @@ namespace MiniCivilization.World.WaterFlow
                 queue.Enqueue(seed);
                 visited.Add(seed);
                 var touchesEdge = false;
+                var touchesUnloadedBoundary = false;
+                var containsSea = false;
                 while (queue.Count > 0)
                 {
                     var column = queue.Dequeue();
                     component.Add(column);
-                    touchesEdge |= column.X == 0
-                        || column.Z == 0
-                        || column.X == world.Size - 1
-                        || column.Z == world.Size - 1;
+                    touchesEdge |= !world.IsInfinite
+                        && (column.X == world.MinimumCellX
+                            || column.Z == world.MinimumCellZ
+                            || column.X == world.MaximumCellXExclusive - 1
+                            || column.Z == world.MaximumCellZExclusive - 1);
+                    containsSea |= HasWaterType(
+                        world,
+                        column,
+                        WaterType.Sea);
 
                     for (var directionIndex = 0;
                          directionIndex < Directions.Length;
@@ -108,6 +121,12 @@ namespace MiniCivilization.World.WaterFlow
                         var nextZ = column.Z + direction.z;
                         if (!world.ContainsColumn(nextX, nextZ))
                         {
+                            continue;
+                        }
+
+                        if (!world.IsChunkLoaded(nextX, nextZ))
+                        {
+                            touchesUnloadedBoundary = true;
                             continue;
                         }
 
@@ -123,7 +142,12 @@ namespace MiniCivilization.World.WaterFlow
                     }
                 }
 
-                var type = touchesEdge
+                if (touchesUnloadedBoundary)
+                {
+                    continue;
+                }
+
+                var type = containsSea || touchesEdge
                     ? WaterType.Sea
                     : component.Count <= world.PondMaximumArea
                         ? WaterType.Pond
@@ -143,6 +167,26 @@ namespace MiniCivilization.World.WaterFlow
                 }
             }
         }
+
+        private static bool HasWaterType(
+            WorldData world,
+            CellColumnCoordinate column,
+            WaterType type)
+        {
+            for (var y = 0; y < world.Height; y++)
+            {
+                var water = world.GetCell(column.X, y, column.Z).Water;
+                if (water.HasWater && water.Type == type)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsLoadedColumn(WorldData world, int x, int z) =>
+            world.IsColumnLoaded(x, z);
 
         private static bool HasClassifiableWater(
             WorldData world,

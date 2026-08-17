@@ -117,21 +117,9 @@ namespace MiniCivilization.World.Generation
             terrainJob = new TerrainJob
             {
                 Size = build.Size,
-                Height = build.Height,
-                TerrainSeed = DeterministicNoise.DeriveSeed(build.Seed, "terrain"),
-                MountainSeed = DeterministicNoise.DeriveSeed(build.Seed, "mountains"),
-                MountainMaskSeed = DeterministicNoise.DeriveSeed(build.Seed, "mountain-mask"),
-                TerrainScale = input.TerrainScale,
-                TerrainLayers = input.TerrainLayers,
-                TerrainSpacing = input.TerrainSpacing,
-                TerrainDetail = input.TerrainDetail,
-                BaseHeightUnits = input.BaseHeightUnits,
-                HeightVariationUnits = input.HeightVariationUnits,
-                EdgeLowering = input.EdgeLowering,
-                MountainScale = input.MountainScale,
-                MountainHeightUnits = input.MountainHeightUnits,
-                MountainCoverage = input.MountainCoverage,
-                MountainSteepness = input.MountainSteepness,
+                OriginX = build.OriginX,
+                OriginZ = build.OriginZ,
+                Parameters = new TerrainFieldParameters(input.Settings),
                 Result = terrainHeights
             }.Schedule(terrainHeights.Length, innerloopBatchCount: 64);
             terrainJobScheduled = true;
@@ -194,6 +182,8 @@ namespace MiniCivilization.World.Generation
             biomeJob = new BiomeJob
             {
                 Size = build.Size,
+                OriginX = build.OriginX,
+                OriginZ = build.OriginZ,
                 Height = build.Height,
                 SeaLevelUnits = input.SeaLevelUnits,
                 ClimateSeed = DeterministicNoise.DeriveSeed(build.Seed, "climate"),
@@ -282,69 +272,24 @@ namespace MiniCivilization.World.Generation
         private struct TerrainJob : IJobParallelFor
         {
             public int Size;
-            public int Height;
-            public int TerrainSeed;
-            public int MountainSeed;
-            public int MountainMaskSeed;
-            public float TerrainScale;
-            public int TerrainLayers;
-            public float TerrainSpacing;
-            public float TerrainDetail;
-            public int BaseHeightUnits;
-            public int HeightVariationUnits;
-            public float EdgeLowering;
-            public float MountainScale;
-            public int MountainHeightUnits;
-            public float MountainCoverage;
-            public float MountainSteepness;
+            public int OriginX;
+            public int OriginZ;
+            public TerrainFieldParameters Parameters;
             public NativeArray<int> Result;
 
             public void Execute(int index)
             {
-                var x = index % Size;
-                var z = index / Size;
-                var noise = DeterministicNoise.FractalNoise(
-                    x * TerrainScale, z * TerrainScale, TerrainSeed,
-                    TerrainLayers, TerrainSpacing, TerrainDetail);
-                var ridge = DeterministicNoise.RidgedFractalNoise(
-                    x * MountainScale, z * MountainScale, MountainSeed,
-                    TerrainLayers, TerrainSpacing, TerrainDetail);
-                var maskNoise = DeterministicNoise.FractalNoise(
-                    x * MountainScale * 0.4f, z * MountainScale * 0.4f,
-                    MountainMaskSeed, 3, 2f, 0.5f);
-                var normalizedX = Size > 1
-                    ? x / (float)(Size - 1) * 2f - 1f : 0f;
-                var normalizedZ = Size > 1
-                    ? z / (float)(Size - 1) * 2f - 1f : 0f;
-                var edgeDistance = MathF.Max(
-                    MathF.Abs(normalizedX),
-                    MathF.Abs(normalizedZ));
-                var edgeFalloffUnits = Height * WorldGrid.HeightStepsPerCell * 0.35f;
-                var edgePenalty = MathF.Pow(edgeDistance, 3f)
-                    * edgeFalloffUnits * EdgeLowering;
-                var mountainMask = SmoothStep01(
-                    (maskNoise - MountainCoverage) / 0.2f);
-                var inlandMask = 1f - SmoothStep01(
-                    (edgeDistance - 0.62f) / 0.38f);
-                var mountainHeight = MathF.Pow(ridge, MountainSteepness)
-                    * mountainMask * inlandMask * MountainHeightUnits;
-                var height = BaseHeightUnits + (int)MathF.Round(
-                    (noise * 2f - 1f) * HeightVariationUnits
-                    + mountainHeight - edgePenalty);
-                var maximumUnits = Height * WorldGrid.HeightStepsPerCell - 1;
-                Result[index] = Math.Clamp(height, 1, maximumUnits);
-            }
-
-            private static float SmoothStep01(float value)
-            {
-                value = Math.Clamp(value, 0f, 1f);
-                return value * value * (3f - 2f * value);
+                Result[index] = Parameters.SampleHeight(
+                    OriginX + index % Size,
+                    OriginZ + index / Size);
             }
         }
 
         private struct BiomeJob : IJobParallelFor
         {
             public int Size;
+            public int OriginX;
+            public int OriginZ;
             public int Height;
             public int SeaLevelUnits;
             public int ClimateSeed;
@@ -358,18 +303,24 @@ namespace MiniCivilization.World.Generation
 
             public void Execute(int index)
             {
-                var x = index % Size;
-                var z = index / Size;
+                var localX = index % Size;
+                var localZ = index / Size;
+                var x = OriginX + localX;
+                var z = OriginZ + localZ;
                 var groundHeight = SolidHeights[index];
                 var altitude = groundHeight /
                     (float)(Height * WorldGrid.HeightStepsPerCell);
-                var temperature = BiomeStage.CalculateTemperature(
-                    Size,
-                    Height,
+                var temperature = DeterministicNoise.FractalNoise(
+                    x * 0.00625f,
+                    z * 0.00625f,
                     ClimateSeed,
-                    x,
-                    z,
-                    groundHeight);
+                    4,
+                    2f,
+                    0.5f);
+                temperature = Math.Clamp(
+                    temperature * 0.85f + 0.15f - altitude * 0.35f,
+                    0f,
+                    1f);
                 var climate = BiomeStage.ResolveClimate(
                     temperature,
                     ColdClimateThreshold);
@@ -379,7 +330,7 @@ namespace MiniCivilization.World.Generation
                     BiomeStage.ResolveWater(WaterTypes[index]));
                 TopSurfaces[index] = WaterBedSurfaces[index] != SurfaceType.None
                     ? WaterBedSurfaces[index]
-                    : IsAdjacentToWater(x, z)
+                    : IsAdjacentToWater(localX, localZ)
                         && Math.Abs(groundHeight - SeaLevelUnits) <= 2
                             ? SurfaceType.Shore
                             : SurfaceType.Ground;

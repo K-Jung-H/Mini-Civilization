@@ -1,6 +1,7 @@
 using System;
 using MiniCivilization.World.Domain;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Generation
 {
@@ -8,6 +9,9 @@ namespace MiniCivilization.World.Generation
     public sealed class WorldGenerationSettings : ScriptableObject
     {
         [Header("월드 구조")]
+        [Tooltip("Finite는 초기 Chunk 범위를 월드 경계로 사용하고, Infinite는 범위 밖 Chunk를 Seed로 추가 생성합니다.")]
+        [InspectorName("월드 타입")]
+        [SerializeField] private WorldType worldType = WorldType.Finite;
         [Tooltip("Cell 한 변의 월드 단위 크기입니다. Cell은 항상 정육면체입니다.")]
         [InspectorName("Cell 크기")]
         [SerializeField, Min(0.01f)] private float cellSize = 10f;
@@ -17,9 +21,10 @@ namespace MiniCivilization.World.Generation
         [Tooltip("ChunkSection 하나의 Y 방향 Cell 수입니다.")]
         [InspectorName("ChunkSection Y Cell 수")]
         [SerializeField, Min(1)] private int chunkSectionCellCountY = 8;
-        [Tooltip("월드 X/Z 방향의 논리 Chunk 수입니다.")]
-        [InspectorName("월드 XZ Chunk 수")]
-        [SerializeField, Min(1)] private int worldChunkCountXZ = 4;
+        [Tooltip("원점 Chunk를 중심으로 처음 생성할 X/Z 방향 Chunk 수입니다. 0 또는 짝수는 다음 홀수로 보정됩니다.")]
+        [InspectorName("초기 XZ Chunk 수")]
+        [FormerlySerializedAs("worldChunkCountXZ")]
+        [SerializeField, Min(1)] private int initialChunkCountXZ = 5;
         [Tooltip("월드 Y 방향의 ChunkSection 수입니다.")]
         [InspectorName("월드 Y ChunkSection 수")]
         [SerializeField, Min(1)] private int chunkSectionCountY = 2;
@@ -50,10 +55,6 @@ namespace MiniCivilization.World.Generation
         [Tooltip("지형 노이즈가 기준 고도에서 위아래로 변화시킬 수 있는 높이 규모입니다. 단위는 수직 Cell입니다.")]
         [InspectorName("높이 변화")]
         [SerializeField, Min(1)] private int heightVariationCells = 5;
-        [Tooltip("월드 가장자리의 지형을 낮추는 강도입니다. 값이 클수록 가장자리가 더 많이 잠겨 섬 형태가 강해집니다.")]
-        [InspectorName("가장자리 낮춤")]
-        [SerializeField, Range(0f, 1.5f)] private float edgeLowering = 0.85f;
-
         [Header("산악 지형")]
         [Tooltip("산맥 능선을 만드는 Ridged Noise의 좌표 배율입니다. 값이 클수록 산맥 간격이 좁아집니다.")]
         [InspectorName("산맥 크기")]
@@ -69,17 +70,33 @@ namespace MiniCivilization.World.Generation
         [SerializeField, Range(1f, 6f)] private float mountainSteepness = 2.2f;
 
         [Header("바다")]
+        [Tooltip("대륙과 바다 지역을 나누는 절대 좌표 Noise 크기입니다.")]
+        [InspectorName("대륙 크기")]
+        [SerializeField, Min(0.0001f)] private float continentalScale = 0.004f;
+        [Tooltip("Continental Field가 이 값 이상인 영역을 육지로 판정합니다.")]
+        [InspectorName("육지 기준")]
+        [SerializeField, Range(0.05f, 0.95f)] private float landThreshold = 0.5f;
+        [Tooltip("해안선에서 바다 높이와 육지 지형이 전이되는 Continental Field 범위입니다. 이 범위 밖의 육지는 지형 높이 변화를 그대로 유지합니다.")]
+        [InspectorName("해안 전이 범위")]
+        [SerializeField, Range(0.001f, 0.25f)]
+        private float coastTransitionWidth = 0.08f;
         [Tooltip("해수면의 기본 수직 Cell 위치입니다. Sea Level Step과 합쳐 최종 해수면 높이를 결정합니다. 지형 전체가 최종 해수면보다 높으면 바다가 생성되지 않을 수 있습니다.")]
         [InspectorName("바다 높이")]
         [SerializeField, Min(0)] private int seaLevelCell = 5;
         [Tooltip("해수면 Cell 내부의 추가 양자화 높이 단계입니다. 한 단계는 Cell 높이의 1/5(월드 높이 0.2)입니다.")]
         [InspectorName("바다 세부 높이")]
         [SerializeField, Range(0, WorldGrid.HeightStepsPerCell - 1)] private int seaLevelStep;
+        [Tooltip("Continental Field의 가장 깊은 Ocean 지형이 해수면 아래로 내려갈 최대 깊이입니다. 단위는 수직 Cell입니다.")]
+        [InspectorName("바다 최대 깊이")]
+        [SerializeField, Min(1)] private int maximumSeaDepthCells = 3;
 
         [Header("강 생성")]
-        [Tooltip("생성을 시도할 강의 수입니다. 적합한 발원지나 경로가 부족하면 실제 생성 수는 더 적을 수 있습니다.")]
-        [InspectorName("강 수")]
-        [SerializeField, Range(0, 12)] private int riverCount = 4;
+        [Tooltip("연속된 River Channel Field의 좌표 배율입니다.")]
+        [InspectorName("강 분포 크기")]
+        [SerializeField, Min(0.0001f)] private float riverScale = 0.0125f;
+        [Tooltip("육지에서 River Channel이 나타나는 밀도입니다.")]
+        [InspectorName("강 밀도")]
+        [SerializeField, Range(0f, 1f)] private float riverDensity = 0.2f;
         [Tooltip("폭 1인 River 구간에서 확보할 기본 수심입니다. 단위는 수직 Cell이며, WaterCell이 차지할 공간을 먼저 절삭합니다.")]
         [InspectorName("기본 강 깊이")]
         [SerializeField, Range(1, 3)] private int riverDepthCells = 2;
@@ -92,12 +109,19 @@ namespace MiniCivilization.World.Generation
         private int maximumRiverDepthCells = 4;
 
         [Header("호수 생성")]
-        [Tooltip("생성을 시도할 내륙 호수의 수입니다. 적합한 위치가 부족하면 실제 생성 수는 더 적을 수 있습니다.")]
-        [InspectorName("호수 수")]
-        [SerializeField, Range(0, 8)] private int lakeCount = 2;
-        [Tooltip("생성할 내륙 호수와 바다 사이에 필요한 최소 D4 Cell 거리입니다.")]
-        [InspectorName("바다와 최소 거리")]
-        [SerializeField, Range(1, 32)] private int minimumInlandLakeDistance = 6;
+        [Tooltip("육지 분지 후보가 Lake 또는 Pond로 생성되는 밀도입니다.")]
+        [InspectorName("호수 밀도")]
+        [SerializeField, Range(0f, 1f)] private float lakeDensity = 0.15f;
+        [Tooltip("Lake Basin 후보를 배치하는 절대 좌표 격자의 Cell 간격입니다.")]
+        [InspectorName("호수 분포 간격")]
+        [SerializeField, Min(4)] private int lakeRegionSizeCells = 32;
+        [Tooltip("Lake Basin이 가질 수 있는 최대 반지름입니다. 단위는 Cell입니다.")]
+        [InspectorName("호수 최대 반지름")]
+        [SerializeField, Min(1)] private int maximumLakeRadiusCells = 8;
+        [Tooltip("가장 큰 Lake Basin 중심부의 최대 깊이입니다. 한 단계는 Cell 높이의 1/5입니다.")]
+        [InspectorName("호수 최대 깊이 단계")]
+        [SerializeField, Range(1, WorldGrid.HeightStepsPerCell * 4)]
+        private int maximumLakeDepthSteps = WorldGrid.HeightStepsPerCell * 2;
         [Tooltip("내륙 분지가 호수로 채택되기 위한 최소 수면 Column 수입니다.")]
         [InspectorName("최소 호수 크기")]
         [SerializeField, Range(1, 64)] private int minimumInlandLakeArea = 3;
@@ -129,15 +153,17 @@ namespace MiniCivilization.World.Generation
         [SerializeField, Range(0f, 0.5f)]
         private float coldClimateThreshold = 0.24f;
 
+        public WorldType WorldType => worldType;
         public float CellSize => cellSize;
         public float HeightStep => cellSize / WorldGrid.HeightStepsPerCell;
         public int ChunkCellCountXZ => chunkCellCountXZ;
         public int ChunkSectionCellCountY => chunkSectionCellCountY;
-        public int WorldChunkCountXZ => worldChunkCountXZ;
+        public int InitialChunkCountXZ => initialChunkCountXZ;
+        public int WorldChunkCountXZ => initialChunkCountXZ;
         public int ChunkSectionCountY => chunkSectionCountY;
         public int RenderChunksPerPatch => renderChunksPerPatch;
         public int RoadMaxHeightSteps => roadMaxHeightSteps;
-        public int WorldSize => checked(chunkCellCountXZ * worldChunkCountXZ);
+        public int WorldSize => checked(chunkCellCountXZ * initialChunkCountXZ);
         public int WorldHeight => checked(chunkSectionCellCountY * chunkSectionCountY);
         public int ChunkSizeXZ => chunkCellCountXZ;
         public int ChunkHeight => chunkSectionCellCountY;
@@ -148,20 +174,28 @@ namespace MiniCivilization.World.Generation
         public float TerrainDetail => terrainDetail;
         public int BaseHeightUnits => baseHeightCells * WorldGrid.HeightStepsPerCell;
         public int HeightVariationUnits => heightVariationCells * WorldGrid.HeightStepsPerCell;
-        public float EdgeLowering => edgeLowering;
         public float MountainScale => mountainScale;
         public int MountainHeightUnits => mountainHeightCells * WorldGrid.HeightStepsPerCell;
         public float MountainCoverage => mountainCoverage;
         public float MountainSteepness => mountainSteepness;
         public int SeaLevelUnits => seaLevelCell * WorldGrid.HeightStepsPerCell + seaLevelStep;
-        public int RiverCount => riverCount;
+        public int MaximumSeaDepthUnits => Math.Min(
+            Math.Max(1, SeaLevelUnits - 1),
+            maximumSeaDepthCells * WorldGrid.HeightStepsPerCell);
+        public float ContinentalScale => continentalScale;
+        public float LandThreshold => landThreshold;
+        public float CoastTransitionWidth => coastTransitionWidth;
+        public float RiverScale => riverScale;
+        public float RiverDensity => riverDensity;
         public int RiverDepthCells => riverDepthCells;
         public int MaximumRiverWidthCells => maximumRiverWidthCells;
         public int MaximumRiverDepthCells => Math.Max(
             riverDepthCells,
             maximumRiverDepthCells);
-        public int LakeCount => lakeCount;
-        public int MinimumInlandLakeDistance => minimumInlandLakeDistance;
+        public float LakeDensity => lakeDensity;
+        public int LakeRegionSizeCells => lakeRegionSizeCells;
+        public int MaximumLakeRadiusCells => maximumLakeRadiusCells;
+        public int MaximumLakeDepthSteps => maximumLakeDepthSteps;
         public int MinimumInlandLakeArea => minimumInlandLakeArea;
         public int MinimumInlandLakeDepthSteps =>
             minimumInlandLakeDepthSteps;
@@ -177,10 +211,11 @@ namespace MiniCivilization.World.Generation
 
         public WorldSettingsData CreateData(int seed) => new(
             seed,
+            WorldType,
             CellSize,
             ChunkCellCountXZ,
             ChunkSectionCellCountY,
-            WorldChunkCountXZ,
+            InitialChunkCountXZ,
             ChunkSectionCountY,
             RenderChunksPerPatch,
             RoadMaxHeightSteps,
@@ -190,18 +225,24 @@ namespace MiniCivilization.World.Generation
             TerrainDetail,
             BaseHeightUnits,
             HeightVariationUnits,
-            EdgeLowering,
             MountainScale,
             MountainHeightUnits,
             MountainCoverage,
             MountainSteepness,
             SeaLevelUnits,
-            RiverCount,
+            MaximumSeaDepthUnits,
+            ContinentalScale,
+            LandThreshold,
+            CoastTransitionWidth,
+            RiverScale,
+            RiverDensity,
             RiverDepthCells,
             MaximumRiverWidthCells,
             MaximumRiverDepthCells,
-            LakeCount,
-            MinimumInlandLakeDistance,
+            LakeDensity,
+            LakeRegionSizeCells,
+            MaximumLakeRadiusCells,
+            MaximumLakeDepthSteps,
             MinimumInlandLakeArea,
             MinimumInlandLakeDepthSteps,
             PondMaximumArea,
@@ -225,9 +266,10 @@ namespace MiniCivilization.World.Generation
 
             chunkCellCountXZ = horizontalChunkSize;
             chunkSectionCellCountY = verticalChunkSize;
-            worldChunkCountXZ = Math.Max(1, size / horizontalChunkSize);
+            initialChunkCountXZ = NormalizeInitialChunkCount(
+                Math.Max(1, size / horizontalChunkSize));
             chunkSectionCountY = Math.Max(1, height / verticalChunkSize);
-            renderChunksPerPatch = worldChunkCountXZ % 2 == 0 ? 2 : 1;
+            renderChunksPerPatch = 1;
             OnValidate();
         }
 
@@ -240,20 +282,20 @@ namespace MiniCivilization.World.Generation
             }
 
             if (chunkCellCountXZ <= 0 || chunkSectionCellCountY <= 0
-                || worldChunkCountXZ <= 0 || chunkSectionCountY <= 0)
+                || initialChunkCountXZ <= 0 || chunkSectionCountY <= 0
+                || (initialChunkCountXZ & 1) == 0)
             {
-                error = "Chunk Cell counts and world chunk counts must be positive.";
+                error = "Chunk Cell counts must be positive and the initial horizontal Chunk count must be odd.";
                 return false;
             }
 
-            if (renderChunksPerPatch <= 0
-                || worldChunkCountXZ % renderChunksPerPatch != 0)
+            if (renderChunksPerPatch <= 0)
             {
-                error = "Render chunks per patch must divide the horizontal world chunk count.";
+                error = "Render chunks per patch must be positive.";
                 return false;
             }
 
-            if (SeaLevelUnits <= 0 || SeaLevelUnits >= WorldHeight * WorldGrid.HeightStepsPerCell)
+            if (SeaLevelUnits <= 1 || SeaLevelUnits >= WorldHeight * WorldGrid.HeightStepsPerCell)
             {
                 error = "Sea level must be inside the vertical world range.";
                 return false;
@@ -268,12 +310,13 @@ namespace MiniCivilization.World.Generation
             cellSize = Mathf.Max(0.01f, cellSize);
             chunkCellCountXZ = Math.Max(1, chunkCellCountXZ);
             chunkSectionCellCountY = Math.Max(1, chunkSectionCellCountY);
-            worldChunkCountXZ = Math.Max(1, worldChunkCountXZ);
+            initialChunkCountXZ = NormalizeInitialChunkCount(
+                initialChunkCountXZ);
             chunkSectionCountY = Math.Max(1, chunkSectionCountY);
             renderChunksPerPatch = Math.Clamp(
                 renderChunksPerPatch,
                 1,
-                worldChunkCountXZ);
+                initialChunkCountXZ);
             roadMaxHeightSteps = Math.Clamp(
                 roadMaxHeightSteps,
                 0,
@@ -282,9 +325,25 @@ namespace MiniCivilization.World.Generation
             heightVariationCells = Math.Clamp(heightVariationCells, 1, WorldHeight - 1);
             mountainHeightCells = Math.Clamp(mountainHeightCells, 0, WorldHeight - 1);
             seaLevelCell = Math.Clamp(seaLevelCell, 0, WorldHeight - 1);
-            minimumInlandLakeDistance = Math.Max(
+            maximumSeaDepthCells = Math.Clamp(
+                maximumSeaDepthCells,
                 1,
-                minimumInlandLakeDistance);
+                Math.Max(1, seaLevelCell));
+            continentalScale = Mathf.Max(0.0001f, continentalScale);
+            landThreshold = Math.Clamp(landThreshold, 0.05f, 0.95f);
+            coastTransitionWidth = Math.Clamp(
+                coastTransitionWidth,
+                0.001f,
+                0.25f);
+            riverScale = Mathf.Max(0.0001f, riverScale);
+            riverDensity = Math.Clamp(riverDensity, 0f, 1f);
+            lakeDensity = Math.Clamp(lakeDensity, 0f, 1f);
+            lakeRegionSizeCells = Math.Max(4, lakeRegionSizeCells);
+            maximumLakeRadiusCells = Math.Max(1, maximumLakeRadiusCells);
+            maximumLakeDepthSteps = Math.Clamp(
+                maximumLakeDepthSteps,
+                1,
+                WorldGrid.HeightStepsPerCell * 4);
             minimumInlandLakeArea = Math.Max(1, minimumInlandLakeArea);
             minimumInlandLakeDepthSteps = Math.Clamp(
                 minimumInlandLakeDepthSteps,
@@ -320,6 +379,12 @@ namespace MiniCivilization.World.Generation
                 coldClimateThreshold,
                 0f,
                 0.5f);
+        }
+
+        private static int NormalizeInitialChunkCount(int value)
+        {
+            value = Math.Max(1, value);
+            return (value & 1) == 0 ? value + 1 : value;
         }
     }
 }

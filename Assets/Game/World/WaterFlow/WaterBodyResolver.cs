@@ -68,10 +68,17 @@ namespace MiniCivilization.World.WaterFlow
 
             if (preparedChunks == null)
             {
-                for (var z = 0; z < world.Size; z++)
-                for (var x = 0; x < world.Size; x++)
+                foreach (var chunk in world.EnumerateLoadedChunks())
                 {
-                    ResolveFromColumn(x, z);
+                    var startX = chunk.Coordinate.X * world.ChunkSizeX;
+                    var startZ = chunk.Coordinate.Z * world.ChunkSizeZ;
+                    for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
+                    for (var localX = 0; localX < world.ChunkSizeX; localX++)
+                    {
+                        ResolveFromColumn(
+                            startX + localX,
+                            startZ + localZ);
+                    }
                 }
             }
             else
@@ -83,12 +90,8 @@ namespace MiniCivilization.World.WaterFlow
                     var chunk = preparedChunks[chunkIndex];
                     var startX = chunk.X * world.ChunkSizeX;
                     var startZ = chunk.Z * world.ChunkSizeZ;
-                    var endX = Math.Min(
-                        startX + world.ChunkSizeX,
-                        world.Size);
-                    var endZ = Math.Min(
-                        startZ + world.ChunkSizeZ,
-                        world.Size);
+                    var endX = startX + world.ChunkSizeX;
+                    var endZ = startZ + world.ChunkSizeZ;
                     for (var z = startZ; z < endZ; z++)
                     for (var x = startX; x < endX; x++)
                     {
@@ -125,16 +128,17 @@ namespace MiniCivilization.World.WaterFlow
                         current.z,
                         body);
                     body.SurfaceCellCount++;
-                    body.TouchesWorldEdge |= current.x == 0
-                        || current.z == 0
-                        || current.x == world.Size - 1
-                        || current.z == world.Size - 1;
+                    body.TouchesWorldEdge |= !world.IsInfinite
+                        && (current.x == world.MinimumCellX
+                            || current.z == world.MinimumCellZ
+                            || current.x == world.MaximumCellXExclusive - 1
+                            || current.z == world.MaximumCellZExclusive - 1);
 
                     for (var directionIndex = 0; directionIndex < Directions.Length; directionIndex++)
                     {
                         var nextX = current.x + Directions[directionIndex].x;
                         var nextZ = current.z + Directions[directionIndex].z;
-                        if (!world.ContainsColumn(nextX, nextZ))
+                        if (!world.IsColumnLoaded(nextX, nextZ))
                         {
                             continue;
                         }

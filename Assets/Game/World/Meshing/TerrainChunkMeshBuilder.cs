@@ -26,8 +26,8 @@ namespace MiniCivilization.World.Meshing
             buffers.Clear();
             var startX = patchX * patchSize;
             var startZ = patchZ * patchSize;
-            var endX = Math.Min(startX + patchSize, world.Size);
-            var endZ = Math.Min(startZ + patchSize, world.Size);
+            var endX = startX + patchSize;
+            var endZ = startZ + patchSize;
 
             exposureCache.CopySolidCellsForPatch(
                 startX,

@@ -654,6 +654,7 @@ namespace MiniCivilization.World.Persistence
             WorldSettingsData settings)
         {
             writer.Write(settings.Seed);
+            writer.Write((byte)settings.WorldType);
             writer.Write(settings.CellSize);
             writer.Write(settings.ChunkCellCountXZ);
             writer.Write(settings.ChunkSectionCellCountY);
@@ -667,18 +668,24 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.TerrainDetail);
             writer.Write(settings.BaseHeightUnits);
             writer.Write(settings.HeightVariationUnits);
-            writer.Write(settings.EdgeLowering);
             writer.Write(settings.MountainScale);
             writer.Write(settings.MountainHeightUnits);
             writer.Write(settings.MountainCoverage);
             writer.Write(settings.MountainSteepness);
             writer.Write(settings.SeaLevelUnits);
-            writer.Write(settings.RiverCount);
+            writer.Write(settings.MaximumSeaDepthUnits);
+            writer.Write(settings.ContinentalScale);
+            writer.Write(settings.LandThreshold);
+            writer.Write(settings.CoastTransitionWidth);
+            writer.Write(settings.RiverScale);
+            writer.Write(settings.RiverDensity);
             writer.Write(settings.RiverDepthCells);
             writer.Write(settings.MaximumRiverWidthCells);
             writer.Write(settings.MaximumRiverDepthCells);
-            writer.Write(settings.LakeCount);
-            writer.Write(settings.MinimumInlandLakeDistance);
+            writer.Write(settings.LakeDensity);
+            writer.Write(settings.LakeRegionSizeCells);
+            writer.Write(settings.MaximumLakeRadiusCells);
+            writer.Write(settings.MaximumLakeDepthSteps);
             writer.Write(settings.MinimumInlandLakeArea);
             writer.Write(settings.MinimumInlandLakeDepthSteps);
             writer.Write(settings.PondMaximumArea);
@@ -691,6 +698,7 @@ namespace MiniCivilization.World.Persistence
         private static WorldSettingsData ReadSettings(BinaryReader reader)
         {
             var seed = reader.ReadInt32();
+            var worldType = (WorldType)reader.ReadByte();
             var cellSize = reader.ReadSingle();
             var chunkCellCountXZ = ReadPositiveDimension(
                 reader,
@@ -710,6 +718,7 @@ namespace MiniCivilization.World.Persistence
 
             var settings = new WorldSettingsData(
                 seed,
+                worldType,
                 cellSize,
                 chunkCellCountXZ,
                 chunkSectionCellCountY,
@@ -724,14 +733,20 @@ namespace MiniCivilization.World.Persistence
                 reader.ReadInt32(),
                 reader.ReadInt32(),
                 reader.ReadSingle(),
-                reader.ReadSingle(),
                 reader.ReadInt32(),
                 reader.ReadSingle(),
                 reader.ReadSingle(),
                 reader.ReadInt32(),
                 reader.ReadInt32(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
                 reader.ReadInt32(),
                 reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadSingle(),
                 reader.ReadInt32(),
                 reader.ReadInt32(),
                 reader.ReadInt32(),

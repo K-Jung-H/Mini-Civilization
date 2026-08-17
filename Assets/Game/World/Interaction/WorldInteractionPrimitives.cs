@@ -47,14 +47,38 @@ namespace MiniCivilization.World.Interaction
                 throw new ArgumentNullException(nameof(world));
             }
 
+            var minimumX = world.IsInfinite
+                ? bounds.Minimum.X
+                : Math.Clamp(
+                    bounds.Minimum.X,
+                    world.MinimumCellX,
+                    world.MaximumCellXExclusive - 1);
+            var minimumZ = world.IsInfinite
+                ? bounds.Minimum.Z
+                : Math.Clamp(
+                    bounds.Minimum.Z,
+                    world.MinimumCellZ,
+                    world.MaximumCellZExclusive - 1);
+            var maximumX = world.IsInfinite
+                ? bounds.Maximum.X
+                : Math.Clamp(
+                    bounds.Maximum.X,
+                    world.MinimumCellX,
+                    world.MaximumCellXExclusive - 1);
+            var maximumZ = world.IsInfinite
+                ? bounds.Maximum.Z
+                : Math.Clamp(
+                    bounds.Maximum.Z,
+                    world.MinimumCellZ,
+                    world.MaximumCellZExclusive - 1);
             var minimum = new CellCoordinate(
-                Math.Clamp(bounds.Minimum.X, 0, world.Size - 1),
+                minimumX,
                 Math.Clamp(bounds.Minimum.Y, 0, world.Height - 1),
-                Math.Clamp(bounds.Minimum.Z, 0, world.Size - 1));
+                minimumZ);
             var maximum = new CellCoordinate(
-                Math.Clamp(bounds.Maximum.X, 0, world.Size - 1),
+                maximumX,
                 Math.Clamp(bounds.Maximum.Y, 0, world.Height - 1),
-                Math.Clamp(bounds.Maximum.Z, 0, world.Size - 1));
+                maximumZ);
             return new WorldCellBoxSelection(new CellBounds(minimum, maximum));
         }
 
@@ -129,10 +153,13 @@ namespace MiniCivilization.World.Interaction
             var uniqueCoordinates = new HashSet<CellCoordinate>();
             var uniqueCells = new List<CellCoordinate>();
             var minimum = new CellCoordinate(
-                world.Size - 1,
-                world.Height - 1,
-                world.Size - 1);
-            var maximum = new CellCoordinate(0, 0, 0);
+                int.MaxValue,
+                int.MaxValue,
+                int.MaxValue);
+            var maximum = new CellCoordinate(
+                int.MinValue,
+                int.MinValue,
+                int.MinValue);
             foreach (var coordinate in coordinates)
             {
                 if (!world.Contains(

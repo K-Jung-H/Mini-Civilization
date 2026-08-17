@@ -31,12 +31,12 @@ namespace MiniCivilization.World.Runtime
             chunks.ContainsKey(coordinate);
 
         public bool IsPrepared(int x, int z) =>
-            world.ContainsColumn(x, z)
+            world.IsColumnLoaded(x, z)
             && chunks.ContainsKey(ToChunk(x, z));
 
         public SurfaceHeightData GetSurfaceHeight(int x, int z)
         {
-            if (!world.ContainsColumn(x, z))
+            if (!world.IsColumnLoaded(x, z))
             {
                 return default;
             }
@@ -53,10 +53,9 @@ namespace MiniCivilization.World.Runtime
         public void RebuildAll()
         {
             chunks.Clear();
-            for (var chunkZ = 0; chunkZ < world.ChunkCountZ; chunkZ++)
-            for (var chunkX = 0; chunkX < world.ChunkCountX; chunkX++)
+            foreach (var chunk in world.EnumerateLoadedChunks())
             {
-                PrepareChunk(new ChunkCoordinate(chunkX, chunkZ));
+                PrepareChunk(chunk.Coordinate);
             }
         }
 
@@ -89,8 +88,8 @@ namespace MiniCivilization.World.Runtime
             chunks.Add(coordinate, column);
             var startX = coordinate.X * world.ChunkSizeX;
             var startZ = coordinate.Z * world.ChunkSizeZ;
-            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
-            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            var endX = startX + world.ChunkSizeX;
+            var endZ = startZ + world.ChunkSizeZ;
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)
             {
@@ -154,8 +153,7 @@ namespace MiniCivilization.World.Runtime
 
         private void ValidateChunk(ChunkCoordinate coordinate)
         {
-            if ((uint)coordinate.X >= world.ChunkCountX
-                || (uint)coordinate.Z >= world.ChunkCountZ)
+            if (!world.IsChunkWithinBounds(coordinate))
             {
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }
@@ -257,8 +255,8 @@ namespace MiniCivilization.World.Runtime
                 var column = pair.Value;
                 var startX = coordinate.X * world.ChunkSizeX;
                 var startZ = coordinate.Z * world.ChunkSizeZ;
-                var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
-                var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+                var endX = startX + world.ChunkSizeX;
+                var endZ = startZ + world.ChunkSizeZ;
                 for (var z = startZ; z < endZ; z++)
                 for (var x = startX; x < endX; x++)
                 {
@@ -279,8 +277,8 @@ namespace MiniCivilization.World.Runtime
                 var column = pair.Value;
                 var startX = coordinate.X * world.ChunkSizeX;
                 var startZ = coordinate.Z * world.ChunkSizeZ;
-                var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
-                var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+                var endX = startX + world.ChunkSizeX;
+                var endZ = startZ + world.ChunkSizeZ;
                 for (var z = startZ; z < endZ; z++)
                 for (var x = startX; x < endX; x++)
                 {
@@ -384,8 +382,8 @@ namespace MiniCivilization.World.Runtime
             chunks.Add(coordinate, column);
             var startX = coordinate.X * world.ChunkSizeX;
             var startZ = coordinate.Z * world.ChunkSizeZ;
-            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
-            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            var endX = startX + world.ChunkSizeX;
+            var endZ = startZ + world.ChunkSizeZ;
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)
             {
@@ -502,7 +500,7 @@ namespace MiniCivilization.World.Runtime
         }
 
         private bool IsPreparedCellColumn(int x, int z) =>
-            world.ContainsColumn(x, z)
+            world.IsColumnLoaded(x, z)
             && chunks.ContainsKey(WorldCoordinateUtility.ToChunk(
                 x,
                 z,
@@ -514,7 +512,7 @@ namespace MiniCivilization.World.Runtime
             out ChunkCoordinate coordinate,
             out ChunkCacheData column)
         {
-            if (!world.ContainsColumn(x, z))
+            if (!world.IsColumnLoaded(x, z))
             {
                 coordinate = default;
                 column = null;
@@ -540,8 +538,7 @@ namespace MiniCivilization.World.Runtime
 
         private void ValidateChunk(ChunkCoordinate coordinate)
         {
-            if ((uint)coordinate.X >= world.ChunkCountX
-                || (uint)coordinate.Z >= world.ChunkCountZ)
+            if (!world.IsChunkWithinBounds(coordinate))
             {
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }

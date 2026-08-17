@@ -19,12 +19,17 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            var cells = (long)settings.WorldSize * settings.WorldSize * settings.WorldHeight;
+            var cells = (long)settings.WorldSize
+                * settings.WorldSize
+                * settings.WorldHeight;
+            var halfChunkCount = settings.InitialChunkCountXZ / 2;
             EditorGUILayout.HelpBox(
+                $"World type: {settings.WorldType}\n" +
                 $"Cell: {settings.CellSize:g} x {settings.CellSize:g} x {settings.CellSize:g}\n" +
                 $"Height step: {settings.HeightStep:g}\n" +
-                $"World Cells: {settings.WorldSize} x {settings.WorldHeight} x {settings.WorldSize}\n" +
-                $"Total Cells: {cells:N0}\n" +
+                $"Initial Chunks: -{halfChunkCount}..{halfChunkCount} x -{halfChunkCount}..{halfChunkCount}\n" +
+                $"Initial Cells: {settings.WorldSize} x {settings.WorldHeight} x {settings.WorldSize}\n" +
+                $"Initial Cell capacity: {cells:N0}\n" +
                 $"Sea level: {settings.SeaLevelUnits * settings.HeightStep:g}",
                 MessageType.None);
         }

@@ -46,8 +46,7 @@ namespace MiniCivilization.World.Meshing
 
         public void PrepareChunk(ChunkCoordinate coordinate)
         {
-            if ((uint)coordinate.X >= world.ChunkCountX
-                || (uint)coordinate.Z >= world.ChunkCountZ)
+            if (!world.IsChunkWithinBounds(coordinate))
             {
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }
@@ -152,19 +151,30 @@ namespace MiniCivilization.World.Meshing
             bool water)
         {
             target.Clear();
-            startX = Math.Max(0, startX);
-            startZ = Math.Max(0, startZ);
-            endX = Math.Min(world.Size, endX);
-            endZ = Math.Min(world.Size, endZ);
+            if (!world.IsInfinite)
+            {
+                startX = Math.Max(world.MinimumCellX, startX);
+                startZ = Math.Max(world.MinimumCellZ, startZ);
+                endX = Math.Min(world.MaximumCellXExclusive, endX);
+                endZ = Math.Min(world.MaximumCellZExclusive, endZ);
+            }
             if (startX >= endX || startZ >= endZ)
             {
                 return;
             }
 
-            var minimumChunkX = startX / world.ChunkSizeX;
-            var maximumChunkX = (endX - 1) / world.ChunkSizeX;
-            var minimumChunkZ = startZ / world.ChunkSizeZ;
-            var maximumChunkZ = (endZ - 1) / world.ChunkSizeZ;
+            var minimumChunkX = WorldCoordinateUtility.FloorDivide(
+                startX,
+                world.ChunkSizeX);
+            var maximumChunkX = WorldCoordinateUtility.FloorDivide(
+                endX - 1,
+                world.ChunkSizeX);
+            var minimumChunkZ = WorldCoordinateUtility.FloorDivide(
+                startZ,
+                world.ChunkSizeZ);
+            var maximumChunkZ = WorldCoordinateUtility.FloorDivide(
+                endZ - 1,
+                world.ChunkSizeZ);
             for (var sectionY = 0;
                  sectionY < world.ChunkSectionCountY;
                  sectionY++)
@@ -232,20 +242,22 @@ namespace MiniCivilization.World.Meshing
             var startX = coordinate.X * world.ChunkSizeX;
             var startY = coordinate.Y * world.ChunkSectionSizeY;
             var startZ = coordinate.Z * world.ChunkSizeZ;
-            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+            var endX = startX + world.ChunkSizeX;
             var endY = Math.Min(startY + world.ChunkSectionSizeY, world.Height);
-            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            var endZ = startZ + world.ChunkSizeZ;
+            var hasBoundaryX = changedNeighbor.X != coordinate.X;
+            var hasBoundaryZ = changedNeighbor.Z != coordinate.Z;
             var boundaryX = changedNeighbor.X < coordinate.X
                 ? startX
                 : changedNeighbor.X > coordinate.X
                     ? endX - 1
-                    : -1;
+                    : 0;
             var boundaryZ = changedNeighbor.Z < coordinate.Z
                 ? startZ
                 : changedNeighbor.Z > coordinate.Z
                     ? endZ - 1
-                    : -1;
-            if (boundaryX >= 0)
+                    : 0;
+            if (hasBoundaryX)
             {
                 target.SolidCells.RemoveAll(
                     cell => cell.Coordinate.X == boundaryX);
@@ -258,7 +270,7 @@ namespace MiniCivilization.World.Meshing
                 }
             }
 
-            if (boundaryZ >= 0)
+            if (hasBoundaryZ)
             {
                 target.SolidCells.RemoveAll(
                     cell => cell.Coordinate.Z == boundaryZ);
@@ -300,9 +312,9 @@ namespace MiniCivilization.World.Meshing
             var startX = coordinate.X * world.ChunkSizeX;
             var startY = coordinate.Y * world.ChunkSectionSizeY;
             var startZ = coordinate.Z * world.ChunkSizeZ;
-            var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
+            var endX = startX + world.ChunkSizeX;
             var endY = Math.Min(startY + world.ChunkSectionSizeY, world.Height);
-            var endZ = Math.Min(startZ + world.ChunkSizeZ, world.Size);
+            var endZ = startZ + world.ChunkSizeZ;
             for (var y = startY; y < endY; y++)
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)

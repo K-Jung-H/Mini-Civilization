@@ -27,28 +27,7 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(build));
             }
 
-            var input = build.Input;
-            WaterFeatureStage.InitializeSea(build);
-
-            var hydrology = HydrologyStage.Build(build);
-            var waterValidationContext = WaterPlanValidator.CreateContext(build);
-            var validationWorld = waterValidationContext.SourceWorld;
-            var lakePlans = InlandLakePlanner.BuildPlans(
-                validationWorld,
-                input,
-                hydrology,
-                input.Seed,
-                waterValidationContext);
-            var featurePlan = DynamicRiverPlanner.BuildFeaturePlan(
-                validationWorld,
-                input,
-                hydrology,
-                lakePlans,
-                build.SolidHeights,
-                build.WaterSurfaces,
-                input.Seed,
-                waterValidationContext);
-            WaterFeatureStage.ApplyFeaturePlan(build, featurePlan);
+            WaterFeatureStage.Build(build);
         }
 
         internal static WorldData BuildWorldData(WorldBuildData build)

@@ -12,11 +12,18 @@ namespace MiniCivilization.World.Domain
                 throw new ArgumentNullException(nameof(world));
             }
 
-            for (var y = 0; y < world.Height; y++)
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            foreach (var chunk in world.EnumerateLoadedChunks())
             {
-                ValidateCell(world.GetCell(x, y, z), x, y, z);
+                var startX = chunk.Coordinate.X * world.ChunkSizeX;
+                var startZ = chunk.Coordinate.Z * world.ChunkSizeZ;
+                for (var y = 0; y < world.Height; y++)
+                for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
+                for (var localX = 0; localX < world.ChunkSizeX; localX++)
+                {
+                    var x = startX + localX;
+                    var z = startZ + localZ;
+                    ValidateCell(world.GetCell(x, y, z), x, y, z);
+                }
             }
 
             for (var index = 0;

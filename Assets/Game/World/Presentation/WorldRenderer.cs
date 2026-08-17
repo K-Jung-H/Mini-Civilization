@@ -165,8 +165,8 @@ namespace MiniCivilization.World.Presentation
             for (var z = coordinate.Z - 1; z <= coordinate.Z + 1; z++)
             for (var x = coordinate.X - 1; x <= coordinate.X + 1; x++)
             {
-                if ((uint)x >= boundWorld.ChunkCountX
-                    || (uint)z >= boundWorld.ChunkCountZ)
+                if (!boundWorld.IsChunkWithinBounds(
+                        new ChunkCoordinate(x, z)))
                 {
                     continue;
                 }
@@ -237,9 +237,19 @@ namespace MiniCivilization.World.Presentation
 
         private bool IsPatchInsideFiniteBounds(Vector2Int patch)
         {
-            var countPerAxis = boundWorld.ChunkCountX / activeChunksPerPatch;
-            return (uint)patch.x < countPerAxis
-                && (uint)patch.y < countPerAxis;
+            if (boundWorld.IsInfinite)
+            {
+                return true;
+            }
+
+            var startChunkX = patch.x * activeChunksPerPatch;
+            var startChunkZ = patch.y * activeChunksPerPatch;
+            var endChunkX = startChunkX + activeChunksPerPatch - 1;
+            var endChunkZ = startChunkZ + activeChunksPerPatch - 1;
+            return endChunkX >= boundWorld.MinimumChunkX
+                && startChunkX <= boundWorld.MaximumChunkX
+                && endChunkZ >= boundWorld.MinimumChunkZ
+                && startChunkZ <= boundWorld.MaximumChunkZ;
         }
 
         public void ApplyChanges(WorldChangeSet changeSet)

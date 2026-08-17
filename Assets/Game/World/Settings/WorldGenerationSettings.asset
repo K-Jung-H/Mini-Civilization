@@ -12,10 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 97d524c8ea6b0e145a34679a81fd4244, type: 3}
   m_Name: WorldGenerationSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationSettings
+  worldType: 1
   cellSize: 10
   chunkCellCountXZ: 8
   chunkSectionCellCountY: 8
-  worldChunkCountXZ: 16
+  initialChunkCountXZ: 15
   chunkSectionCountY: 4
   renderChunksPerPatch: 1
   roadMaxHeightSteps: 5
@@ -25,19 +26,25 @@ MonoBehaviour:
   terrainDetail: 0.4
   baseHeightCells: 10
   heightVariationCells: 6
-  edgeLowering: 0.25
   mountainScale: 0.018
   mountainHeightCells: 8
   mountainCoverage: 0.58
   mountainSteepness: 1.8
+  continentalScale: 0.004
+  landThreshold: 0.5
+  coastTransitionWidth: 0.08
   seaLevelCell: 3
   seaLevelStep: 0
-  riverCount: 3
+  maximumSeaDepthCells: 3
+  riverScale: 0.0125
+  riverDensity: 0.2
   riverDepthCells: 2
   maximumRiverWidthCells: 5
   maximumRiverDepthCells: 4
-  lakeCount: 2
-  minimumInlandLakeDistance: 6
+  lakeDensity: 0.15
+  lakeRegionSizeCells: 32
+  maximumLakeRadiusCells: 8
+  maximumLakeDepthSteps: 10
   minimumInlandLakeArea: 3
   minimumInlandLakeDepthSteps: 1
   pondMaximumArea: 8

@@ -12,6 +12,7 @@ namespace MiniCivilization.World.Runtime
         [SerializeField, Min(0)] private int renderRadius = 1;
         [SerializeField, Min(0)] private int entityRenderRadius = 1;
         [SerializeField, Min(0)] private int simulationRadius;
+        [SerializeField, Min(1)] private int chunkApplicationsPerFrame = 1;
 
         private WorldRuntime runtime;
         private Transform resolvedTarget;
@@ -33,6 +34,7 @@ namespace MiniCivilization.World.Runtime
         private void Update()
         {
             RefreshStreaming(force: false);
+            runtime?.ProcessStreamingWork(chunkApplicationsPerFrame);
         }
 
         private void OnValidate()
@@ -40,6 +42,7 @@ namespace MiniCivilization.World.Runtime
             renderRadius = Math.Max(0, renderRadius);
             entityRenderRadius = Math.Max(0, entityRenderRadius);
             simulationRadius = Math.Max(0, simulationRadius);
+            chunkApplicationsPerFrame = Math.Max(1, chunkApplicationsPerFrame);
         }
 
         public void Configure(
@@ -209,9 +212,14 @@ namespace MiniCivilization.World.Runtime
             var chunkWorldSize = world.ChunkSizeX * world.CellSize;
             var chunkX = Mathf.FloorToInt(localPosition.x / chunkWorldSize);
             var chunkZ = Mathf.FloorToInt(localPosition.z / chunkWorldSize);
+            if (world.IsInfinite)
+            {
+                return new ChunkCoordinate(chunkX, chunkZ);
+            }
+
             return new ChunkCoordinate(
-                Math.Clamp(chunkX, 0, world.ChunkCountX - 1),
-                Math.Clamp(chunkZ, 0, world.ChunkCountZ - 1));
+                Math.Clamp(chunkX, world.MinimumChunkX, world.MaximumChunkX),
+                Math.Clamp(chunkZ, world.MinimumChunkZ, world.MaximumChunkZ));
         }
 
         private void OnDestroy()

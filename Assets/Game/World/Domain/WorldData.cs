@@ -164,6 +164,8 @@ namespace MiniCivilization.World.Domain
 
         public WorldSettingsData Settings { get; }
         public int Size => Settings.WorldSize;
+        public WorldType WorldType => Settings.WorldType;
+        public bool IsInfinite => WorldType == WorldType.Infinite;
         public int Height => Settings.WorldHeight;
         public float CellSize => Settings.CellSize;
         public float HeightStep => Settings.HeightStep;
@@ -173,6 +175,14 @@ namespace MiniCivilization.World.Domain
         public int ChunkCountX => Settings.WorldChunkCountXZ;
         public int ChunkSectionCountY => Settings.ChunkSectionCountY;
         public int ChunkCountZ => Settings.WorldChunkCountXZ;
+        public int MinimumChunkX => Settings.MinimumChunkCoordinate;
+        public int MaximumChunkX => Settings.MaximumChunkCoordinate;
+        public int MinimumChunkZ => Settings.MinimumChunkCoordinate;
+        public int MaximumChunkZ => Settings.MaximumChunkCoordinate;
+        public int MinimumCellX => Settings.MinimumCellCoordinate;
+        public int MaximumCellXExclusive => Settings.MaximumCellCoordinateExclusive;
+        public int MinimumCellZ => Settings.MinimumCellCoordinate;
+        public int MaximumCellZExclusive => Settings.MaximumCellCoordinateExclusive;
         public int Seed => Settings.Seed;
         public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
         public int PondMaximumArea => Settings.PondMaximumArea;
@@ -190,13 +200,23 @@ namespace MiniCivilization.World.Domain
         public bool IsValidHeight(int y) => (uint)y < Height;
 
         public bool IsWithinHorizontalBounds(int x, int z) =>
-            (uint)x < Size && (uint)z < Size;
+            IsInfinite
+            || x >= MinimumCellX && x < MaximumCellXExclusive
+            && z >= MinimumCellZ && z < MaximumCellZExclusive;
+
+        public bool IsChunkWithinBounds(ChunkCoordinate coordinate) =>
+            IsInfinite
+            || coordinate.X >= MinimumChunkX && coordinate.X <= MaximumChunkX
+            && coordinate.Z >= MinimumChunkZ && coordinate.Z <= MaximumChunkZ;
 
         public bool Contains(int x, int y, int z) =>
             IsValidHeight(y) && IsWithinHorizontalBounds(x, z);
 
         public bool ContainsColumn(int x, int z) =>
             IsWithinHorizontalBounds(x, z);
+
+        public bool IsColumnLoaded(int x, int z) =>
+            ContainsColumn(x, z) && IsChunkLoaded(x, z);
 
         public bool IsChunkLoaded(ChunkCoordinate coordinate) =>
             loadedChunks.ContainsKey(coordinate);
@@ -299,9 +319,8 @@ namespace MiniCivilization.World.Domain
             int sectionY,
             int chunkZ)
         {
-            if ((uint)chunkX >= ChunkCountX
-                || (uint)sectionY >= ChunkSectionCountY
-                || (uint)chunkZ >= ChunkCountZ)
+            if ((uint)sectionY >= ChunkSectionCountY
+                || !IsChunkWithinBounds(new ChunkCoordinate(chunkX, chunkZ)))
             {
                 throw new ArgumentOutOfRangeException(nameof(chunkX));
             }
@@ -444,8 +463,7 @@ namespace MiniCivilization.World.Domain
         internal Chunk EnsureChunkLoaded(
             ChunkCoordinate coordinate)
         {
-            if ((uint)coordinate.X >= ChunkCountX
-                || (uint)coordinate.Z >= ChunkCountZ)
+            if (!IsChunkWithinBounds(coordinate))
             {
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }

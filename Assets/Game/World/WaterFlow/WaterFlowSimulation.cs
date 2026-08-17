@@ -272,7 +272,7 @@ namespace MiniCivilization.World.WaterFlow
             {
                 foreach (var column in changedColumns)
                 {
-                    if (!world.ContainsColumn(column.X, column.Z))
+                    if (!world.IsColumnLoaded(column.X, column.Z))
                     {
                         continue;
                     }
@@ -1082,19 +1082,31 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             var frontier = new HashSet<CellCoordinate>();
-            for (var y = 0; y < world.Height; y++)
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            foreach (var chunk in world.EnumerateLoadedChunks())
             {
-                var cell = world.GetCell(x, y, z);
-                if (!cell.HasWater
-                    || cell.Water.Role != WaterRole.Source)
+                var startX = chunk.Coordinate.X * world.ChunkSizeX;
+                var startZ = chunk.Coordinate.Z * world.ChunkSizeZ;
+                for (var y = 0; y < world.Height; y++)
+                for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
+                for (var localX = 0; localX < world.ChunkSizeX; localX++)
                 {
-                    continue;
-                }
+                    var x = startX + localX;
+                    var z = startZ + localZ;
+                    var cell = world.GetCell(x, y, z);
+                    if (!cell.HasWater
+                        || cell.Water.Role != WaterRole.Source)
+                    {
+                        continue;
+                    }
 
-                AddSourceAndNeighbors(
-                    new CellCoordinate(x, y, z));
+                    var coordinate = new CellCoordinate(x, y, z);
+                    if (WaterSourceFrontierSelector.IsNeeded(
+                            world,
+                            coordinate))
+                    {
+                        AddSourceAndNeighbors(coordinate);
+                    }
+                }
             }
 
             var sortedFrontier = new CellCoordinate[frontier.Count];
@@ -1115,11 +1127,94 @@ namespace MiniCivilization.World.WaterFlow
 
             void AddIfContained(int x, int y, int z)
             {
-                if (world.Contains(x, y, z))
+                if (world.TryGetCell(x, y, z, out _))
                 {
                     frontier.Add(new CellCoordinate(x, y, z));
                 }
             }
+        }
+    }
+
+    internal static class WaterSourceFrontierSelector
+    {
+        private static readonly (int x, int z)[] HorizontalDirections =
+        {
+            (1, 0), (-1, 0), (0, 1), (0, -1)
+        };
+
+        public static bool IsNeeded(
+            WorldData world,
+            CellCoordinate coordinate)
+        {
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
+
+            if (!world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y,
+                    coordinate.Z,
+                    out var sourceCell)
+                || !sourceCell.HasWater
+                || sourceCell.Water.Role != WaterRole.Source)
+            {
+                return false;
+            }
+
+            if (coordinate.Y > 0
+                && world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y - 1,
+                    coordinate.Z,
+                    out var below)
+                && WaterFlowReachability.CanFlowDown(
+                    coordinate.Y,
+                    below,
+                    below.Water))
+            {
+                return true;
+            }
+
+            var spreadAmount = (byte)Math.Max(
+                0,
+                WaterAmount.Full
+                - world.Settings.WaterFlowRules.SpreadAmountLoss);
+            for (var index = 0; index < HorizontalDirections.Length; index++)
+            {
+                var direction = HorizontalDirections[index];
+                if (!world.TryGetCell(
+                        coordinate.X + direction.x,
+                        coordinate.Y,
+                        coordinate.Z + direction.z,
+                        out var neighbor))
+                {
+                    continue;
+                }
+
+                if (neighbor.HasWater
+                    && neighbor.Water.Role == WaterRole.Source
+                    && neighbor.Water.Type == sourceCell.Water.Type)
+                {
+                    continue;
+                }
+
+                if (WaterFlowReachability.CanReachHorizontally(
+                        coordinate,
+                        sourceCell,
+                        sourceCell.Water,
+                        new CellCoordinate(
+                            coordinate.X + direction.x,
+                            coordinate.Y,
+                            coordinate.Z + direction.z),
+                        neighbor,
+                        spreadAmount))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

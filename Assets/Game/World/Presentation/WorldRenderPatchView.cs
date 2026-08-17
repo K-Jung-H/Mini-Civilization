@@ -187,8 +187,8 @@ namespace MiniCivilization.World.Presentation
                 roadPortOffsetPixels.Length);
             var startX = patchX * patchSize;
             var startZ = patchZ * patchSize;
-            var endX = Mathf.Min(startX + patchSize, world.Size);
-            var endZ = Mathf.Min(startZ + patchSize, world.Size);
+            var endX = startX + patchSize;
+            var endZ = startZ + patchSize;
             for (var z = startZ; z < endZ; z++)
             for (var x = startX; x < endX; x++)
             {

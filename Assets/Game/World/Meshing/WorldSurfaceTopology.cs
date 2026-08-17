@@ -346,18 +346,25 @@ namespace MiniCivilization.World.Meshing
 
         public void InvalidateRegion(in CellBounds changedBounds)
         {
-            var minimumX = Math.Max(
-                0,
-                changedBounds.Minimum.X - HorizontalDependencyRadius);
-            var maximumX = Math.Min(
-                world.Size - 1,
-                changedBounds.Maximum.X + HorizontalDependencyRadius);
-            var minimumZ = Math.Max(
-                0,
-                changedBounds.Minimum.Z - HorizontalDependencyRadius);
-            var maximumZ = Math.Min(
-                world.Size - 1,
-                changedBounds.Maximum.Z + HorizontalDependencyRadius);
+            var minimumX = changedBounds.Minimum.X
+                - HorizontalDependencyRadius;
+            var maximumX = changedBounds.Maximum.X
+                + HorizontalDependencyRadius;
+            var minimumZ = changedBounds.Minimum.Z
+                - HorizontalDependencyRadius;
+            var maximumZ = changedBounds.Maximum.Z
+                + HorizontalDependencyRadius;
+            if (!world.IsInfinite)
+            {
+                minimumX = Math.Max(world.MinimumCellX, minimumX);
+                maximumX = Math.Min(
+                    world.MaximumCellXExclusive - 1,
+                    maximumX);
+                minimumZ = Math.Max(world.MinimumCellZ, minimumZ);
+                maximumZ = Math.Min(
+                    world.MaximumCellZExclusive - 1,
+                    maximumZ);
+            }
             if (minimumX > maximumX || minimumZ > maximumZ)
             {
                 return;
@@ -391,8 +398,8 @@ namespace MiniCivilization.World.Meshing
 
             var startX = coordinate.X * chunkSizeXZ;
             var startZ = coordinate.Z * chunkSizeXZ;
-            var endX = Math.Min(startX + chunkSizeXZ, world.Size) - 1;
-            var endZ = Math.Min(startZ + chunkSizeXZ, world.Size) - 1;
+            var endX = startX + chunkSizeXZ - 1;
+            var endZ = startZ + chunkSizeXZ - 1;
             if (startX > endX || startZ > endZ)
             {
                 return;
@@ -481,7 +488,7 @@ namespace MiniCivilization.World.Meshing
             out SolidSurfaceProfile profile)
         {
             profile = default;
-            if (!world.ContainsColumn(x, z) || heightUnits <= 0)
+            if (!world.IsColumnLoaded(x, z) || heightUnits <= 0)
             {
                 return false;
             }
@@ -1171,8 +1178,8 @@ namespace MiniCivilization.World.Meshing
             int targetZ,
             out int height)
         {
-            if (!world.ContainsColumn(sourceX, sourceZ)
-                || !world.ContainsColumn(targetX, targetZ))
+            if (!world.IsColumnLoaded(sourceX, sourceZ)
+                || !world.IsColumnLoaded(targetX, targetZ))
             {
                 height = 0;
                 return false;
@@ -1187,7 +1194,15 @@ namespace MiniCivilization.World.Meshing
 
             for (var scanY = y - 1; scanY >= 0; scanY--)
             {
-                var source = world.GetCell(sourceX, scanY, sourceZ);
+                if (!world.TryGetCell(
+                        sourceX,
+                        scanY,
+                        sourceZ,
+                        out var source))
+                {
+                    break;
+                }
+
                 var sourceCeiling = (scanY + 1)
                     * WorldGrid.HeightStepsPerCell;
                 if (!source.HasTerrain
@@ -1196,7 +1211,15 @@ namespace MiniCivilization.World.Meshing
                     break;
                 }
 
-                var candidate = world.GetCell(targetX, scanY, targetZ);
+                if (!world.TryGetCell(
+                        targetX,
+                        scanY,
+                        targetZ,
+                        out var candidate))
+                {
+                    break;
+                }
+
                 if (candidate.HasTerrain)
                 {
                     height = GetSolidTop(scanY, candidate);
