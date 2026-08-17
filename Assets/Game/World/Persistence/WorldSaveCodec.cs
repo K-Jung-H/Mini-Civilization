@@ -71,17 +71,19 @@ namespace MiniCivilization.World.Persistence
             writer.Write((byte)0);
             WriteSettings(writer, world.Settings);
 
-            var chunks = new List<ChunkData>(world.EnumerateChunks());
-            chunks.Sort((left, right) =>
+            var sections = new List<ChunkSection>(world.EnumerateSections());
+            sections.Sort((left, right) =>
                 left.Coordinate.CompareTo(right.Coordinate));
-            writer.Write(chunks.Count);
-            for (var chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+            writer.Write(sections.Count);
+            for (var sectionIndex = 0;
+                 sectionIndex < sections.Count;
+                 sectionIndex++)
             {
-                var chunk = chunks[chunkIndex];
-                writer.Write(chunk.Coordinate.X);
-                writer.Write(chunk.Coordinate.Y);
-                writer.Write(chunk.Coordinate.Z);
-                WriteCellSection(writer, chunk.AsSpan());
+                var section = sections[sectionIndex];
+                writer.Write(section.Coordinate.X);
+                writer.Write(section.Coordinate.Y);
+                writer.Write(section.Coordinate.Z);
+                WriteCellSection(writer, section.AsSpan());
             }
 
             WriteWaterFlowSchedule(writer, world.WaterFlowSchedule);
@@ -124,7 +126,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             var world = new WorldData(ReadSettings(reader));
-            var expectedChunkCount = checked(world.ChunkCountX * world.ChunkCountY * world.ChunkCountZ);
+            var expectedChunkCount = checked(world.ChunkCountX * world.ChunkSectionCountY * world.ChunkCountZ);
             var chunkCount = reader.ReadInt32();
             if (chunkCount < 0 || chunkCount > expectedChunkCount)
             {
@@ -138,7 +140,7 @@ namespace MiniCivilization.World.Persistence
                 var chunkX = reader.ReadInt32();
                 var chunkY = reader.ReadInt32();
                 var chunkZ = reader.ReadInt32();
-                ValidateChunkCoordinate(world, chunkX, chunkY, chunkZ);
+                ValidateChunkSectionCoordinate(world, chunkX, chunkY, chunkZ);
                 var chunkIndex = chunkX
                     + world.ChunkCountX * (chunkZ + world.ChunkCountZ * chunkY);
                 if (loadedChunks[chunkIndex])
@@ -150,7 +152,7 @@ namespace MiniCivilization.World.Persistence
                 loadedChunks[chunkIndex] = true;
                 ReadCellSection(
                     reader,
-                    world.GetOrCreateChunk(chunkX, chunkY, chunkZ));
+                    world.GetOrCreateSection(chunkX, chunkY, chunkZ));
             }
 
             if (reader.ReadUInt32() != WaterFlowScheduleMarker)
@@ -318,7 +320,7 @@ namespace MiniCivilization.World.Persistence
             WriteSection(writer, cells.Length, encoding, encodedStream.ToArray());
         }
 
-        private static void ReadCellSection(BinaryReader reader, ChunkData chunk)
+        private static void ReadCellSection(BinaryReader reader, ChunkSection chunk)
         {
             var expectedCount = checked(chunk.SizeX * chunk.SizeY * chunk.SizeZ);
             var section = ReadSection(reader, expectedCount, CellByteSize);
@@ -654,9 +656,9 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.Seed);
             writer.Write(settings.CellSize);
             writer.Write(settings.ChunkCellCountXZ);
-            writer.Write(settings.ChunkCellCountY);
+            writer.Write(settings.ChunkSectionCellCountY);
             writer.Write(settings.WorldChunkCountXZ);
-            writer.Write(settings.WorldChunkCountY);
+            writer.Write(settings.ChunkSectionCountY);
             writer.Write(settings.RenderChunksPerPatch);
             writer.Write(settings.RoadMaxHeightSteps);
             writer.Write(settings.TerrainScale);
@@ -693,13 +695,13 @@ namespace MiniCivilization.World.Persistence
             var chunkCellCountXZ = ReadPositiveDimension(
                 reader,
                 "horizontal chunk Cell count");
-            var chunkCellCountY = ReadPositiveDimension(
+            var chunkSectionCellCountY = ReadPositiveDimension(
                 reader,
                 "vertical chunk Cell count");
             var worldChunkCountXZ = ReadPositiveDimension(
                 reader,
                 "horizontal world chunk count");
-            var worldChunkCountY = ReadPositiveDimension(
+            var chunkSectionCountY = ReadPositiveDimension(
                 reader,
                 "vertical world chunk count");
             var renderChunksPerPatch = ReadPositiveDimension(
@@ -710,9 +712,9 @@ namespace MiniCivilization.World.Persistence
                 seed,
                 cellSize,
                 chunkCellCountXZ,
-                chunkCellCountY,
+                chunkSectionCellCountY,
                 worldChunkCountXZ,
-                worldChunkCountY,
+                chunkSectionCountY,
                 renderChunksPerPatch,
                 reader.ReadInt32(),
                 reader.ReadSingle(),
@@ -766,14 +768,14 @@ namespace MiniCivilization.World.Persistence
             return value;
         }
 
-        private static void ValidateChunkCoordinate(
+        private static void ValidateChunkSectionCoordinate(
             WorldData world,
             int chunkX,
             int chunkY,
             int chunkZ)
         {
             if ((uint)chunkX >= world.ChunkCountX
-                || (uint)chunkY >= world.ChunkCountY
+                || (uint)chunkY >= world.ChunkSectionCountY
                 || (uint)chunkZ >= world.ChunkCountZ)
             {
                 throw new InvalidDataException(

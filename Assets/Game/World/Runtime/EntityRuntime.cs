@@ -17,7 +17,14 @@ namespace MiniCivilization.World.Runtime
         private readonly Dictionary<CellCoordinate, BuildingCellState> buildingCells = new();
         private readonly HashSet<CellCoordinate> terrainAnchorCells = new();
         private readonly HashSet<CellColumnCoordinate> terrainAnchorColumns = new();
-        private readonly List<Entity> tickEntities = new();
+        private readonly Dictionary<ChunkCoordinate, List<Entity>>
+            tickEntitiesByChunk = new();
+        private readonly Dictionary<ChunkCoordinate, HashSet<EntityId>>
+            entityIdsByChunk = new();
+        private readonly Dictionary<EntityId, ChunkCoordinate[]>
+            referencedChunksByEntityId = new();
+        private readonly List<Entity> tickBuffer = new();
+        private readonly HashSet<EntityId> copyEntityIds = new();
         private readonly HashSet<EntityId> movingEntityIds = new();
         private readonly Dictionary<EntityId, BuildingWayLocation>
             buildingWayLocations = new();
@@ -65,6 +72,80 @@ namespace MiniCivilization.World.Runtime
             target.Sort(CompareEntities);
         }
 
+        public void CopyEntitiesInChunkTo(
+            ChunkCoordinate coordinate,
+            List<Entity> target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            if (!entityIdsByChunk.TryGetValue(coordinate, out var ids))
+            {
+                return;
+            }
+
+            foreach (var id in ids)
+            {
+                if (entitiesById.TryGetValue(id, out var entity))
+                {
+                    target.Add(entity);
+                }
+            }
+
+            target.Sort(CompareEntities);
+        }
+
+        internal void CopyEntitiesInPreparedChunksTo(List<Entity> target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            copyEntityIds.Clear();
+            foreach (var pair in runtime.ChunkRuntimes)
+            {
+                if (pair.Value.State == ChunkState.Unloaded
+                    || !entityIdsByChunk.TryGetValue(pair.Key, out var ids))
+                {
+                    continue;
+                }
+
+                foreach (var id in ids)
+                {
+                    if (copyEntityIds.Add(id)
+                        && entitiesById.TryGetValue(id, out var entity))
+                    {
+                        target.Add(entity);
+                    }
+                }
+            }
+
+            target.Sort(CompareEntities);
+        }
+
+        public bool IsEntityRendered(EntityId id)
+        {
+            if (!referencedChunksByEntityId.TryGetValue(id, out var chunks))
+            {
+                return false;
+            }
+
+            for (var index = 0; index < chunks.Length; index++)
+            {
+                if (runtime.IsEntityRenderingEnabled(chunks[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public void CopyMovingEntitiesTo(List<DynamicEntity> target)
         {
             if (target == null)
@@ -95,10 +176,25 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentOutOfRangeException(nameof(deltaTime));
             }
 
-            for (var index = 0; index < tickEntities.Count; index++)
+            tickBuffer.Clear();
+            foreach (var pair in runtime.ChunkRuntimes)
             {
-                var entity = tickEntities[index];
-                if (!runtime.IsSimulationActive(entity.AnchorCell))
+                if (pair.Value.State == ChunkState.Active
+                    && tickEntitiesByChunk.TryGetValue(
+                        pair.Key,
+                        out var chunkEntities))
+                {
+                    tickBuffer.AddRange(chunkEntities);
+                }
+            }
+
+            tickBuffer.Sort(CompareEntities);
+            for (var index = 0; index < tickBuffer.Count; index++)
+            {
+                var entity = tickBuffer[index];
+                if (!entitiesById.TryGetValue(entity.Id, out var registered)
+                    || !ReferenceEquals(registered, entity)
+                    || !runtime.IsSimulationActive(entity.AnchorCell))
                 {
                     continue;
                 }
@@ -635,9 +731,29 @@ namespace MiniCivilization.World.Runtime
 
             var current = entity.AnchorCell;
             var destination = entity.MoveTo;
+            var previousChunk = ToChunk(current);
+            var nextChunk = ToChunk(destination);
             RemoveEntityFromCell(entity.Id, current);
+            if (!previousChunk.Equals(nextChunk))
+            {
+                RemoveEntityChunkReferences(entity);
+                if (entity.RequiresTick)
+                {
+                    RemoveTickEntity(entity, previousChunk);
+                }
+            }
+
             world.MoveEntity(entity.Data, destination);
             AddEntityToCell(entity.Id, destination);
+            if (!previousChunk.Equals(nextChunk))
+            {
+                AddEntityChunkReferences(entity);
+                if (entity.RequiresTick)
+                {
+                    AddTickEntity(entity, nextChunk);
+                }
+            }
+
             entity.FinishMove();
             movingEntityIds.Remove(entity.Id);
             if (activeWayMoves.Remove(entity.Id, out var wayPlan))
@@ -714,7 +830,12 @@ namespace MiniCivilization.World.Runtime
             foreach (var pair in buildingWayLocations)
             {
                 if (!entitiesById.ContainsKey(pair.Key)
-                    || !graph.TryGetPosition(pair.Value, out _))
+                    || !entitiesById.TryGetValue(
+                        pair.Value.BuildingId,
+                        out var buildingEntity)
+                    || buildingEntity is not BuildingEntity building
+                    || (uint)pair.Value.LocalPointIndex
+                        >= building.Layout.WayPoints.Count)
                 {
                     removed.Add(pair.Key);
                 }
@@ -877,15 +998,19 @@ namespace MiniCivilization.World.Runtime
                     AddEntityToCell(entity.Id, entity.AnchorCell);
                 }
 
+                AddEntityChunkReferences(entity);
                 if (entity.RequiresTick)
                 {
-                    tickEntities.Add(entity);
-                    tickEntities.Sort(CompareEntities);
+                    AddTickEntity(entity, ToChunk(entity.AnchorCell));
                 }
             }
             catch
             {
-                tickEntities.Remove(entity);
+                RemoveEntityChunkReferences(entity, requireExisting: false);
+                RemoveTickEntity(
+                    entity,
+                    ToChunk(entity.AnchorCell),
+                    requireExisting: false);
                 entitiesById.Remove(entity.Id);
                 throw;
             }
@@ -893,7 +1018,12 @@ namespace MiniCivilization.World.Runtime
 
         private void RemoveRuntimeEntity(Entity entity)
         {
-            tickEntities.Remove(entity);
+            if (entity.RequiresTick)
+            {
+                RemoveTickEntity(entity, ToChunk(entity.AnchorCell));
+            }
+
+            RemoveEntityChunkReferences(entity);
             movingEntityIds.Remove(entity.Id);
             activeWayMoves.Remove(entity.Id);
             buildingWayLocations.Remove(entity.Id);
@@ -908,6 +1038,136 @@ namespace MiniCivilization.World.Runtime
 
             entitiesById.Remove(entity.Id);
         }
+
+        private void AddTickEntity(Entity entity, ChunkCoordinate coordinate)
+        {
+            if (!tickEntitiesByChunk.TryGetValue(coordinate, out var entities))
+            {
+                entities = new List<Entity>();
+                tickEntitiesByChunk.Add(coordinate, entities);
+            }
+
+            entities.Add(entity);
+            entities.Sort(CompareEntities);
+        }
+
+        private void RemoveTickEntity(
+            Entity entity,
+            ChunkCoordinate coordinate,
+            bool requireExisting = true)
+        {
+            if (!tickEntitiesByChunk.TryGetValue(coordinate, out var entities)
+                || !entities.Remove(entity))
+            {
+                if (requireExisting)
+                {
+                    throw new InvalidOperationException(
+                        $"Entity ID {entity.Id} is not indexed for Tick in Chunk {coordinate}.");
+                }
+
+                return;
+            }
+
+            if (entities.Count == 0)
+            {
+                tickEntitiesByChunk.Remove(coordinate);
+            }
+        }
+
+        private void AddEntityChunkReferences(Entity entity)
+        {
+            var chunks = ResolveReferencedChunks(entity);
+            referencedChunksByEntityId.Add(entity.Id, chunks);
+            for (var index = 0; index < chunks.Length; index++)
+            {
+                var coordinate = chunks[index];
+                if (!entityIdsByChunk.TryGetValue(coordinate, out var ids))
+                {
+                    ids = new HashSet<EntityId>();
+                    entityIdsByChunk.Add(coordinate, ids);
+                }
+
+                ids.Add(entity.Id);
+            }
+        }
+
+        private void RemoveEntityChunkReferences(
+            Entity entity,
+            bool requireExisting = true)
+        {
+            if (!referencedChunksByEntityId.Remove(entity.Id, out var chunks))
+            {
+                if (requireExisting)
+                {
+                    throw new InvalidOperationException(
+                        $"Entity ID {entity.Id} has no Chunk references.");
+                }
+
+                return;
+            }
+
+            for (var index = 0; index < chunks.Length; index++)
+            {
+                var coordinate = chunks[index];
+                if (!entityIdsByChunk.TryGetValue(coordinate, out var ids)
+                    || !ids.Remove(entity.Id))
+                {
+                    if (requireExisting)
+                    {
+                        throw new InvalidOperationException(
+                            $"Entity ID {entity.Id} is not referenced by Chunk {coordinate}.");
+                    }
+
+                    continue;
+                }
+
+                if (ids.Count == 0)
+                {
+                    entityIdsByChunk.Remove(coordinate);
+                }
+            }
+        }
+
+        private ChunkCoordinate[] ResolveReferencedChunks(Entity entity)
+        {
+            var chunks = new HashSet<ChunkCoordinate>();
+            if (entity is BuildingEntity building)
+            {
+                var layout = building.Layout;
+                for (var index = 0;
+                     index < layout.BuildingCells.Count;
+                     index++)
+                {
+                    chunks.Add(ToChunk(layout.ToWorld(
+                        building.Data,
+                        layout.BuildingCells[index].LocalOffset)));
+                }
+
+                for (var index = 0;
+                     index < layout.TerrainAnchorCells.Count;
+                     index++)
+                {
+                    chunks.Add(ToChunk(layout.ToWorld(
+                        building.Data,
+                        layout.TerrainAnchorCells[index].LocalOffset)));
+                }
+            }
+            else
+            {
+                chunks.Add(ToChunk(entity.AnchorCell));
+            }
+
+            var result = new ChunkCoordinate[chunks.Count];
+            chunks.CopyTo(result);
+            Array.Sort(result);
+            return result;
+        }
+
+        private ChunkCoordinate ToChunk(CellCoordinate cell) =>
+            WorldCoordinateUtility.ToChunk(
+                cell.X,
+                cell.Z,
+                world.ChunkSizeX);
 
         private void AddBuilding(BuildingEntity building)
         {
@@ -1148,7 +1408,7 @@ namespace MiniCivilization.World.Runtime
             bool wayTopologyChanged = false)
         {
             var uniqueCells = new HashSet<CellCoordinate>();
-            var chunks = new HashSet<ChunkCoordinate>();
+            var sections = new HashSet<ChunkSectionCoordinate>();
             for (var index = 0; index < affectedCells.Count; index++)
             {
                 var coordinate = affectedCells[index];
@@ -1157,18 +1417,18 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                chunks.Add(WorldCoordinateUtility.ToChunk(
+                sections.Add(WorldCoordinateUtility.ToChunkSection(
                     coordinate,
                     world.ChunkSizeX,
-                    world.ChunkSizeY));
+                    world.ChunkSectionSizeY));
             }
 
             var changedCells = new CellCoordinate[uniqueCells.Count];
             uniqueCells.CopyTo(changedCells);
             Array.Sort(changedCells);
-            var affectedChunks = new ChunkCoordinate[chunks.Count];
-            chunks.CopyTo(affectedChunks);
-            Array.Sort(affectedChunks, CompareChunks);
+            var affectedSections = new ChunkSectionCoordinate[sections.Count];
+            sections.CopyTo(affectedSections);
+            Array.Sort(affectedSections, CompareSections);
 
             var changeSet = new EntityChangeSet(
                 world,
@@ -1177,7 +1437,7 @@ namespace MiniCivilization.World.Runtime
                 CopyAndSort(removed),
                 CopyAndSort(moved),
                 changedCells,
-                affectedChunks,
+                affectedSections,
                 wayTopologyChanged);
             Changed?.Invoke(changeSet);
             return changeSet;
@@ -1195,9 +1455,9 @@ namespace MiniCivilization.World.Runtime
             return result;
         }
 
-        private static int CompareChunks(
-            ChunkCoordinate left,
-            ChunkCoordinate right)
+        private static int CompareSections(
+            ChunkSectionCoordinate left,
+            ChunkSectionCoordinate right)
         {
             var y = left.Y.CompareTo(right.Y);
             if (y != 0)

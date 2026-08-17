@@ -543,29 +543,29 @@ namespace MiniCivilization.World.Domain
         public override string ToString() => $"({X}, {Z})";
     }
 
-    public readonly struct ChunkColumnCoordinate :
-        IEquatable<ChunkColumnCoordinate>,
-        IComparable<ChunkColumnCoordinate>
+    public readonly struct ChunkCoordinate :
+        IEquatable<ChunkCoordinate>,
+        IComparable<ChunkCoordinate>
     {
         public readonly int X;
         public readonly int Z;
 
-        public ChunkColumnCoordinate(int x, int z)
+        public ChunkCoordinate(int x, int z)
         {
             X = x;
             Z = z;
         }
 
-        public int CompareTo(ChunkColumnCoordinate other)
+        public int CompareTo(ChunkCoordinate other)
         {
             var z = Z.CompareTo(other.Z);
             return z != 0 ? z : X.CompareTo(other.X);
         }
 
-        public bool Equals(ChunkColumnCoordinate other) =>
+        public bool Equals(ChunkCoordinate other) =>
             X == other.X && Z == other.Z;
         public override bool Equals(object obj) =>
-            obj is ChunkColumnCoordinate other && Equals(other);
+            obj is ChunkCoordinate other && Equals(other);
         public override int GetHashCode() => HashCode.Combine(X, Z);
         public override string ToString() => $"({X}, {Z})";
     }
@@ -595,22 +595,22 @@ namespace MiniCivilization.World.Domain
         public override string ToString() => Value.ToString();
     }
 
-    public readonly struct ChunkCoordinate :
-        IEquatable<ChunkCoordinate>,
-        IComparable<ChunkCoordinate>
+    public readonly struct ChunkSectionCoordinate :
+        IEquatable<ChunkSectionCoordinate>,
+        IComparable<ChunkSectionCoordinate>
     {
         public readonly int X;
         public readonly int Y;
         public readonly int Z;
 
-        public ChunkCoordinate(int x, int y, int z)
+        public ChunkSectionCoordinate(int x, int y, int z)
         {
             X = x;
             Y = y;
             Z = z;
         }
 
-        public int CompareTo(ChunkCoordinate other)
+        public int CompareTo(ChunkSectionCoordinate other)
         {
             var y = Y.CompareTo(other.Y);
             if (y != 0)
@@ -622,8 +622,8 @@ namespace MiniCivilization.World.Domain
             return z != 0 ? z : X.CompareTo(other.X);
         }
 
-        public bool Equals(ChunkCoordinate other) => X == other.X && Y == other.Y && Z == other.Z;
-        public override bool Equals(object obj) => obj is ChunkCoordinate other && Equals(other);
+        public bool Equals(ChunkSectionCoordinate other) => X == other.X && Y == other.Y && Z == other.Z;
+        public override bool Equals(object obj) => obj is ChunkSectionCoordinate other && Equals(other);
         public override int GetHashCode() => HashCode.Combine(X, Y, Z);
         public override string ToString() => $"({X}, {Y}, {Z})";
     }
@@ -657,7 +657,7 @@ namespace MiniCivilization.World.Domain
             return remainder < 0 ? remainder + divisor : remainder;
         }
 
-        public static ChunkColumnCoordinate ToChunkColumn(
+        public static ChunkCoordinate ToChunk(
             int cellX,
             int cellZ,
             int chunkCellCountXZ) =>
@@ -665,22 +665,22 @@ namespace MiniCivilization.World.Domain
                 FloorDivide(cellX, chunkCellCountXZ),
                 FloorDivide(cellZ, chunkCellCountXZ));
 
-        public static ChunkCoordinate ToChunk(
+        public static ChunkSectionCoordinate ToChunkSection(
             CellCoordinate cell,
             int chunkCellCountXZ,
-            int chunkCellCountY) =>
+            int chunkSectionCellCountY) =>
             new(
                 FloorDivide(cell.X, chunkCellCountXZ),
-                FloorDivide(cell.Y, chunkCellCountY),
+                FloorDivide(cell.Y, chunkSectionCellCountY),
                 FloorDivide(cell.Z, chunkCellCountXZ));
 
         public static LocalCellIndex ToLocalCellIndex(
             CellCoordinate cell,
             int chunkCellCountXZ,
-            int chunkCellCountY)
+            int chunkSectionCellCountY)
         {
             var localX = PositiveModulo(cell.X, chunkCellCountXZ);
-            var localY = PositiveModulo(cell.Y, chunkCellCountY);
+            var localY = PositiveModulo(cell.Y, chunkSectionCellCountY);
             var localZ = PositiveModulo(cell.Z, chunkCellCountXZ);
             return new LocalCellIndex(
                 localX
@@ -689,15 +689,15 @@ namespace MiniCivilization.World.Domain
         }
 
         public static CellCoordinate ToAbsoluteCell(
-            ChunkCoordinate chunk,
+            ChunkSectionCoordinate chunk,
             int localX,
             int localY,
             int localZ,
             int chunkCellCountXZ,
-            int chunkCellCountY)
+            int chunkSectionCellCountY)
         {
             if ((uint)localX >= chunkCellCountXZ
-                || (uint)localY >= chunkCellCountY
+                || (uint)localY >= chunkSectionCellCountY
                 || (uint)localZ >= chunkCellCountXZ)
             {
                 throw new ArgumentOutOfRangeException(nameof(localX));
@@ -705,7 +705,7 @@ namespace MiniCivilization.World.Domain
 
             return new CellCoordinate(
                 checked(chunk.X * chunkCellCountXZ + localX),
-                checked(chunk.Y * chunkCellCountY + localY),
+                checked(chunk.Y * chunkSectionCellCountY + localY),
                 checked(chunk.Z * chunkCellCountXZ + localZ));
         }
     }

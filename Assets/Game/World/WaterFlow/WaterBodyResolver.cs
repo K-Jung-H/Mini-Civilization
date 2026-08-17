@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
@@ -13,23 +14,98 @@ namespace MiniCivilization.World.WaterFlow
 
         internal static IReadOnlyList<WaterBody> Resolve(
             WorldData world,
-            SurfaceCache surfaceCache)
+            SurfaceCache surfaceCache) =>
+            Resolve(world, surfaceCache, null);
+
+        internal static IReadOnlyList<WaterBody> ResolvePrepared(
+            WorldRuntime runtime)
         {
+            if (runtime == null)
+            {
+                throw new ArgumentNullException(nameof(runtime));
+            }
+
+            var preparedChunks = new List<ChunkCoordinate>();
+            foreach (var pair in runtime.ChunkRuntimes)
+            {
+                if (runtime.IsChunkPrepared(pair.Key))
+                {
+                    preparedChunks.Add(pair.Key);
+                }
+            }
+
+            preparedChunks.Sort();
+            return Resolve(
+                runtime.Data,
+                runtime.SurfaceCache,
+                preparedChunks);
+        }
+
+        private static IReadOnlyList<WaterBody> Resolve(
+            WorldData world,
+            SurfaceCache surfaceCache,
+            IReadOnlyList<ChunkCoordinate> preparedChunks)
+        {
+            if (world == null)
+            {
+                throw new ArgumentNullException(nameof(world));
+            }
+
+            if (surfaceCache == null)
+            {
+                throw new ArgumentNullException(nameof(surfaceCache));
+            }
+
             var visited = new HashSet<CellColumnCoordinate>();
             var dryColumns = new HashSet<CellColumnCoordinate>();
             var wetSurfaceHeights =
                 new Dictionary<CellColumnCoordinate, SurfaceHeightData>();
+            var includedChunks = preparedChunks == null
+                ? null
+                : new HashSet<ChunkCoordinate>(preparedChunks);
             var result = new List<WaterBody>();
             var queue = new Queue<(int x, int z)>();
 
-            for (var z = 0; z < world.Size; z++)
-            for (var x = 0; x < world.Size; x++)
+            if (preparedChunks == null)
+            {
+                for (var z = 0; z < world.Size; z++)
+                for (var x = 0; x < world.Size; x++)
+                {
+                    ResolveFromColumn(x, z);
+                }
+            }
+            else
+            {
+                for (var chunkIndex = 0;
+                     chunkIndex < preparedChunks.Count;
+                     chunkIndex++)
+                {
+                    var chunk = preparedChunks[chunkIndex];
+                    var startX = chunk.X * world.ChunkSizeX;
+                    var startZ = chunk.Z * world.ChunkSizeZ;
+                    var endX = Math.Min(
+                        startX + world.ChunkSizeX,
+                        world.Size);
+                    var endZ = Math.Min(
+                        startZ + world.ChunkSizeZ,
+                        world.Size);
+                    for (var z = startZ; z < endZ; z++)
+                    for (var x = startX; x < endX; x++)
+                    {
+                        ResolveFromColumn(x, z);
+                    }
+                }
+            }
+
+            return result;
+
+            void ResolveFromColumn(int x, int z)
             {
                 var column = new CellColumnCoordinate(x, z);
                 if (visited.Contains(column)
                     || !TryGetWaterSurface(column, out _))
                 {
-                    continue;
+                    return;
                 }
 
                 var body = new WaterBody(result.Count + 1);
@@ -63,6 +139,16 @@ namespace MiniCivilization.World.WaterFlow
                             continue;
                         }
 
+                        if (includedChunks != null
+                            && !includedChunks.Contains(
+                                WorldCoordinateUtility.ToChunk(
+                                    nextX,
+                                    nextZ,
+                                    world.ChunkSizeX)))
+                        {
+                            continue;
+                        }
+
                         var nextColumn = new CellColumnCoordinate(nextX, nextZ);
                         if (visited.Contains(nextColumn)
                             || !TryGetWaterSurface(nextColumn, out _))
@@ -77,8 +163,6 @@ namespace MiniCivilization.World.WaterFlow
 
                 result.Add(body);
             }
-
-            return result;
 
             bool TryGetWaterSurface(
                 CellColumnCoordinate coordinate,

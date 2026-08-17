@@ -8,9 +8,9 @@ namespace MiniCivilization.World.Domain
             int seed,
             float cellSize,
             int chunkCellCountXZ,
-            int chunkCellCountY,
+            int chunkSectionCellCountY,
             int worldChunkCountXZ,
-            int worldChunkCountY,
+            int chunkSectionCountY,
             int renderChunksPerPatch,
             int roadMaxHeightSteps,
             float terrainScale,
@@ -44,8 +44,8 @@ namespace MiniCivilization.World.Domain
                     "Cell size must be finite and positive.");
             }
 
-            if (chunkCellCountXZ <= 0 || chunkCellCountY <= 0
-                || worldChunkCountXZ <= 0 || worldChunkCountY <= 0)
+            if (chunkCellCountXZ <= 0 || chunkSectionCellCountY <= 0
+                || worldChunkCountXZ <= 0 || chunkSectionCountY <= 0)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(chunkCellCountXZ),
@@ -71,9 +71,9 @@ namespace MiniCivilization.World.Domain
             Seed = seed;
             CellSize = cellSize;
             ChunkCellCountXZ = chunkCellCountXZ;
-            ChunkCellCountY = chunkCellCountY;
+            ChunkSectionCellCountY = chunkSectionCellCountY;
             WorldChunkCountXZ = worldChunkCountXZ;
-            WorldChunkCountY = worldChunkCountY;
+            ChunkSectionCountY = chunkSectionCountY;
             RenderChunksPerPatch = renderChunksPerPatch;
             RoadMaxHeightSteps = roadMaxHeightSteps;
             TerrainScale = terrainScale;
@@ -116,13 +116,13 @@ namespace MiniCivilization.World.Domain
         public float CellSize { get; }
         public float HeightStep => CellSize / WorldGrid.HeightStepsPerCell;
         public int ChunkCellCountXZ { get; }
-        public int ChunkCellCountY { get; }
+        public int ChunkSectionCellCountY { get; }
         public int WorldChunkCountXZ { get; }
-        public int WorldChunkCountY { get; }
+        public int ChunkSectionCountY { get; }
         public int RenderChunksPerPatch { get; }
         public int RoadMaxHeightSteps { get; }
         public int WorldSize => checked(ChunkCellCountXZ * WorldChunkCountXZ);
-        public int WorldHeight => checked(ChunkCellCountY * WorldChunkCountY);
+        public int WorldHeight => checked(ChunkSectionCellCountY * ChunkSectionCountY);
         public int RenderPatchSizeXZ => checked(ChunkCellCountXZ * RenderChunksPerPatch);
 
         public float TerrainScale { get; }

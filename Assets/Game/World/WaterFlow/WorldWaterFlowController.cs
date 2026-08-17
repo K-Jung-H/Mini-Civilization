@@ -39,7 +39,7 @@ namespace MiniCivilization.World.WaterFlow
             if (boundWorld == null
                 || State == null
                 || boundRuntime?.WaterFlowResolver == null
-                || !boundRuntime.WaterFlowResolver.HasWork)
+                || !boundRuntime.WaterFlowResolver.HasRunnableWork)
             {
                 simulationAccumulator = 0f;
                 return;
@@ -88,9 +88,8 @@ namespace MiniCivilization.World.WaterFlow
             if (result.HasTopologyChanges
                 || waterBodyTopologyRefreshRequested)
             {
-                State.ReplaceWaterBodies(WaterBodyResolver.Resolve(
-                    boundWorld,
-                    boundRuntime.SurfaceCache));
+                State.ReplaceWaterBodies(
+                    WaterBodyResolver.ResolvePrepared(boundRuntime));
             }
             else if (result.HasRenderChanges
                 || waterBodyMetricsRefreshRequested)
@@ -124,6 +123,7 @@ namespace MiniCivilization.World.WaterFlow
 
             boundRuntime = runtime;
             boundWorld = runtime.Data;
+            boundRuntime.SimulationStateChanged += OnSimulationStateChanged;
             activeParameters = CreateParameters();
             if (runtime.WaterFlowState == null
                 || runtime.WaterFlowResolver == null)
@@ -142,6 +142,11 @@ namespace MiniCivilization.World.WaterFlow
 
         public void Unbind()
         {
+            if (boundRuntime != null)
+            {
+                boundRuntime.SimulationStateChanged -= OnSimulationStateChanged;
+            }
+
             boundWorld = null;
             boundRuntime = null;
             activeParameters = default;
@@ -152,6 +157,21 @@ namespace MiniCivilization.World.WaterFlow
             simulationAccumulator = 0f;
             LastAppliedChangeId = WorldChangeId.None;
             StateChanged?.Invoke(null);
+        }
+
+        private void OnSimulationStateChanged()
+        {
+            if (boundRuntime == null
+                || boundWorld == null
+                || boundRuntime.WaterFlowResolver == null)
+            {
+                return;
+            }
+
+            boundRuntime.WaterFlowResolver.OnSimulationSetChanged(
+                boundWorld,
+                State);
+            simulationAccumulator = 0f;
         }
 
         public void ApplyChanges(WorldChangeSet changeSet)
@@ -220,7 +240,7 @@ namespace MiniCivilization.World.WaterFlow
                 result.LogicalChangedCells);
             var renderCells = ToSortedArray(
                 result.RenderChangedCells);
-            var affectedChunks = BuildAffectedChunks(
+            var affectedSections = BuildAffectedSections(
                 renderCells,
                 changedColumns);
             var changeTypes = WorldChangeType.None;
@@ -245,7 +265,7 @@ namespace MiniCivilization.World.WaterFlow
                 changeTypes,
                 logicalCells,
                 changedColumns,
-                affectedChunks,
+                affectedSections,
                 BuildBounds(renderCells),
                 rebuildNavigationColumns: false,
                 rebuildWaterDistances: result.HasTopologyChanges
@@ -254,20 +274,20 @@ namespace MiniCivilization.World.WaterFlow
             ChangeCommitted?.Invoke(changeSet);
         }
 
-        private ChunkCoordinate[] BuildAffectedChunks(
+        private ChunkSectionCoordinate[] BuildAffectedSections(
             CellCoordinate[] cells,
             CellColumnCoordinate[] columns)
         {
-            var chunks = new HashSet<ChunkCoordinate>();
+            var sections = new HashSet<ChunkSectionCoordinate>();
             for (var index = 0; index < cells.Length; index++)
             {
                 var cell = cells[index];
                 var minX = Math.Max(0, cell.X - 1) / boundWorld.ChunkSizeX;
                 var maxX = Math.Min(boundWorld.Size - 1, cell.X + 1)
                     / boundWorld.ChunkSizeX;
-                var minY = Math.Max(0, cell.Y - 1) / boundWorld.ChunkSizeY;
+                var minY = Math.Max(0, cell.Y - 1) / boundWorld.ChunkSectionSizeY;
                 var maxY = Math.Min(boundWorld.Height - 1, cell.Y + 1)
-                    / boundWorld.ChunkSizeY;
+                    / boundWorld.ChunkSectionSizeY;
                 var minZ = Math.Max(0, cell.Z - 1) / boundWorld.ChunkSizeZ;
                 var maxZ = Math.Min(boundWorld.Size - 1, cell.Z + 1)
                     / boundWorld.ChunkSizeZ;
@@ -275,16 +295,16 @@ namespace MiniCivilization.World.WaterFlow
                 for (var chunkZ = minZ; chunkZ <= maxZ; chunkZ++)
                 for (var chunkX = minX; chunkX <= maxX; chunkX++)
                 {
-                    chunks.Add(new ChunkCoordinate(chunkX, chunkY, chunkZ));
+                    sections.Add(new ChunkSectionCoordinate(chunkX, chunkY, chunkZ));
                 }
             }
 
-            if (chunks.Count == 0)
+            if (sections.Count == 0)
             {
                 for (var index = 0; index < columns.Length; index++)
                 {
                     var column = columns[index];
-                    chunks.Add(new ChunkCoordinate(
+                    sections.Add(new ChunkSectionCoordinate(
                         WorldCoordinateUtility.FloorDivide(
                             column.X,
                             boundWorld.ChunkSizeX),
@@ -295,8 +315,8 @@ namespace MiniCivilization.World.WaterFlow
                 }
             }
 
-            var result = new ChunkCoordinate[chunks.Count];
-            chunks.CopyTo(result);
+            var result = new ChunkSectionCoordinate[sections.Count];
+            sections.CopyTo(result);
             return result;
         }
 

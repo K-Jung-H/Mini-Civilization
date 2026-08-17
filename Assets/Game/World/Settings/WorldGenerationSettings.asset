@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldGenerationSettings
   cellSize: 10
   chunkCellCountXZ: 8
-  chunkCellCountY: 8
+  chunkSectionCellCountY: 8
   worldChunkCountXZ: 16
-  worldChunkCountY: 4
+  chunkSectionCountY: 4
   renderChunksPerPatch: 1
   roadMaxHeightSteps: 5
   terrainScale: 0.09

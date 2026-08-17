@@ -10,43 +10,46 @@
 
 ## 현재 진행 상태
 
-기준일: 2026-08-16
+기준일: 2026-08-17
 
 | 단계 | 상태 | 현재 적용 결과 |
 |---|---|---|
 | 0. 전환 기준 고정 | 완료 | 이 문서의 확정 원칙과 제외 범위를 구현 기준으로 사용한다. |
 | 1. 좌표와 인덱스 기반 교체 | 완료·테스트 통과 | signed Chunk 좌표, 음수 좌표 변환, Local Cell 인덱스와 Y 범위 분리를 적용했다. |
-| 2. WorldChunkColumn과 희소 Y Chunk | 완료·테스트 통과 | `WorldData`를 Column Dictionary로 교체하고, 비어 있는 Y Chunk는 할당하지 않도록 적용했다. |
+| 2. Chunk와 희소 ChunkSection | 완료·테스트 통과 | `WorldData`를 Chunk Dictionary로 교체하고, 비어 있는 Y Section은 할당하지 않도록 적용했다. |
 | 3. CellBiome과 EnvironmentData 제거 | 완료·테스트 통과 | `CellBiome ushort`를 적용하고 `EnvironmentData`와 임시 Biome Edit 경로를 제거했다. |
-| 4. Column Runtime 상태와 스트리밍 중심 | 완료·테스트 통과 | `Unloaded → Preparing → Rendered ↔ Active`, 교체 가능한 Target, Render·Simulation 반경을 적용했다. |
+| 4. Chunk Runtime 상태와 스트리밍 중심 | 완료·테스트 통과 | `Unloaded → Preparing → Ready ↔ Active`, 교체 가능한 Target과 반경 기반 상태 전환을 적용했다. |
 | 5. 유한 Bounds Render 스트리밍과 Pool | 완료·테스트 통과 | Render Patch Dictionary와 `WorldRenderPatchView` Pool을 적용하고 전체 View 배열을 제거했다. |
-| 6. Chunk별 Cache와 경계 갱신 | 완료·테스트 통과 | Surface·Navigation·Exposure Cache를 준비된 Column 단위로 관리하고 준비·해제 시 경계를 갱신한다. |
-| 7~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
+| 6. Chunk별 Cache와 경계 갱신 | 완료·테스트 통과 | Surface·Navigation·Exposure Cache를 준비된 Chunk 단위로 관리하고 준비·해제 시 경계를 갱신한다. |
+| 7. Entity·Building·Road/Way 스트리밍 | 완료·테스트 통과 | Minecraft 용어 통일, Entity 소유·Tick·렌더 범위, 다중 Chunk Building 참조, 준비된 Chunk의 Way Graph를 적용했다. |
+| 8. Water 스트리밍 | 구현 완료·직접 테스트 필요 | Chunk별 Frontier 소유, Active 범위 실행, 비활성 경계 보류, 준비된 Chunk 한정 WaterBody 해석을 적용했다. |
+| 9~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
 
 현재 런타임 범위는 다음과 같다.
 
 - 유한 월드의 `WorldData`는 아직 생성 시 전체 범위를 만든다. 필요한 범위만 생성하는 구조는 9단계에서 적용한다.
 - 렌더 객체와 Runtime Cache는 Target 반경에 따라 준비·반환된다.
-- Entity Tick은 Active 범위에만 적용된다.
-- Water는 기존 전체 파동 단위 확산을 유지한다. 일부 Cell만 필터링하면 확산 형태와 Mesh 결과가 달라지므로, Column별 Frontier와 경계 상태를 갖추는 8단계에서 Simulation 범위를 적용한다.
-- Cache가 없는 Column의 Cell 사실은 `WorldData`에서 직접 조회하며, Unloaded 영역을 Empty 또는 막힌 Cell로 해석하지 않는다.
+- Entity Controller와 Visual은 EntityRenderRadius에만 유지되고, Entity Tick은 Active 범위에만 적용된다.
+- Water Frontier는 Chunk 좌표별로 분리하고 Active Chunk의 처리 가능한 Cell만 파동에 참여시킨다. 파동의 Stage와 Commit은 전역 Resolver가 한 번에 처리해 기존 확산 결과의 원자성을 유지한다.
+- Cache가 없는 Chunk의 Cell 사실은 `WorldData`에서 직접 조회하며, Unloaded 영역을 Empty 또는 막힌 Cell로 해석하지 않는다.
 - 런타임 전체 Cache `RebuildAll` 경로는 제거했다. 생성 후보 검증용 독립 Preview는 런타임 Cache 스트리밍 대상이 아니다.
-- 1~6단계의 직접 빌드·플레이 테스트가 통과했다. Save/Load는 현재 테스트 범위에서 제외한다.
+- 1~7단계의 직접 빌드·플레이 테스트가 통과했다. 8단계는 코드 적용과 컴파일 검증을 완료했으며 직접 플레이 테스트가 필요하다. Save/Load는 현재 테스트 범위에서 제외한다.
 
 ## 확정 원칙
 
 - X/Z 좌표는 무한하며 음수 좌표를 허용한다.
-- Y 높이와 Y Chunk 수는 현재처럼 고정한다.
-- Chunk `(0,0,0)`은 월드 원점 `(0,0,0)`에서 시작한다.
+- Y 높이와 ChunkSection 수는 현재처럼 고정한다.
+- Chunk `(0,0)`과 ChunkSection `(0,0,0)`은 월드 원점 `(0,0,0)`에서 시작한다.
 - 모든 생성 결과는 `Seed + GenerationSettings + 절대 XYZ 좌표`로 결정한다.
 - Chunk 생성·로드 순서와 주변 Chunk 활성 여부가 생성 결과를 바꾸면 안 된다.
-- 같은 X/Z의 세로 `ChunkData`는 하나의 `WorldChunkColumn`이 관리한다.
-- 완전히 빈 Y Chunk의 `ChunkData`는 생성하지 않는다.
+- 같은 X/Z의 세로 `ChunkSection`은 하나의 `Chunk`가 관리한다.
+- 완전히 빈 Y Section은 생성하지 않는다.
 - Unloaded 영역은 Empty Cell로 해석하지 않는다.
 - `Resident` 상태는 사용하지 않는다.
-- `Rendered`는 데이터·Cache·표현 준비 완료 상태다.
-- `Active`는 Rendered 상태에 Entity·Water 게임 로직 실행이 추가된 상태다.
-- `SimulationRadius`는 `RenderRadius`보다 클 수 없다.
+- `Ready`는 데이터·Cache 준비 완료 상태다.
+- Terrain과 Entity 표현 여부는 Ready 상태와 별도 플래그로 관리한다.
+- `Active`는 Ready 상태에 Entity·Water 게임 로직 실행이 추가된 상태다.
+- RenderRadius, EntityRenderRadius, SimulationRadius는 서로 크기 순서를 강제하지 않는다.
 - Render 범위 안이더라도 Simulation 범위 밖이면 Entity와 Water를 정지한다.
 - Simulation 중지 시간에 대한 일괄 보정은 추가하지 않는다.
 - 초기 스트리밍 기준은 Main Camera이며, 교체 가능한 `Transform` 참조로 관리한다.
@@ -75,7 +78,7 @@ Chunk X= 1 : Cell X= 16~31, World X= 160~320
 
 음수 좌표의 Chunk와 Local Cell 계산에는 0 방향 정수 나눗셈이 아니라 바닥 나눗셈을 사용한다.
 
-월드 Cell은 `CellCoordinate`, X/Z Chunk 열은 `ChunkColumnCoordinate`, Chunk 내부 Cell은 `LocalCellIndex`로 식별한다. `World.Size`를 이용해 월드 전체를 하나의 `int`로 인코딩하는 방식은 제거한다.
+월드 Cell은 `CellCoordinate`, X/Z Chunk는 `ChunkCoordinate`, XYZ ChunkSection은 `ChunkSectionCoordinate`, Section 내부 Cell은 `LocalCellIndex`로 식별한다. `World.Size`를 이용해 월드 전체를 하나의 `int`로 인코딩하는 방식은 제거한다.
 
 ## 데이터 구조
 
@@ -87,32 +90,32 @@ WorldMetadata
 └─ NextEntityId
 
 WorldData
-└─ LoadedColumns
-   └─ Dictionary<ChunkColumnCoordinate, WorldChunkColumn>
+└─ LoadedChunks
+   └─ Dictionary<ChunkCoordinate, Chunk>
 ```
 
-### WorldChunkColumn
+### Chunk
 
-`WorldChunkColumn`은 같은 X/Z를 공유하는 세로 `ChunkData`와 Entity 원본을 하나의 스트리밍 단위로 관리하는 컨테이너다.
+`Chunk`은 같은 X/Z를 공유하는 세로 `ChunkSection`와 Entity 원본을 하나의 스트리밍 단위로 관리하는 컨테이너다.
 
 ```text
-WorldChunkColumn
+Chunk
 ├─ Coordinate X/Z
-├─ ChunkData?[] ChunksByY
+├─ ChunkSection?[] SectionsByY
 └─ EntityData[]
 ```
 
-- `WorldChunkColumn` 자체가 `LoadedColumns`에 없으면 Unloaded다.
-- Preparing 중인 Column은 아직 Cell 조회 결과로 사용하지 않는다.
-- Rendered 또는 Active Column에서 `ChunksByY[y] == null`이면 해당 Y Chunk는 생성 결과가 완전히 비어 있음이 확정된 상태다.
-- Terrain·Water·Road 등 Cell 사실 데이터가 처음 기록될 때 해당 Y 슬롯에 `ChunkData`를 동적으로 생성한다.
-- Entity는 CellData가 아니므로 Entity만 존재한다는 이유로 빈 `ChunkData`를 생성하지 않는다.
-- `ChunkData`의 모든 Cell이 다시 default가 되면 해당 Y 슬롯을 비울 수 있다.
+- `Chunk` 자체가 `LoadedChunks`에 없으면 Unloaded다.
+- Preparing 중인 Chunk는 아직 Cell 조회 결과로 사용하지 않는다.
+- Ready 또는 Active Chunk에서 `SectionsByY[y] == null`이면 해당 Y Section은 생성 결과가 완전히 비어 있음이 확정된 상태다.
+- Terrain·Water·Road 등 Cell 사실 데이터가 처음 기록될 때 해당 Y 슬롯에 `ChunkSection`을 동적으로 생성한다.
+- Entity는 CellData가 아니므로 Entity만 존재한다는 이유로 빈 `ChunkSection`을 생성하지 않는다.
+- `ChunkSection`의 모든 Cell이 다시 default가 되면 해당 Y 슬롯을 비울 수 있다.
 
-### ChunkData와 CellData
+### ChunkSection과 CellData
 
 ```text
-ChunkData
+ChunkSection
 └─ CellData[]
 
 CellData
@@ -150,24 +153,24 @@ CellBiome
 - `WaterType`은 런타임에 변경 가능한 현재 물 사실이고, `CellBiome.Water`는 최종 초기 생성 구조에서 고정된 수역 지역 분류다.
 - 생성 후 Terrain 편집이나 Water 확산·후퇴가 CellBiome을 자동 변경하지 않는다.
 
-완전히 빈 Y Chunk에는 `CellData`와 CellBiome 메모리를 할당하지 않는다. 빈 Cell의 바이옴 조회가 필요하면 Seed와 절대 좌표를 사용하는 생성 조회 경로를 사용하며, Unloaded Column은 조회하지 않고 준비를 요청한다.
+완전히 빈 Y Section에는 `CellData`와 CellBiome 메모리를 할당하지 않는다. 빈 Cell의 바이옴 조회가 필요하면 Seed와 절대 좌표를 사용하는 생성 조회 경로를 사용하며, Unloaded Chunk는 조회하지 않고 준비를 요청한다.
 
 ## 런타임 구조와 상태
 
 ```text
 WorldRuntime
-└─ LoadedColumnRuntimes
-   └─ Dictionary<ChunkColumnCoordinate, WorldChunkColumnRuntime>
+└─ LoadedChunkRuntimes
+   └─ Dictionary<ChunkCoordinate, ChunkRuntime>
 
-WorldChunkColumnRuntime
-├─ WorldChunkColumn
+ChunkRuntime
+├─ Chunk
 ├─ SurfaceCache
 ├─ NavigationCache
 ├─ WaterRuntime
 └─ State
 ```
 
-전체 월드 크기의 Surface·Navigation·Water 배열을 만들지 않는다. Cache는 준비된 Column 단위로 소유하며 이웃 Column이 준비되거나 해제될 때 경계만 갱신한다.
+전체 월드 크기의 Surface·Navigation·Water 배열을 만들지 않는다. Cache는 준비된 Chunk 단위로 소유하며 이웃 Chunk가 준비되거나 해제될 때 경계만 갱신한다.
 
 ### 상태
 
@@ -180,14 +183,13 @@ Preparing
 → Cache 계산
 → Mesh 준비
 
-Rendered
+Ready
 → 데이터와 Cache 준비 완료
-→ Terrain·Water·Road Mesh 표시
-→ Entity Controller와 Visual 표시
-→ 게임 로직은 정지 가능
+→ Terrain·Entity 렌더 여부는 각각 별도 플래그
+→ 게임 로직은 정지
 
 Active
-→ Rendered 상태 포함
+→ Ready 상태 포함
 → Entity Tick 실행
 → Water Simulation 실행
 ```
@@ -195,10 +197,10 @@ Active
 상태 전환은 다음과 같다.
 
 ```text
-Unloaded → Preparing → Rendered ↔ Active → Rendered → Unloaded
+Unloaded → Preparing → Ready ↔ Active → Ready → Unloaded
 ```
 
-저장이 구현된 뒤 Dirty Column은 Unloaded 전에 새 Chunk 저장 경로를 통과한다. 저장 구현 전에는 이전 저장 구조를 임시로 연결하거나 호환 계층을 만들지 않는다.
+저장이 구현된 뒤 Dirty Chunk는 Unloaded 전에 새 Chunk 저장 경로를 통과한다. 저장 구현 전에는 이전 저장 구조를 임시로 연결하거나 호환 계층을 만들지 않는다.
 
 ## 스트리밍 기준과 범위
 
@@ -206,6 +208,7 @@ Unloaded → Preparing → Rendered ↔ Active → Rendered → Unloaded
 WorldStreamingController
 ├─ Transform StreamingTarget
 ├─ RenderRadius
+├─ EntityRenderRadius
 └─ SimulationRadius
 ```
 
@@ -216,14 +219,22 @@ WorldStreamingController
 
 ```text
 Render 범위
-→ Column을 Rendered 이상으로 유지
+→ TerrainRenderingEnabled 유지
+
+Entity Render 범위
+→ 준비된 Chunk의 Entity Controller와 Visual 유지
 
 Simulation 범위
-→ Column을 Active로 유지
+→ Chunk을 Active로 유지
 
 Render 범위 밖
-→ Render View 반환과 Column 해제 대상으로 전환
+→ Terrain Render View 반환
+
+세 범위 모두 밖
+→ Chunk 해제 대상으로 전환
 ```
+
+세 범위의 합집합에 포함된 Chunk는 데이터와 Cache를 Ready 이상으로 유지한다. Terrain과 Entity는 각자 자신의 반경만 사용하고, Active 범위 밖의 Entity는 Tick하지 않는다. 세 범위 모두 밖인 Chunk만 해제한다.
 
 범위 값은 런타임 설정이며 월드 생성 사실 데이터에 포함하지 않는다.
 
@@ -232,7 +243,7 @@ Render 범위 밖
 데이터 스트리밍 단위와 렌더 Pool 단위를 분리한다.
 
 ```text
-WorldChunkColumn
+Chunk
 → 데이터·Cache·상태 단위
 
 RenderPatch
@@ -246,9 +257,9 @@ WorldRenderer
 └─ WorldRenderPatchView Pool
 ```
 
-Column 준비가 끝나면 필요한 RenderPatch를 계산하고 Pool에서 View를 받아 Mesh와 Road Mask를 구성한다. Render 범위를 벗어나면 View를 비활성화해 Pool로 반환한다. Pool 내부 View는 Chunk 상태가 아니다.
+Chunk 준비가 끝나면 필요한 RenderPatch를 계산하고 Pool에서 View를 받아 Mesh와 Road Mask를 구성한다. Render 범위를 벗어나면 View를 비활성화해 Pool로 반환한다. Pool 내부 View는 Chunk 상태가 아니다.
 
-`RenderChunksPerPatch > 1`이면 Patch에 필요한 모든 Column을 준비한 뒤 Mesh를 구성한다. 인접 정보가 나중에 준비되면 영향 경계 Patch만 다시 생성한다.
+`RenderChunksPerPatch > 1`이면 Patch에 필요한 모든 Chunk을 준비한 뒤 Mesh를 구성한다. 인접 정보가 나중에 준비되면 영향 경계 Patch만 다시 생성한다.
 
 ## 생성 Pipeline
 
@@ -260,9 +271,9 @@ Chunk 요청
 → 계획 검증과 실패 결과 롤백
 → 최종 Terrain·Water 구조 확정
 → CellBiome 확정
-→ 필요한 Y ChunkData만 조립
-→ Column Cache 준비
-→ Rendered
+→ 필요한 Y Section만 조립
+→ Chunk Cache 준비
+→ Ready
 ```
 
 ### 생성 계약
@@ -303,25 +314,28 @@ Road와 Building Way의 저장 사실은 이웃이 Unloaded라는 이유로 제�
 
 ```text
 일반 Entity
-→ Center/Anchor Cell이 속한 WorldChunkColumn이 원본 소유
+→ Center/Anchor Cell이 속한 Chunk가 원본 소유
 
 Dynamic Entity
-→ Chunk 경계를 넘으면 소유 Column 이전
+→ X/Z Chunk 경계를 넘으면 소유 Chunk 이전
+→ 같은 Chunk 안의 Y ChunkSection 이동은 소유권을 바꾸지 않음
 
 다중 Chunk Building
-→ Center가 속한 Column이 EntityData 원본 소유
-→ 다른 Column은 점유 참조만 보유
+→ Center가 속한 Chunk가 EntityData 원본 소유
+→ BuildingCells와 TerrainAnchorCells가 걸친 다른 Chunk는 참조만 보유
 ```
 
-Entity 때문에 빈 `ChunkData`를 만들지 않는다. Rendered 범위에서는 Controller와 Visual을 유지하지만 Simulation 범위 밖에서는 Tick하지 않는다.
+`WorldData`의 Chunk가 EntityData 원본을 소유하고 `EntityRuntime`은 조회·Tick·렌더 참조 Index를 관리한다. Active Chunk별 Tick 목록을 사용하므로 전체 Entity를 매 프레임 순회하지 않는다.
+
+Entity 때문에 빈 `ChunkSection`을 만들지 않는다. EntityRender 범위에서는 Controller와 Visual을 유지하지만 Simulation 범위 밖에서는 Tick하지 않는다. 다중 Chunk Building은 참조 Chunk 중 하나라도 EntityRender 범위이면 하나의 Controller만 표시한다.
 
 ## Water 동작
 
-- Rendered이지만 Active가 아닌 Column의 Water Simulation은 정지한다.
+- Ready이지만 Active가 아닌 Chunk의 Water Simulation은 정지한다.
 - Active에서 벗어난 시간을 한 번에 보정하지 않는다.
 - 다시 Active가 되면 정지한 상태에서 재개한다.
 - Unloaded 이웃으로 진행해야 하는 Flow는 이웃이 없다고 확정하지 않고 처리 대상을 보류한다.
-- `WaterFlowFrontier`는 `WorldChunkColumn`의 Cell 사실 데이터가 아니라 `WaterRuntime`의 진행 상태다.
+- `WaterFlowFrontier`는 `Chunk`의 Cell 사실 데이터가 아니라 `WaterRuntime`의 진행 상태다.
 - Water 진행 상태의 새 저장 형식은 Water 스트리밍 동작을 확인한 후 최종 저장 단계에서 결정한다.
 
 ## 저장과 Floating Origin
@@ -370,9 +384,9 @@ Dirty Chunk Unload
 
 적용:
 
-- signed `ChunkColumnCoordinate`와 Local Cell 변환 추가
+- signed `ChunkCoordinate`와 Local Cell 변환 추가
 - 음수 좌표 바닥 나눗셈 적용
-- 전역 `WorldIndex` 의존을 `CellCoordinate` 또는 `ChunkColumnCoordinate + LocalCellIndex`로 교체
+- 전역 `WorldIndex` 의존을 `CellCoordinate` 또는 `ChunkCoordinate + LocalCellIndex`로 교체
 - ChangeSet, Entity 공간 Index, Road/Way, Water 처리에 전역 Size 인덱스를 사용하지 않도록 전환
 - Y 유효 범위 검사를 X/Z Bounds 검사와 분리
 
@@ -381,22 +395,22 @@ Dirty Chunk Unload
 - 양수·음수 Cell이 정확한 Chunk와 Local Cell로 변환된다.
 - 새 스트리밍 핵심 코드가 `World.Size`로 Cell을 인코딩하지 않는다.
 
-### 2. WorldChunkColumn과 희소 Y Chunk 적용
+### 2. Chunk와 희소 ChunkSection 적용
 
 적용:
 
-- `WorldData`의 전체 3차원 Chunk 배열을 Loaded Column Dictionary 구조로 교체
-- `WorldChunkColumn`과 nullable `ChunksByY` 적용
-- Unloaded Column과 Known Empty Y Chunk 구분
-- Cell 쓰기 시 빈 Y Chunk 동적 생성
-- 모든 Cell이 default인 Y Chunk 해제 경로 구성
-- EntityData의 Column 소유 위치 확정
+- `WorldData`의 전체 3차원 Chunk 배열을 Loaded Chunk Dictionary 구조로 교체
+- `Chunk`와 nullable `SectionsByY` 적용
+- Unloaded Chunk와 Known Empty Y Section 구분
+- Cell 쓰기 시 빈 Y Section 동적 생성
+- 모든 Cell이 default인 Y Section 해제 경로 구성
+- EntityData의 Chunk 소유 위치 확정
 
 완료 기준:
 
-- 완전히 빈 공중 Y Chunk가 `ChunkData`를 할당하지 않는다.
-- 기존 Terrain·Water·Road Cell 결과를 Column 구조에서 동일하게 조회한다.
-- Entity만 존재하는 공중 영역이 빈 `ChunkData`를 생성하지 않는다.
+- 완전히 빈 공중 Y Section이 `ChunkSection`을 할당하지 않는다.
+- 기존 Terrain·Water·Road Cell 결과를 Chunk 구조에서 동일하게 조회한다.
+- Entity만 존재하는 공중 영역이 빈 `ChunkSection`을 생성하지 않는다.
 
 ### 3. CellBiome과 EnvironmentData 제거
 
@@ -416,22 +430,21 @@ Dirty Chunk Unload
 - Desert-River, Snow-Sea, Cave-Pond 같은 조합을 Cell에서 조회한다.
 - Terrain·Water 런타임 변경이 고정 CellBiome을 자동 변경하지 않는다.
 
-### 4. Column Runtime 상태와 스트리밍 중심 적용
+### 4. Chunk Runtime 상태와 스트리밍 중심 적용
 
 적용:
 
-- `WorldChunkColumnRuntime` 도입
-- `Unloaded → Preparing → Rendered ↔ Active` 상태 전환 적용
+- `ChunkRuntime` 도입
+- `Unloaded → Preparing → Ready ↔ Active` 상태 전환 적용
 - 교체 가능한 `StreamingTarget Transform` 적용
 - 미연결 시 Main Camera 사용
 - 가변 RenderRadius와 SimulationRadius 적용
-- `SimulationRadius <= RenderRadius` 검증
 
 완료 기준:
 
-- Target 이동에 따라 필요한 Column 상태가 변한다.
-- Render 범위 안·Simulation 범위 밖 Column은 표시되지만 Entity가 정지한다.
-- Water의 Simulation 범위 제한은 Column별 Frontier와 경계 상태를 적용하는 8단계에서 처리한다.
+- Target 이동에 따라 필요한 Chunk 상태가 변한다.
+- Entity Render 범위 안·Simulation 범위 밖 Chunk는 Entity가 표시되지만 Tick하지 않는다.
+- Water는 Simulation 범위의 Active Chunk만 갱신하고, 비활성 Chunk와 맞닿은 경계 Cell은 이웃 활성화 전까지 Frontier에 보류한다.
 - Target Transform을 교체해도 스트리밍 로직을 수정할 필요가 없다.
 
 ### 5. 유한 Bounds Render 스트리밍과 Pool 적용
@@ -455,49 +468,56 @@ Dirty Chunk Unload
 
 적용:
 
-- 전체 월드 SurfaceCache·NavigationCache·WorldExposureCache를 Column 단위로 분리
-- Preparing 과정에서 해당 Column Cache 구성
-- 이웃 Column 준비·해제 시 경계 Cell과 영향 Patch만 갱신
+- 전체 월드 SurfaceCache·NavigationCache·WorldExposureCache를 Chunk 단위로 분리
+- Preparing 과정에서 해당 Chunk Cache 구성
+- 이웃 Chunk 준비·해제 시 경계 Cell과 영향 Patch만 갱신
 - Unloaded 이웃을 Empty로 판정하는 질의 제거
-- Cache가 없는 Column의 사실 데이터는 WorldData에서 직접 조회하고 Cache에 보관하지 않음
+- Cache가 없는 Chunk의 사실 데이터는 WorldData에서 직접 조회하고 Cache에 보관하지 않음
 - Edit ChangeSet을 Chunk 좌표와 Local 범위 기준으로 적용
 
 완료 기준:
 
-- 전체 Cache `RebuildAll` 없이 Column 활성화와 Edit가 반영된다.
+- 전체 Cache `RebuildAll` 없이 Chunk 활성화와 Edit가 반영된다.
 - Chunk 경계의 Shoulder·Corner·Navigation 결과가 이웃 준비 후 일치한다.
 
 ### 7. Entity·Building·Road/Way 스트리밍 적용
 
 적용:
 
-- Entity 원본의 소유 Column 등록
-- Dynamic Entity의 Chunk 경계 이동 시 소유권 이전
-- 다중 Chunk Building의 원본 소유와 점유 참조 분리
-- Rendered 범위 Entity Controller 표시, Active 범위 Entity Tick 적용
-- Road와 Building Way의 경계 연결 보류·재연결 적용
+- `WorldChunkColumn → Chunk`, `ChunkData → ChunkSection`으로 Minecraft 용어를 먼저 통일
+- Entity 원본의 소유 Chunk와 참조 Chunk Index 등록
+- Dynamic Entity의 X/Z Chunk 경계 이동 시 원본 소유권과 Runtime Index 이전
+- 다중 Chunk Building의 원본 소유와 BuildingCells·TerrainAnchorCells 참조 분리
+- `EntityRenderRadius` 범위 Entity Controller 표시, Active Chunk별 Entity Tick 적용
+- Terrain·Entity·Simulation 반경의 크기 순서 제한 제거
+- 세 반경의 합집합으로 Chunk 데이터와 Cache 준비 범위 계산
+- 준비된 Chunk만 사용해 Road Topology와 Building Way Graph 구성
+- Chunk 준비·해제 시 Road와 Building Way 경계 연결 보류·재연결 적용
 - 이웃 Unloaded로 인해 Road·Way 사실 데이터를 수정하는 경로 제거
 
 완료 기준:
 
 - Entity가 Chunk 경계를 넘어도 중복되거나 소실되지 않는다.
-- 다중 Chunk Building의 점유·Terrain 보호가 Column 경계에서 유지된다.
-- 이웃 Column 활성화 후 Road와 Building 외부 Way가 다시 연결된다.
+- 다중 Chunk Building의 점유·Terrain 보호가 Chunk 경계에서 유지된다.
+- Entity Render 범위를 벗어나면 Controller가 반환되고, 재진입하면 같은 EntityData로 복원된다.
+- Simulation 범위 밖 Entity는 렌더 가능하더라도 Tick하지 않는다.
+- 이웃 Chunk 활성화 후 Road와 Building 외부 Way가 다시 연결된다.
 
 ### 8. Water 스트리밍 적용
 
 적용:
 
-- 전체 월드 WaterFlowState를 Column Runtime 단위로 분리
-- Active Column만 Water Simulation 실행
-- Active 이탈 시 상태 정지, 재진입 시 이어서 실행
-- Unloaded 경계로 향하는 처리 대상을 보류하고 이웃 준비 시 연결
-- WaterBody와 Frontier가 전체 `World.Size` 배열을 요구하지 않도록 교체
+- Frontier를 `ChunkCoordinate`별 상태로 분리하고 Active Chunk만 Water Simulation에 참여
+- Active 이탈 시 미완료 Stage를 폐기하고 해당 파동을 Frontier로 되돌려, 재진입 후 같은 입력으로 다시 계산
+- 비활성 이웃과 맞닿은 경계 Cell은 Empty나 벽으로 해석하지 않고 해당 이웃 활성화 전까지 보류
+- 처리 가능한 Chunk들의 Cell은 기존과 같은 정렬된 파동으로 묶고, 모든 Stage가 끝난 뒤 한 번에 Commit
+- WaterBody 해석 범위를 준비된 Chunk로 제한하고, Frontier에서 전체 월드 Cell 수 기반 용량 의존 제거
+- Source·Dynamic 판정, `ResolveDesiredWater`, WaterType 갱신과 Mesh 변경 통지는 기존 규칙 유지
 
 완료 기준:
 
-- Rendered이지만 비Active인 물이 변하지 않는다.
-- 이웃 Column 활성화 전후 물이 Unloaded 영역을 Empty나 벽으로 오판하지 않는다.
+- Ready이지만 비Active인 물이 변하지 않는다.
+- 이웃 Chunk 활성화 전후 물이 Unloaded 영역을 Empty나 벽으로 오판하지 않는다.
 - 빈 Cell을 Source로 보정하는 경로가 존재하지 않는다.
 
 ### 9. 절대 좌표 생성과 Generation Region 적용
@@ -510,7 +530,7 @@ Dirty Chunk Unload
 - River·Lake·Pond 계획을 고정 Generation Region과 Margin 기반으로 교체
 - Region Seed와 Feature 소유 규칙으로 생성 순서 독립성 확보
 - 최종 생성 결과에 대해 CellBiome 확정
-- 필요한 Y ChunkData만 조립
+- 필요한 Y Section만 조립
 
 완료 기준:
 
@@ -553,12 +573,20 @@ Dirty Chunk Unload
 - 저장되지 않은 Chunk는 같은 Seed 결과로 재생성된다.
 - Load가 전체 무한 월드를 읽지 않고 초기 Render 범위만 준비한다.
 
+### 전체 로드맵 완료 후 재검토
+
+- Unloaded 목적지까지 이어지는 Road/Way 광역 탐색 구조
+- 준비된 Chunk 내부의 상세 Way 탐색과 Unloaded Chunk의 광역 경로 정보를 연결하는 방식
+- 원거리 Entity가 StreamingTarget과 무관하게 Chunk 준비를 요청할 수 있는지에 대한 정책
+
+7단계에서는 Unloaded 이웃을 경로 없음으로 판정하지 않고 경계 연결만 보류한다. 원거리 목적지 탐색을 위한 별도 광역 Graph나 Entity 주도 Chunk Load는 1~11단계를 완료하기 전에 추가하지 않는다.
+
 ## 구현 중 변경 금지 항목
 
 - `Resident` 상태를 다시 추가하지 않는다.
 - Unloaded를 Empty Cell 또는 막힌 Cell로 보정하지 않는다.
 - 전체 월드 배열 Cache로 되돌리지 않는다.
-- WorldChunkColumn의 모든 Y Chunk를 미리 생성하지 않는다.
+- Chunk의 모든 Y Section을 미리 생성하지 않는다.
 - `EnvironmentData` 또는 방향이 확정되지 않은 Temperature·Moisture·Fertility 저장 구조를 다시 추가하지 않는다.
 - 후보 River·Lake 정보를 최종 CellBiome으로 확정하지 않는다.
 - 현재 WaterType 변화로 고정 WaterBiome을 자동 변경하지 않는다.

@@ -17,7 +17,7 @@ namespace MiniCivilization.World.Generation
         public int WorldSize => Settings.WorldSize;
         public int WorldHeight => Settings.WorldHeight;
         public int ChunkSizeXZ => Settings.ChunkCellCountXZ;
-        public int ChunkHeight => Settings.ChunkCellCountY;
+        public int ChunkHeight => Settings.ChunkSectionCellCountY;
         public float TerrainScale => Settings.TerrainScale;
         public int TerrainLayers => Settings.TerrainLayers;
         public float TerrainSpacing => Settings.TerrainSpacing;

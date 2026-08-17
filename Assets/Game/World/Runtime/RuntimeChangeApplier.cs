@@ -17,7 +17,7 @@ namespace MiniCivilization.World.Runtime
             WorldChangeType changeTypes,
             IReadOnlyList<CellCoordinate> changedCells,
             IReadOnlyList<CellColumnCoordinate> changedColumns,
-            IReadOnlyList<ChunkCoordinate> affectedChunks,
+            IReadOnlyList<ChunkSectionCoordinate> affectedSections,
             CellBounds affectedBounds,
             bool rebuildNavigationColumns,
             bool rebuildWaterDistances)
@@ -32,9 +32,9 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(nameof(changedColumns));
             }
 
-            if (affectedChunks == null)
+            if (affectedSections == null)
             {
-                throw new ArgumentNullException(nameof(affectedChunks));
+                throw new ArgumentNullException(nameof(affectedSections));
             }
 
             RebuildDerived(
@@ -51,7 +51,7 @@ namespace MiniCivilization.World.Runtime
                 changeTypes,
                 changedCells,
                 changedColumns,
-                affectedChunks,
+                affectedSections,
                 affectedBounds);
         }
 

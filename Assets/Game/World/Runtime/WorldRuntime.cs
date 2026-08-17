@@ -8,11 +8,14 @@ namespace MiniCivilization.World.Runtime
 {
     public sealed class WorldRuntime
     {
-        private readonly Dictionary<ChunkColumnCoordinate, WorldChunkColumnRuntime>
-            columnRuntimes = new();
-        private readonly HashSet<ChunkColumnCoordinate> desiredRenderColumns = new();
-        private readonly HashSet<ChunkColumnCoordinate> desiredActiveColumns = new();
-        private readonly List<ChunkColumnCoordinate> removedColumns = new();
+        private readonly Dictionary<ChunkCoordinate, ChunkRuntime>
+            chunkRuntimes = new();
+        private readonly HashSet<ChunkCoordinate> desiredPreparedChunks = new();
+        private readonly HashSet<ChunkCoordinate> desiredTerrainRenderChunks = new();
+        private readonly HashSet<ChunkCoordinate> desiredEntityRenderChunks = new();
+        private readonly HashSet<ChunkCoordinate> desiredActiveChunks = new();
+        private readonly List<ChunkCoordinate> removedChunks = new();
+        private bool simulationStateChangedPending;
 
         private WorldRuntime(WorldData data)
         {
@@ -33,9 +36,12 @@ namespace MiniCivilization.World.Runtime
         public EntityRuntime Entities { get; private set; }
         internal WorldRoadTopology RoadTopology { get; private set; }
         public WorldWayPointGraph WayPointGraph { get; private set; }
-        public IReadOnlyDictionary<ChunkColumnCoordinate, WorldChunkColumnRuntime>
-            ColumnRuntimes => columnRuntimes;
-        public event Action<WorldChunkColumnRuntime> ColumnStateChanged;
+        public IReadOnlyDictionary<ChunkCoordinate, ChunkRuntime>
+            ChunkRuntimes => chunkRuntimes;
+        public event Action<ChunkRuntime> ChunkStateChanged;
+        public event Action SimulationStateChanged;
+        public event Action<ChunkRuntime> TerrainRenderStateChanged;
+        public event Action<ChunkRuntime> EntityRenderStateChanged;
 
         public static WorldRuntime CreatePrepared(WorldData data)
         {
@@ -48,9 +54,10 @@ namespace MiniCivilization.World.Runtime
             var runtime = new WorldRuntime(data);
             runtime.WaterFlowState = new WaterFlowState(
                 data,
-                WaterBodyResolver.Resolve(data, runtime.SurfaceCache));
+                Array.Empty<WaterBody>());
             runtime.WaterFlowResolver = new WaterFlowResolver(
-                runtime.WaterFlowState.CellCount);
+                data.ChunkSizeX,
+                runtime.CanSimulateWaterCell);
             runtime.WaterFlowResolver.RestoreFrontier(
                 data,
                 runtime.WaterFlowState,
@@ -119,40 +126,101 @@ namespace MiniCivilization.World.Runtime
             return CurrentChangeId;
         }
 
-        public bool TryGetColumnRuntime(
-            ChunkColumnCoordinate coordinate,
-            out WorldChunkColumnRuntime columnRuntime) =>
-            columnRuntimes.TryGetValue(coordinate, out columnRuntime);
+        public bool TryGetChunkRuntime(
+            ChunkCoordinate coordinate,
+            out ChunkRuntime chunkRuntime) =>
+            chunkRuntimes.TryGetValue(coordinate, out chunkRuntime);
 
-        public WorldChunkColumnState GetColumnState(
-            ChunkColumnCoordinate coordinate) =>
-            columnRuntimes.TryGetValue(coordinate, out var columnRuntime)
-                ? columnRuntime.State
-                : WorldChunkColumnState.Unloaded;
+        public ChunkState GetChunkState(
+            ChunkCoordinate coordinate) =>
+            chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+                ? chunkRuntime.State
+                : ChunkState.Unloaded;
 
         public bool IsSimulationActive(CellCoordinate cell) =>
-            IsSimulationActive(WorldCoordinateUtility.ToChunkColumn(
+            IsSimulationActive(WorldCoordinateUtility.ToChunk(
                 cell.X,
                 cell.Z,
                 Data.ChunkSizeX));
 
-        public bool IsSimulationActive(ChunkColumnCoordinate coordinate) =>
-            GetColumnState(coordinate) == WorldChunkColumnState.Active;
+        public bool IsSimulationActive(ChunkCoordinate coordinate) =>
+            GetChunkState(coordinate) == ChunkState.Active;
 
-        public bool IsColumnPrepared(ChunkColumnCoordinate coordinate) =>
+        internal bool CanSimulateWaterCell(CellCoordinate cell)
+        {
+            if (!Data.Contains(cell.X, cell.Y, cell.Z))
+            {
+                return false;
+            }
+
+            var chunk = WorldCoordinateUtility.ToChunk(
+                cell.X,
+                cell.Z,
+                Data.ChunkSizeX);
+            if (!IsSimulationActive(chunk))
+            {
+                return false;
+            }
+
+            var localX = WorldCoordinateUtility.PositiveModulo(
+                cell.X,
+                Data.ChunkSizeX);
+            var localZ = WorldCoordinateUtility.PositiveModulo(
+                cell.Z,
+                Data.ChunkSizeZ);
+            if (localX == 0
+                && cell.X > 0
+                && !IsSimulationActive(new ChunkCoordinate(
+                    chunk.X - 1,
+                    chunk.Z)))
+            {
+                return false;
+            }
+
+            if (localX == Data.ChunkSizeX - 1
+                && cell.X + 1 < Data.Size
+                && !IsSimulationActive(new ChunkCoordinate(
+                    chunk.X + 1,
+                    chunk.Z)))
+            {
+                return false;
+            }
+
+            if (localZ == 0
+                && cell.Z > 0
+                && !IsSimulationActive(new ChunkCoordinate(
+                    chunk.X,
+                    chunk.Z - 1)))
+            {
+                return false;
+            }
+
+            return localZ != Data.ChunkSizeZ - 1
+                || cell.Z + 1 >= Data.Size
+                || IsSimulationActive(new ChunkCoordinate(
+                    chunk.X,
+                    chunk.Z + 1));
+        }
+
+        public bool IsEntityRenderingEnabled(ChunkCoordinate coordinate) =>
+            chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+            && chunkRuntime.EntityRenderingEnabled;
+
+        public bool IsChunkPrepared(ChunkCoordinate coordinate) =>
             SurfaceCache.IsPrepared(coordinate)
             && NavigationCache.IsPrepared(coordinate);
 
-        internal bool IsColumnPrepared(int cellX, int cellZ) =>
+        internal bool IsChunkPrepared(int cellX, int cellZ) =>
             Data.ContainsColumn(cellX, cellZ)
-            && IsColumnPrepared(WorldCoordinateUtility.ToChunkColumn(
+            && IsChunkPrepared(WorldCoordinateUtility.ToChunk(
                 cellX,
                 cellZ,
                 Data.ChunkSizeX));
 
-        internal void UpdateStreamingColumns(
-            ChunkColumnCoordinate center,
+        internal void UpdateStreamingChunks(
+            ChunkCoordinate center,
             int renderRadius,
+            int entityRenderRadius,
             int simulationRadius)
         {
             if (renderRadius < 0)
@@ -160,19 +228,29 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentOutOfRangeException(nameof(renderRadius));
             }
 
-            if (simulationRadius < 0 || simulationRadius > renderRadius)
+            if (entityRenderRadius < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(entityRenderRadius));
+            }
+
+            if (simulationRadius < 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(simulationRadius));
             }
 
-            desiredRenderColumns.Clear();
-            desiredActiveColumns.Clear();
+            desiredPreparedChunks.Clear();
+            desiredTerrainRenderChunks.Clear();
+            desiredEntityRenderChunks.Clear();
+            desiredActiveChunks.Clear();
             var chunksPerPatch = Data.Settings.RenderChunksPerPatch;
-            for (var z = center.Z - renderRadius;
-                 z <= center.Z + renderRadius;
+            var preparationRadius = Math.Max(
+                renderRadius,
+                Math.Max(entityRenderRadius, simulationRadius));
+            for (var z = center.Z - preparationRadius;
+                 z <= center.Z + preparationRadius;
                  z++)
-            for (var x = center.X - renderRadius;
-                 x <= center.X + renderRadius;
+            for (var x = center.X - preparationRadius;
+                 x <= center.X + preparationRadius;
                  x++)
             {
                 if ((uint)x >= Data.ChunkCountX
@@ -181,115 +259,126 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var patchX = x / chunksPerPatch;
-                var patchZ = z / chunksPerPatch;
-                var patchStartX = patchX * chunksPerPatch;
-                var patchStartZ = patchZ * chunksPerPatch;
-                var patchEndX = Math.Min(
-                    patchStartX + chunksPerPatch,
-                    Data.ChunkCountX);
-                var patchEndZ = Math.Min(
-                    patchStartZ + chunksPerPatch,
-                    Data.ChunkCountZ);
-                for (var patchColumnZ = patchStartZ;
-                     patchColumnZ < patchEndZ;
-                     patchColumnZ++)
-                for (var patchColumnX = patchStartX;
-                     patchColumnX < patchEndX;
-                     patchColumnX++)
+                if (Math.Abs(x - center.X) <= renderRadius
+                    && Math.Abs(z - center.Z) <= renderRadius)
                 {
-                    desiredRenderColumns.Add(new ChunkColumnCoordinate(
-                        patchColumnX,
-                        patchColumnZ));
+                    var patchX = x / chunksPerPatch;
+                    var patchZ = z / chunksPerPatch;
+                    var patchStartX = patchX * chunksPerPatch;
+                    var patchStartZ = patchZ * chunksPerPatch;
+                    var patchEndX = Math.Min(
+                        patchStartX + chunksPerPatch,
+                        Data.ChunkCountX);
+                    var patchEndZ = Math.Min(
+                        patchStartZ + chunksPerPatch,
+                        Data.ChunkCountZ);
+                    for (var patchChunkZ = patchStartZ;
+                         patchChunkZ < patchEndZ;
+                         patchChunkZ++)
+                    for (var patchChunkX = patchStartX;
+                         patchChunkX < patchEndX;
+                         patchChunkX++)
+                    {
+                        desiredTerrainRenderChunks.Add(new ChunkCoordinate(
+                            patchChunkX,
+                            patchChunkZ));
+                    }
+                }
+
+                if (Math.Abs(x - center.X) <= entityRenderRadius
+                    && Math.Abs(z - center.Z) <= entityRenderRadius)
+                {
+                    desiredEntityRenderChunks.Add(
+                        new ChunkCoordinate(x, z));
                 }
 
                 if (Math.Abs(x - center.X) <= simulationRadius
                     && Math.Abs(z - center.Z) <= simulationRadius)
                 {
-                    desiredActiveColumns.Add(
-                        new ChunkColumnCoordinate(x, z));
+                    desiredActiveChunks.Add(
+                        new ChunkCoordinate(x, z));
                 }
             }
 
-            removedColumns.Clear();
-            foreach (var pair in columnRuntimes)
+            desiredPreparedChunks.UnionWith(desiredTerrainRenderChunks);
+            desiredPreparedChunks.UnionWith(desiredEntityRenderChunks);
+            desiredPreparedChunks.UnionWith(desiredActiveChunks);
+
+            removedChunks.Clear();
+            foreach (var pair in chunkRuntimes)
             {
-                if (!desiredRenderColumns.Contains(pair.Key))
+                if (!desiredPreparedChunks.Contains(pair.Key))
                 {
-                    removedColumns.Add(pair.Key);
+                    removedChunks.Add(pair.Key);
                 }
             }
 
             var cacheSetChanged = false;
-            for (var index = 0; index < removedColumns.Count; index++)
+            for (var index = 0; index < removedChunks.Count; index++)
             {
-                cacheSetChanged |= UnloadColumn(
-                    removedColumns[index],
+                cacheSetChanged |= UnloadChunk(
+                    removedChunks[index],
                     rebuildWaterDistances: false);
             }
 
-            foreach (var coordinate in desiredRenderColumns)
+            foreach (var coordinate in desiredPreparedChunks)
             {
-                if (!columnRuntimes.TryGetValue(
+                if (!chunkRuntimes.TryGetValue(
                         coordinate,
-                        out var columnRuntime))
+                        out var chunkRuntime))
                 {
-                    Data.EnsureColumnLoaded(coordinate);
-                    columnRuntime = new WorldChunkColumnRuntime(coordinate);
-                    columnRuntimes.Add(coordinate, columnRuntime);
-                    SurfaceCache.PrepareColumn(coordinate);
-                    NavigationCache.PrepareColumn(
+                    Data.EnsureChunkLoaded(coordinate);
+                    chunkRuntime = new ChunkRuntime(coordinate);
+                    chunkRuntimes.Add(coordinate, chunkRuntime);
+                    ChangeChunkState(
+                        chunkRuntime,
+                        ChunkState.Preparing);
+                    SurfaceCache.PrepareChunk(coordinate);
+                    NavigationCache.PrepareChunk(
                         coordinate,
                         rebuildWaterDistances: false);
                     cacheSetChanged = true;
-                    ChangeColumnState(
-                        columnRuntime,
-                        WorldChunkColumnState.Preparing);
-                    continue;
+                    ChangeChunkState(
+                        chunkRuntime,
+                        ChunkState.Ready);
                 }
 
-                var shouldBeActive = desiredActiveColumns.Contains(coordinate);
-                if (columnRuntime.State == WorldChunkColumnState.Rendered
+                var shouldBeActive = desiredActiveChunks.Contains(coordinate);
+                if (chunkRuntime.State == ChunkState.Ready
                     && shouldBeActive)
                 {
-                    ChangeColumnState(
-                        columnRuntime,
-                        WorldChunkColumnState.Active);
+                    ChangeChunkState(
+                        chunkRuntime,
+                        ChunkState.Active);
                 }
-                else if (columnRuntime.State == WorldChunkColumnState.Active
+                else if (chunkRuntime.State == ChunkState.Active
                     && !shouldBeActive)
                 {
-                    ChangeColumnState(
-                        columnRuntime,
-                        WorldChunkColumnState.Rendered);
+                    ChangeChunkState(
+                        chunkRuntime,
+                        ChunkState.Ready);
                 }
+
+                ChangeTerrainRenderState(
+                    chunkRuntime,
+                    desiredTerrainRenderChunks.Contains(coordinate));
+                ChangeEntityRenderState(
+                    chunkRuntime,
+                    desiredEntityRenderChunks.Contains(coordinate));
             }
 
             if (cacheSetChanged)
             {
                 NavigationCache.RebuildWaterDistances();
+                RebuildWayPointGraph();
+                WaterFlowState.ReplaceWaterBodies(
+                    WaterBodyResolver.ResolvePrepared(this));
             }
+
+            FlushSimulationStateChanged();
         }
 
-        internal void MarkColumnRendered(ChunkColumnCoordinate coordinate)
-        {
-            if (!desiredRenderColumns.Contains(coordinate)
-                || !columnRuntimes.TryGetValue(
-                    coordinate,
-                    out var columnRuntime)
-                || columnRuntime.State != WorldChunkColumnState.Preparing)
-            {
-                return;
-            }
-
-            ChangeColumnState(columnRuntime, WorldChunkColumnState.Rendered);
-            if (desiredActiveColumns.Contains(coordinate))
-            {
-                ChangeColumnState(columnRuntime, WorldChunkColumnState.Active);
-            }
-        }
-
-        internal bool HasPresentedColumnInPatch(
+        internal bool HasTerrainRenderingInPatch(
             int patchX,
             int patchZ,
             int chunksPerPatch)
@@ -298,14 +387,14 @@ namespace MiniCivilization.World.Runtime
             var startZ = patchZ * chunksPerPatch;
             var endX = startX + chunksPerPatch;
             var endZ = startZ + chunksPerPatch;
-            foreach (var pair in columnRuntimes)
+            foreach (var pair in chunkRuntimes)
             {
                 var coordinate = pair.Key;
                 if (coordinate.X >= startX
                     && coordinate.X < endX
                     && coordinate.Z >= startZ
                     && coordinate.Z < endZ
-                    && pair.Value.State != WorldChunkColumnState.Unloaded)
+                    && pair.Value.TerrainRenderingEnabled)
                 {
                     return true;
                 }
@@ -314,79 +403,108 @@ namespace MiniCivilization.World.Runtime
             return false;
         }
 
-        internal void MarkPatchRendered(
-            int patchX,
-            int patchZ,
-            int chunksPerPatch)
+        internal void ClearStreamingChunks()
         {
-            var startX = patchX * chunksPerPatch;
-            var startZ = patchZ * chunksPerPatch;
-            var endX = Math.Min(startX + chunksPerPatch, Data.ChunkCountX);
-            var endZ = Math.Min(startZ + chunksPerPatch, Data.ChunkCountZ);
-            for (var z = startZ; z < endZ; z++)
-            for (var x = startX; x < endX; x++)
+            removedChunks.Clear();
+            foreach (var coordinate in chunkRuntimes.Keys)
             {
-                MarkColumnRendered(new ChunkColumnCoordinate(x, z));
-            }
-        }
-
-        internal void ClearStreamingColumns()
-        {
-            removedColumns.Clear();
-            foreach (var coordinate in columnRuntimes.Keys)
-            {
-                removedColumns.Add(coordinate);
+                removedChunks.Add(coordinate);
             }
 
             var cacheSetChanged = false;
-            for (var index = 0; index < removedColumns.Count; index++)
+            for (var index = 0; index < removedChunks.Count; index++)
             {
-                cacheSetChanged |= UnloadColumn(
-                    removedColumns[index],
+                cacheSetChanged |= UnloadChunk(
+                    removedChunks[index],
                     rebuildWaterDistances: false);
             }
 
             if (cacheSetChanged)
             {
                 NavigationCache.RebuildWaterDistances();
+                RebuildWayPointGraph();
+                WaterFlowState.ReplaceWaterBodies(
+                    WaterBodyResolver.ResolvePrepared(this));
             }
 
-            desiredRenderColumns.Clear();
-            desiredActiveColumns.Clear();
+            desiredPreparedChunks.Clear();
+            desiredTerrainRenderChunks.Clear();
+            desiredEntityRenderChunks.Clear();
+            desiredActiveChunks.Clear();
+            FlushSimulationStateChanged();
         }
 
-        private bool UnloadColumn(
-            ChunkColumnCoordinate coordinate,
+        private bool UnloadChunk(
+            ChunkCoordinate coordinate,
             bool rebuildWaterDistances)
         {
-            if (!columnRuntimes.TryGetValue(coordinate, out var columnRuntime))
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime))
             {
                 return false;
             }
 
-            if (columnRuntime.State == WorldChunkColumnState.Active)
+            if (chunkRuntime.State == ChunkState.Active)
             {
-                ChangeColumnState(
-                    columnRuntime,
-                    WorldChunkColumnState.Rendered);
+                ChangeChunkState(
+                    chunkRuntime,
+                    ChunkState.Ready);
             }
 
-            NavigationCache.ReleaseColumn(
+            ChangeTerrainRenderState(chunkRuntime, false);
+            ChangeEntityRenderState(chunkRuntime, false);
+
+            NavigationCache.ReleaseChunk(
                 coordinate,
                 rebuildWaterDistances);
-            SurfaceCache.ReleaseColumn(coordinate);
-            ChangeColumnState(columnRuntime, WorldChunkColumnState.Unloaded);
-            columnRuntimes.Remove(coordinate);
+            SurfaceCache.ReleaseChunk(coordinate);
+            ChangeChunkState(chunkRuntime, ChunkState.Unloaded);
+            chunkRuntimes.Remove(coordinate);
             return true;
         }
 
-        private void ChangeColumnState(
-            WorldChunkColumnRuntime columnRuntime,
-            WorldChunkColumnState state)
+        private void ChangeChunkState(
+            ChunkRuntime chunkRuntime,
+            ChunkState state)
         {
-            if (columnRuntime.SetState(state))
+            var wasActive = chunkRuntime.State == ChunkState.Active;
+            if (chunkRuntime.SetState(state))
             {
-                ColumnStateChanged?.Invoke(columnRuntime);
+                ChunkStateChanged?.Invoke(chunkRuntime);
+                if (wasActive != (state == ChunkState.Active))
+                {
+                    simulationStateChangedPending = true;
+                }
+            }
+        }
+
+        private void FlushSimulationStateChanged()
+        {
+            if (!simulationStateChangedPending)
+            {
+                return;
+            }
+
+            simulationStateChangedPending = false;
+            SimulationStateChanged?.Invoke();
+        }
+
+        private void ChangeEntityRenderState(
+            ChunkRuntime chunkRuntime,
+            bool enabled)
+        {
+            if (chunkRuntime.SetEntityRenderingEnabled(enabled))
+            {
+                EntityRenderStateChanged?.Invoke(chunkRuntime);
+            }
+        }
+
+        private void ChangeTerrainRenderState(
+            ChunkRuntime chunkRuntime,
+            bool enabled)
+        {
+            if (chunkRuntime.SetTerrainRenderingEnabled(enabled))
+            {
+                TerrainRenderStateChanged?.Invoke(chunkRuntime);
             }
         }
 

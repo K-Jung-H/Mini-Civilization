@@ -50,7 +50,7 @@ namespace MiniCivilization.World.Editor
                     $"Seed: {world.Seed}\n" +
                     $"Water bodies: {waterBodyCount}\n" +
                     $"Streaming center: {streamingCenter}\n" +
-                    $"Prepared cache columns: {runtime.SurfaceCache.PreparedColumnCount}\n" +
+                    $"Prepared cache chunks: {runtime.SurfaceCache.PreparedChunkCount}\n" +
                     $"Rendered/Pooled patches: {manager.Renderer.RenderedPatchCount}/" +
                     $"{manager.Renderer.PooledPatchCount}\n" +
                     $"Change ID: {runtime.CurrentChangeId}\n" +

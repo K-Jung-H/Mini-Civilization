@@ -83,16 +83,19 @@ namespace MiniCivilization.World.Presentation
             surfaceQuery = new WorldSurfaceQuery(
                 world,
                 boundWaterFlowState,
-                runtime.IsColumnPrepared);
+                runtime.IsChunkPrepared);
             activeRenderPatchSize = ResolveRenderPatchSize(world);
             activeChunksPerPatch = world.Settings.RenderChunksPerPatch;
             roadVisualCatalog?.ApplyToMaterial(terrainMaterial);
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             LastAppliedChangeId = runtime.CurrentChangeId;
-            runtime.ColumnStateChanged += OnColumnStateChanged;
-            foreach (var pair in runtime.ColumnRuntimes)
+            runtime.TerrainRenderStateChanged += OnTerrainRenderStateChanged;
+            foreach (var pair in runtime.ChunkRuntimes)
             {
-                OnColumnStateChanged(pair.Value);
+                if (pair.Value.TerrainRenderingEnabled)
+                {
+                    OnTerrainRenderStateChanged(pair.Value);
+                }
             }
         }
 
@@ -107,25 +110,25 @@ namespace MiniCivilization.World.Presentation
             surfaceQuery?.SetWaterFlowState(waterFlowState);
         }
 
-        private void OnColumnStateChanged(
-            WorldChunkColumnRuntime columnRuntime)
+        private void OnTerrainRenderStateChanged(
+            ChunkRuntime chunkRuntime)
         {
             if (boundRuntime == null
-                || columnRuntime == null
+                || chunkRuntime == null
                 || activeChunksPerPatch <= 0)
             {
                 return;
             }
 
-            var patch = ToPatchCoordinate(columnRuntime.Coordinate);
-            if (columnRuntime.State == WorldChunkColumnState.Unloaded)
+            var patch = ToPatchCoordinate(chunkRuntime.Coordinate);
+            if (!chunkRuntime.TerrainRenderingEnabled)
             {
-                exposureCache?.ReleaseColumn(columnRuntime.Coordinate);
-                surfaceQuery?.InvalidateColumn(
-                    columnRuntime.Coordinate,
+                exposureCache?.ReleaseChunk(chunkRuntime.Coordinate);
+                surfaceQuery?.InvalidateChunk(
+                    chunkRuntime.Coordinate,
                     boundWorld.ChunkSizeX);
-                QueueBoundaryPatchRebuilds(columnRuntime.Coordinate);
-                if (!boundRuntime.HasPresentedColumnInPatch(
+                QueueBoundaryPatchRebuilds(chunkRuntime.Coordinate);
+                if (!boundRuntime.HasTerrainRenderingInPatch(
                         patch.x,
                         patch.y,
                         activeChunksPerPatch))
@@ -137,20 +140,14 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            if (columnRuntime.State != WorldChunkColumnState.Preparing)
-            {
-                return;
-            }
-
-            exposureCache?.PrepareColumn(columnRuntime.Coordinate);
-            surfaceQuery?.InvalidateColumn(
-                columnRuntime.Coordinate,
+            exposureCache?.PrepareChunk(chunkRuntime.Coordinate);
+            surfaceQuery?.InvalidateChunk(
+                chunkRuntime.Coordinate,
                 boundWorld.ChunkSizeX);
-            QueueBoundaryPatchRebuilds(columnRuntime.Coordinate);
+            QueueBoundaryPatchRebuilds(chunkRuntime.Coordinate);
 
             if (renderedPatchViews.ContainsKey(patch))
             {
-                boundRuntime.MarkColumnRendered(columnRuntime.Coordinate);
                 return;
             }
 
@@ -158,7 +155,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         private void QueueBoundaryPatchRebuilds(
-            ChunkColumnCoordinate coordinate)
+            ChunkCoordinate coordinate)
         {
             if (activeChunksPerPatch <= 0)
             {
@@ -175,7 +172,7 @@ namespace MiniCivilization.World.Presentation
                 }
 
                 var patch = ToPatchCoordinate(
-                    new ChunkColumnCoordinate(x, z));
+                    new ChunkCoordinate(x, z));
                 if (!renderedPatchViews.ContainsKey(patch))
                 {
                     continue;
@@ -207,7 +204,7 @@ namespace MiniCivilization.World.Presentation
                 }
 
                 if (!IsPatchInsideFiniteBounds(patch)
-                    || !boundRuntime.HasPresentedColumnInPatch(
+                    || !boundRuntime.HasTerrainRenderingInPatch(
                         patch.x,
                         patch.y,
                         activeChunksPerPatch))
@@ -226,15 +223,11 @@ namespace MiniCivilization.World.Presentation
                     pendingRoadPatches.Remove(patch);
                 }
 
-                boundRuntime.MarkPatchRendered(
-                    patch.x,
-                    patch.y,
-                    activeChunksPerPatch);
             }
         }
 
         private Vector2Int ToPatchCoordinate(
-            ChunkColumnCoordinate coordinate) => new(
+            ChunkCoordinate coordinate) => new(
             WorldCoordinateUtility.FloorDivide(
                 coordinate.X,
                 activeChunksPerPatch),
@@ -295,10 +288,10 @@ namespace MiniCivilization.World.Presentation
                 && activeRenderPatchSize > 0)
             {
                 for (var index = 0;
-                     index < changeSet.AffectedChunks.Count;
+                     index < changeSet.AffectedSections.Count;
                      index++)
                 {
-                    var coordinate = changeSet.AffectedChunks[index];
+                    var coordinate = changeSet.AffectedSections[index];
                     var startX = coordinate.X * boundWorld.ChunkSizeX;
                     var startZ = coordinate.Z * boundWorld.ChunkSizeZ;
                     var patch = new Vector2Int(
@@ -563,7 +556,7 @@ namespace MiniCivilization.World.Presentation
         {
             if (boundRuntime != null)
             {
-                boundRuntime.ColumnStateChanged -= OnColumnStateChanged;
+                boundRuntime.TerrainRenderStateChanged -= OnTerrainRenderStateChanged;
             }
 
             boundWorld = null;

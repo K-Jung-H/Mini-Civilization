@@ -14,15 +14,15 @@ namespace MiniCivilization.World.Generation
         [Tooltip("논리 Chunk 하나의 X/Z 방향 Cell 수입니다.")]
         [InspectorName("Chunk XZ Cell 수")]
         [SerializeField, Min(1)] private int chunkCellCountXZ = 16;
-        [Tooltip("논리 Chunk 하나의 Y 방향 Cell 수입니다.")]
-        [InspectorName("Chunk Y Cell 수")]
-        [SerializeField, Min(1)] private int chunkCellCountY = 8;
+        [Tooltip("ChunkSection 하나의 Y 방향 Cell 수입니다.")]
+        [InspectorName("ChunkSection Y Cell 수")]
+        [SerializeField, Min(1)] private int chunkSectionCellCountY = 8;
         [Tooltip("월드 X/Z 방향의 논리 Chunk 수입니다.")]
         [InspectorName("월드 XZ Chunk 수")]
         [SerializeField, Min(1)] private int worldChunkCountXZ = 4;
-        [Tooltip("월드 Y 방향의 논리 Chunk 수입니다.")]
-        [InspectorName("월드 Y Chunk 수")]
-        [SerializeField, Min(1)] private int worldChunkCountY = 2;
+        [Tooltip("월드 Y 방향의 ChunkSection 수입니다.")]
+        [InspectorName("월드 Y ChunkSection 수")]
+        [SerializeField, Min(1)] private int chunkSectionCountY = 2;
         [Tooltip("렌더 Patch 한 변에 포함되는 논리 Chunk 수입니다.")]
         [InspectorName("Patch당 Chunk 수")]
         [SerializeField, Min(1)] private int renderChunksPerPatch = 2;
@@ -132,15 +132,15 @@ namespace MiniCivilization.World.Generation
         public float CellSize => cellSize;
         public float HeightStep => cellSize / WorldGrid.HeightStepsPerCell;
         public int ChunkCellCountXZ => chunkCellCountXZ;
-        public int ChunkCellCountY => chunkCellCountY;
+        public int ChunkSectionCellCountY => chunkSectionCellCountY;
         public int WorldChunkCountXZ => worldChunkCountXZ;
-        public int WorldChunkCountY => worldChunkCountY;
+        public int ChunkSectionCountY => chunkSectionCountY;
         public int RenderChunksPerPatch => renderChunksPerPatch;
         public int RoadMaxHeightSteps => roadMaxHeightSteps;
         public int WorldSize => checked(chunkCellCountXZ * worldChunkCountXZ);
-        public int WorldHeight => checked(chunkCellCountY * worldChunkCountY);
+        public int WorldHeight => checked(chunkSectionCellCountY * chunkSectionCountY);
         public int ChunkSizeXZ => chunkCellCountXZ;
-        public int ChunkHeight => chunkCellCountY;
+        public int ChunkHeight => chunkSectionCellCountY;
         public int RenderPatchSizeXZ => checked(chunkCellCountXZ * renderChunksPerPatch);
         public float TerrainScale => terrainScale;
         public int TerrainLayers => terrainLayers;
@@ -179,9 +179,9 @@ namespace MiniCivilization.World.Generation
             seed,
             CellSize,
             ChunkCellCountXZ,
-            ChunkCellCountY,
+            ChunkSectionCellCountY,
             WorldChunkCountXZ,
-            WorldChunkCountY,
+            ChunkSectionCountY,
             RenderChunksPerPatch,
             RoadMaxHeightSteps,
             TerrainScale,
@@ -224,9 +224,9 @@ namespace MiniCivilization.World.Generation
             }
 
             chunkCellCountXZ = horizontalChunkSize;
-            chunkCellCountY = verticalChunkSize;
+            chunkSectionCellCountY = verticalChunkSize;
             worldChunkCountXZ = Math.Max(1, size / horizontalChunkSize);
-            worldChunkCountY = Math.Max(1, height / verticalChunkSize);
+            chunkSectionCountY = Math.Max(1, height / verticalChunkSize);
             renderChunksPerPatch = worldChunkCountXZ % 2 == 0 ? 2 : 1;
             OnValidate();
         }
@@ -239,8 +239,8 @@ namespace MiniCivilization.World.Generation
                 return false;
             }
 
-            if (chunkCellCountXZ <= 0 || chunkCellCountY <= 0
-                || worldChunkCountXZ <= 0 || worldChunkCountY <= 0)
+            if (chunkCellCountXZ <= 0 || chunkSectionCellCountY <= 0
+                || worldChunkCountXZ <= 0 || chunkSectionCountY <= 0)
             {
                 error = "Chunk Cell counts and world chunk counts must be positive.";
                 return false;
@@ -267,9 +267,9 @@ namespace MiniCivilization.World.Generation
         {
             cellSize = Mathf.Max(0.01f, cellSize);
             chunkCellCountXZ = Math.Max(1, chunkCellCountXZ);
-            chunkCellCountY = Math.Max(1, chunkCellCountY);
+            chunkSectionCellCountY = Math.Max(1, chunkSectionCellCountY);
             worldChunkCountXZ = Math.Max(1, worldChunkCountXZ);
-            worldChunkCountY = Math.Max(1, worldChunkCountY);
+            chunkSectionCountY = Math.Max(1, chunkSectionCountY);
             renderChunksPerPatch = Math.Clamp(
                 renderChunksPerPatch,
                 1,

@@ -145,7 +145,7 @@ namespace MiniCivilization.World.Editor
                 renderRoot);
             entityRenderer.Configure(entityRoot);
             entityManager.Configure(entityCatalog, entityRenderer);
-            streamingController.Configure(null, renderRoot, 1, 0);
+            streamingController.Configure(null, renderRoot, 1, 1, 0);
             saveController.Configure("Worlds", "default.mcw", true);
             manager.Configure(
                 generator,

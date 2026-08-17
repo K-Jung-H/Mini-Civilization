@@ -22,7 +22,7 @@ namespace MiniCivilization.World.Runtime
         public int WorldHeight => HasData ? Data.Height : 0;
         public float CellSize => HasData ? Data.CellSize : 0f;
         public int ChunkSizeX => HasData ? Data.ChunkSizeX : 0;
-        public int ChunkSizeY => HasData ? Data.ChunkSizeY : 0;
+        public int ChunkSectionSizeY => HasData ? Data.ChunkSectionSizeY : 0;
         public int ChunkSizeZ => HasData ? Data.ChunkSizeZ : 0;
         public int SerializedByteCount => serializedWorld?.Length ?? 0;
         public WorldData Data

@@ -81,7 +81,7 @@ namespace MiniCivilization.World.Runtime
             }
 
             var builder = new Builder(runtime, roadTopology);
-            entities.CopyEntitiesTo(builder.EntityBuffer);
+            entities.CopyEntitiesInPreparedChunksTo(builder.EntityBuffer);
             builder.AddBuildings();
             builder.AddRoads();
             builder.ConnectBuildingPorts();
@@ -340,11 +340,24 @@ namespace MiniCivilization.World.Runtime
 
                     var layout = building.Layout;
                     var localNodes = new int[layout.WayPoints.Count];
+                    Array.Fill(localNodes, -1);
                     for (var pointIndex = 0;
                          pointIndex < layout.WayPoints.Count;
                          pointIndex++)
                     {
                         var point = layout.WayPoints[pointIndex];
+                        var cell = layout.ToWorld(
+                            building.Data,
+                            point.LocalCellOffset);
+                        if (!runtime.IsChunkPrepared(
+                                WorldCoordinateUtility.ToChunk(
+                                    cell.X,
+                                    cell.Z,
+                                    runtime.Data.ChunkSizeX)))
+                        {
+                            continue;
+                        }
+
                         var location = new BuildingWayLocation(
                             building.Id,
                             pointIndex);
@@ -356,9 +369,6 @@ namespace MiniCivilization.World.Runtime
                         nodeByBuildingPoint.Add(location, node);
                         buildingLocationByNode.Add(node, location);
 
-                        var cell = layout.ToWorld(
-                            building.Data,
-                            point.LocalCellOffset);
                         if (!buildingNodesByCell.TryGetValue(
                                 cell,
                                 out var nodes))
@@ -384,6 +394,12 @@ namespace MiniCivilization.World.Runtime
                          wayIndex++)
                     {
                         var way = layout.Ways[wayIndex];
+                        if (localNodes[way.PointA] < 0
+                            || localNodes[way.PointB] < 0)
+                        {
+                            continue;
+                        }
+
                         AddEdge(
                             localNodes[way.PointA],
                             localNodes[way.PointB],

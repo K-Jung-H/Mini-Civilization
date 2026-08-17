@@ -77,7 +77,7 @@ namespace MiniCivilization.World.Domain
         public WorldChangeType ChangeTypes { get; }
         public IReadOnlyList<CellCoordinate> ChangedCells { get; }
         public IReadOnlyList<CellColumnCoordinate> ChangedColumns { get; }
-        public IReadOnlyList<ChunkCoordinate> AffectedChunks { get; }
+        public IReadOnlyList<ChunkSectionCoordinate> AffectedSections { get; }
         public CellBounds AffectedBounds { get; }
 
         internal WorldChangeSet(
@@ -86,7 +86,7 @@ namespace MiniCivilization.World.Domain
             WorldChangeType changeTypes,
             IReadOnlyList<CellCoordinate> changedCells,
             IReadOnlyList<CellColumnCoordinate> changedColumns,
-            IReadOnlyList<ChunkCoordinate> affectedChunks,
+            IReadOnlyList<ChunkSectionCoordinate> affectedSections,
             CellBounds affectedBounds)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
@@ -96,8 +96,8 @@ namespace MiniCivilization.World.Domain
                 ?? throw new ArgumentNullException(nameof(changedCells));
             ChangedColumns = changedColumns
                 ?? throw new ArgumentNullException(nameof(changedColumns));
-            AffectedChunks = affectedChunks
-                ?? throw new ArgumentNullException(nameof(affectedChunks));
+            AffectedSections = affectedSections
+                ?? throw new ArgumentNullException(nameof(affectedSections));
             AffectedBounds = affectedBounds;
         }
 
@@ -113,7 +113,7 @@ namespace MiniCivilization.World.Domain
         public IReadOnlyList<EntityId> RemovedEntityIds { get; }
         public IReadOnlyList<EntityId> MovedEntityIds { get; }
         public IReadOnlyList<CellCoordinate> AffectedCells { get; }
-        public IReadOnlyList<ChunkCoordinate> AffectedChunks { get; }
+        public IReadOnlyList<ChunkSectionCoordinate> AffectedSections { get; }
         public bool WayTopologyChanged { get; }
 
         internal EntityChangeSet(
@@ -123,7 +123,7 @@ namespace MiniCivilization.World.Domain
             IReadOnlyList<EntityId> removedEntityIds,
             IReadOnlyList<EntityId> movedEntityIds,
             IReadOnlyList<CellCoordinate> affectedCells,
-            IReadOnlyList<ChunkCoordinate> affectedChunks,
+            IReadOnlyList<ChunkSectionCoordinate> affectedSections,
             bool wayTopologyChanged)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
@@ -136,8 +136,8 @@ namespace MiniCivilization.World.Domain
                 ?? throw new ArgumentNullException(nameof(movedEntityIds));
             AffectedCells = affectedCells
                 ?? throw new ArgumentNullException(nameof(affectedCells));
-            AffectedChunks = affectedChunks
-                ?? throw new ArgumentNullException(nameof(affectedChunks));
+            AffectedSections = affectedSections
+                ?? throw new ArgumentNullException(nameof(affectedSections));
             WayTopologyChanged = wayTopologyChanged;
         }
     }

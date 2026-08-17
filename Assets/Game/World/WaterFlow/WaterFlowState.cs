@@ -7,8 +7,6 @@ namespace MiniCivilization.World.WaterFlow
     public sealed class WaterFlowState
     {
         private readonly WorldData world;
-        private readonly int worldSize;
-        private readonly int worldHeight;
         private readonly Dictionary<CellColumnCoordinate, int>
             waterBodyIdsByColumn = new();
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
@@ -18,17 +16,12 @@ namespace MiniCivilization.World.WaterFlow
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
         public bool IsRecalculating { get; internal set; }
 
-        internal int CellCount => checked(
-            worldSize * worldSize * worldHeight);
-
         internal WaterFlowState(
             WorldData world,
             IReadOnlyList<WaterBody> bodies)
         {
             this.world = world
                 ?? throw new ArgumentNullException(nameof(world));
-            worldSize = world.Size;
-            worldHeight = world.Height;
             ReplaceWaterBodies(bodies);
         }
 
@@ -93,6 +86,9 @@ namespace MiniCivilization.World.WaterFlow
         internal void SynchronizeFromPersistent(CellCoordinate cell) =>
             stagedCells.Remove(cell);
 
+        internal bool BelongsTo(WorldData candidate) =>
+            ReferenceEquals(world, candidate);
+
         internal IEnumerable<KeyValuePair<CellCoordinate, WaterData>>
             EnumerateStagedCells() => stagedCells;
 
@@ -119,11 +115,9 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         private bool ContainsColumn(int x, int z) =>
-            (uint)x < worldSize && (uint)z < worldSize;
+            world.ContainsColumn(x, z);
 
         private bool ContainsCell(int x, int y, int z) =>
-            (uint)x < worldSize
-            && (uint)y < worldHeight
-            && (uint)z < worldSize;
+            world.Contains(x, y, z);
     }
 }

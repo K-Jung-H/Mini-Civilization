@@ -715,6 +715,23 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1910000021}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1900000090
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1910000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f12af89d7c734c8db82056f2b830b4aa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Runtime.WorldChunkStreamingController
+  streamingTarget: {fileID: 0}
+  worldOrigin: {fileID: 1900000011}
+  renderRadius: 5
+  entityRenderRadius: 4
+  simulationRadius: 3
 --- !u!1 &1910000000
 GameObject:
   m_ObjectHideFlags: 0
@@ -733,22 +750,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1900000090
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1910000000}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f12af89d7c734c8db82056f2b830b4aa, type: 3}
-  m_Name:
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Runtime.WorldChunkStreamingController
-  streamingTarget: {fileID: 0}
-  worldOrigin: {fileID: 1900000011}
-  renderRadius: 1
-  simulationRadius: 0
 --- !u!4 &1910000001
 Transform:
   m_ObjectHideFlags: 0

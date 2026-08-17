@@ -380,8 +380,8 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        public void InvalidateColumn(
-            ChunkColumnCoordinate coordinate,
+        public void InvalidateChunk(
+            ChunkCoordinate coordinate,
             int chunkSizeXZ)
         {
             if (chunkSizeXZ <= 0)

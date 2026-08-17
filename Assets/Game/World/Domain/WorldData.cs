@@ -3,19 +3,19 @@ using System.Collections.Generic;
 
 namespace MiniCivilization.World.Domain
 {
-    public sealed class ChunkData
+    public sealed class ChunkSection
     {
         private readonly CellData[] cells;
         private int nonDefaultCellCount;
 
-        public ChunkCoordinate Coordinate { get; }
+        public ChunkSectionCoordinate Coordinate { get; }
         public int SizeX { get; }
         public int SizeY { get; }
         public int SizeZ { get; }
         public bool IsEmpty => nonDefaultCellCount == 0;
 
-        public ChunkData(
-            ChunkCoordinate coordinate,
+        public ChunkSection(
+            ChunkSectionCoordinate coordinate,
             int sizeX,
             int sizeY,
             int sizeZ)
@@ -79,71 +79,71 @@ namespace MiniCivilization.World.Domain
         }
     }
 
-    public sealed class WorldChunkColumn
+    public sealed class Chunk
     {
-        private readonly ChunkData[] chunksByY;
+        private readonly ChunkSection[] sectionsByY;
         private readonly List<EntityData> entities = new();
 
-        public ChunkColumnCoordinate Coordinate { get; }
-        public IReadOnlyList<ChunkData> ChunksByY => chunksByY;
+        public ChunkCoordinate Coordinate { get; }
+        public IReadOnlyList<ChunkSection> SectionsByY => sectionsByY;
         public IReadOnlyList<EntityData> Entities => entities;
 
-        internal WorldChunkColumn(
-            ChunkColumnCoordinate coordinate,
-            int chunkCountY)
+        internal Chunk(
+            ChunkCoordinate coordinate,
+            int sectionCountY)
         {
             Coordinate = coordinate;
-            chunksByY = new ChunkData[chunkCountY];
+            sectionsByY = new ChunkSection[sectionCountY];
         }
 
-        public bool TryGetChunk(int chunkY, out ChunkData chunk)
+        public bool TryGetSection(int sectionY, out ChunkSection section)
         {
-            if ((uint)chunkY >= chunksByY.Length)
+            if ((uint)sectionY >= sectionsByY.Length)
             {
-                chunk = null;
+                section = null;
                 return false;
             }
 
-            chunk = chunksByY[chunkY];
-            return chunk != null;
+            section = sectionsByY[sectionY];
+            return section != null;
         }
 
-        internal ChunkData GetOrCreateChunk(
-            int chunkY,
+        internal ChunkSection GetOrCreateSection(
+            int sectionY,
             int chunkSizeX,
-            int chunkSizeY,
+            int sectionSizeY,
             int chunkSizeZ)
         {
-            if ((uint)chunkY >= chunksByY.Length)
+            if ((uint)sectionY >= sectionsByY.Length)
             {
-                throw new ArgumentOutOfRangeException(nameof(chunkY));
+                throw new ArgumentOutOfRangeException(nameof(sectionY));
             }
 
-            var chunk = chunksByY[chunkY];
-            if (chunk != null)
+            var section = sectionsByY[sectionY];
+            if (section != null)
             {
-                return chunk;
+                return section;
             }
 
-            chunk = new ChunkData(
-                new ChunkCoordinate(Coordinate.X, chunkY, Coordinate.Z),
+            section = new ChunkSection(
+                new ChunkSectionCoordinate(Coordinate.X, sectionY, Coordinate.Z),
                 chunkSizeX,
-                chunkSizeY,
+                sectionSizeY,
                 chunkSizeZ);
-            chunksByY[chunkY] = chunk;
-            return chunk;
+            sectionsByY[sectionY] = section;
+            return section;
         }
 
-        internal void ReleaseChunkIfEmpty(int chunkY)
+        internal void ReleaseSectionIfEmpty(int sectionY)
         {
-            if ((uint)chunkY >= chunksByY.Length)
+            if ((uint)sectionY >= sectionsByY.Length)
             {
-                throw new ArgumentOutOfRangeException(nameof(chunkY));
+                throw new ArgumentOutOfRangeException(nameof(sectionY));
             }
 
-            if (chunksByY[chunkY]?.IsEmpty == true)
+            if (sectionsByY[sectionY]?.IsEmpty == true)
             {
-                chunksByY[chunkY] = null;
+                sectionsByY[sectionY] = null;
             }
         }
 
@@ -158,8 +158,8 @@ namespace MiniCivilization.World.Domain
 
     public sealed class WorldData
     {
-        private readonly Dictionary<ChunkColumnCoordinate, WorldChunkColumn>
-            loadedColumns = new();
+        private readonly Dictionary<ChunkCoordinate, Chunk>
+            loadedChunks = new();
         private readonly Dictionary<EntityId, EntityData> entitiesById = new();
 
         public WorldSettingsData Settings { get; }
@@ -168,17 +168,17 @@ namespace MiniCivilization.World.Domain
         public float CellSize => Settings.CellSize;
         public float HeightStep => Settings.HeightStep;
         public int ChunkSizeX => Settings.ChunkCellCountXZ;
-        public int ChunkSizeY => Settings.ChunkCellCountY;
+        public int ChunkSectionSizeY => Settings.ChunkSectionCellCountY;
         public int ChunkSizeZ => Settings.ChunkCellCountXZ;
         public int ChunkCountX => Settings.WorldChunkCountXZ;
-        public int ChunkCountY => Settings.WorldChunkCountY;
+        public int ChunkSectionCountY => Settings.ChunkSectionCountY;
         public int ChunkCountZ => Settings.WorldChunkCountXZ;
         public int Seed => Settings.Seed;
         public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
         public int PondMaximumArea => Settings.PondMaximumArea;
         public WaterFlowScheduleData WaterFlowSchedule { get; }
-        public IReadOnlyDictionary<ChunkColumnCoordinate, WorldChunkColumn>
-            LoadedColumns => loadedColumns;
+        public IReadOnlyDictionary<ChunkCoordinate, Chunk>
+            LoadedChunks => loadedChunks;
         public int EntityCount => entitiesById.Count;
 
         public WorldData(WorldSettingsData settings)
@@ -198,38 +198,38 @@ namespace MiniCivilization.World.Domain
         public bool ContainsColumn(int x, int z) =>
             IsWithinHorizontalBounds(x, z);
 
-        public bool IsColumnLoaded(ChunkColumnCoordinate coordinate) =>
-            loadedColumns.ContainsKey(coordinate);
+        public bool IsChunkLoaded(ChunkCoordinate coordinate) =>
+            loadedChunks.ContainsKey(coordinate);
 
-        public bool IsColumnLoaded(int cellX, int cellZ) =>
-            loadedColumns.ContainsKey(ToChunkColumn(cellX, cellZ));
+        public bool IsChunkLoaded(int cellX, int cellZ) =>
+            loadedChunks.ContainsKey(ToChunk(cellX, cellZ));
 
-        public bool TryGetColumn(
-            ChunkColumnCoordinate coordinate,
-            out WorldChunkColumn column) =>
-            loadedColumns.TryGetValue(coordinate, out column);
+        public bool TryGetChunk(
+            ChunkCoordinate coordinate,
+            out Chunk chunk) =>
+            loadedChunks.TryGetValue(coordinate, out chunk);
 
         public CellData GetCell(int x, int y, int z)
         {
             ValidateCellCoordinate(x, y, z);
-            GetChunkAndLocal(
+            GetSectionAndLocal(
                 x,
                 y,
                 z,
-                createColumn: false,
                 createChunk: false,
-                out var chunk,
+                createSection: false,
+                out var section,
                 out var localIndex,
                 out _);
-            return chunk == null
+            return section == null
                 ? default
-                : chunk.GetCell(localIndex);
+                : section.GetCell(localIndex);
         }
 
         public bool TryGetCell(int x, int y, int z, out CellData cell)
         {
             if (!Contains(x, y, z)
-                || !IsColumnLoaded(x, z))
+                || !IsChunkLoaded(x, z))
             {
                 cell = default;
                 return false;
@@ -243,92 +243,95 @@ namespace MiniCivilization.World.Domain
         {
             ValidateCellCoordinate(x, y, z);
             cell.Normalize();
-            GetChunkAndLocal(
+            GetSectionAndLocal(
                 x,
                 y,
                 z,
-                createColumn: true,
-                createChunk: !cell.Equals(default),
-                out var chunk,
+                createChunk: true,
+                createSection: !cell.Equals(default),
+                out var section,
                 out var localIndex,
-                out var chunkY);
-            if (chunk == null)
+                out var sectionY);
+            if (section == null)
             {
                 return false;
             }
 
-            var changed = chunk.SetCell(localIndex, cell);
-            if (changed && chunk.IsEmpty)
+            var changed = section.SetCell(localIndex, cell);
+            if (changed && section.IsEmpty)
             {
-                loadedColumns[ToChunkColumn(x, z)].ReleaseChunkIfEmpty(chunkY);
+                loadedChunks[ToChunk(x, z)].ReleaseSectionIfEmpty(sectionY);
             }
 
             return changed;
         }
 
-        public bool TryGetChunk(
-            ChunkCoordinate coordinate,
-            out ChunkData chunk)
+        public bool TryGetSection(
+            ChunkSectionCoordinate coordinate,
+            out ChunkSection section)
         {
-            if ((uint)coordinate.Y >= ChunkCountY
-                || !loadedColumns.TryGetValue(
-                    new ChunkColumnCoordinate(coordinate.X, coordinate.Z),
-                    out var column))
+            if ((uint)coordinate.Y >= ChunkSectionCountY
+                || !loadedChunks.TryGetValue(
+                    new ChunkCoordinate(coordinate.X, coordinate.Z),
+                    out var chunk))
             {
-                chunk = null;
+                section = null;
                 return false;
             }
 
-            return column.TryGetChunk(coordinate.Y, out chunk);
+            return chunk.TryGetSection(coordinate.Y, out section);
         }
 
-        public ChunkData GetChunk(int chunkX, int chunkY, int chunkZ)
+        public ChunkSection GetSection(int chunkX, int sectionY, int chunkZ)
         {
-            var coordinate = new ChunkCoordinate(chunkX, chunkY, chunkZ);
-            if (!TryGetChunk(coordinate, out var chunk))
+            var coordinate = new ChunkSectionCoordinate(chunkX, sectionY, chunkZ);
+            if (!TryGetSection(coordinate, out var section))
             {
                 throw new InvalidOperationException(
-                    $"Chunk {coordinate} is not loaded or is known to be empty.");
+                    $"Chunk Section {coordinate} is not loaded or is known to be empty.");
             }
 
-            return chunk;
+            return section;
         }
 
-        internal ChunkData GetOrCreateChunk(int chunkX, int chunkY, int chunkZ)
+        internal ChunkSection GetOrCreateSection(
+            int chunkX,
+            int sectionY,
+            int chunkZ)
         {
             if ((uint)chunkX >= ChunkCountX
-                || (uint)chunkY >= ChunkCountY
+                || (uint)sectionY >= ChunkSectionCountY
                 || (uint)chunkZ >= ChunkCountZ)
             {
                 throw new ArgumentOutOfRangeException(nameof(chunkX));
             }
 
-            var column = GetOrCreateColumn(
-                new ChunkColumnCoordinate(chunkX, chunkZ));
-            return column.GetOrCreateChunk(
-                chunkY,
+            var chunk = GetOrCreateChunk(
+                new ChunkCoordinate(chunkX, chunkZ));
+            return chunk.GetOrCreateSection(
+                sectionY,
                 ChunkSizeX,
-                ChunkSizeY,
+                ChunkSectionSizeY,
                 ChunkSizeZ);
         }
 
-        public IEnumerable<WorldChunkColumn> EnumerateLoadedColumns()
+        public IEnumerable<Chunk> EnumerateLoadedChunks()
         {
-            foreach (var column in loadedColumns.Values)
+            foreach (var chunk in loadedChunks.Values)
             {
-                yield return column;
+                yield return chunk;
             }
         }
 
-        public IEnumerable<ChunkData> EnumerateChunks()
+        public IEnumerable<ChunkSection> EnumerateSections()
         {
-            foreach (var column in loadedColumns.Values)
+            foreach (var chunk in loadedChunks.Values)
             {
-                for (var chunkY = 0; chunkY < ChunkCountY; chunkY++)
+                for (var sectionY = 0; sectionY < ChunkSectionCountY; sectionY++)
                 {
-                    if (column.TryGetChunk(chunkY, out var chunk))
+                    if (chunk.TryGetSection(sectionY, out var section))
                     {
-                        yield return chunk;
+                        yield return section;
                     }
                 }
             }
@@ -344,7 +347,7 @@ namespace MiniCivilization.World.Domain
 
         public bool HasTerrainCell(int x, int z)
         {
-            if (!ContainsColumn(x, z) || !IsColumnLoaded(x, z))
+            if (!ContainsColumn(x, z) || !IsChunkLoaded(x, z))
             {
                 return false;
             }
@@ -377,7 +380,7 @@ namespace MiniCivilization.World.Domain
                     $"Entity ID {entity.Id} already exists in the world.");
             }
 
-            GetOrCreateColumn(ToChunkColumn(
+            GetOrCreateChunk(ToChunk(
                 entity.AnchorCell.X,
                 entity.AnchorCell.Z)).AddEntity(entity);
         }
@@ -390,14 +393,14 @@ namespace MiniCivilization.World.Domain
                     $"Entity ID {id} does not exist in the world.");
             }
 
-            var coordinate = ToChunkColumn(
+            var coordinate = ToChunk(
                 entity.AnchorCell.X,
                 entity.AnchorCell.Z);
-            if (!loadedColumns.TryGetValue(coordinate, out var column)
-                || !column.RemoveEntity(entity))
+            if (!loadedChunks.TryGetValue(coordinate, out var chunk)
+                || !chunk.RemoveEntity(entity))
             {
                 throw new InvalidOperationException(
-                    $"Entity ID {id} is not owned by column {coordinate}.");
+                    $"Entity ID {id} is not owned by Chunk {coordinate}.");
             }
 
             entitiesById.Remove(id);
@@ -419,27 +422,27 @@ namespace MiniCivilization.World.Domain
                     $"Entity ID {entity.Id} does not exist in the world.");
             }
 
-            var previousColumnCoordinate = ToChunkColumn(
+            var previousChunkCoordinate = ToChunk(
                 entity.AnchorCell.X,
                 entity.AnchorCell.Z);
-            var nextColumnCoordinate = ToChunkColumn(destination.X, destination.Z);
-            if (!previousColumnCoordinate.Equals(nextColumnCoordinate))
+            var nextChunkCoordinate = ToChunk(destination.X, destination.Z);
+            if (!previousChunkCoordinate.Equals(nextChunkCoordinate))
             {
-                var previousColumn = loadedColumns[previousColumnCoordinate];
-                if (!previousColumn.RemoveEntity(entity))
+                var previousChunk = loadedChunks[previousChunkCoordinate];
+                if (!previousChunk.RemoveEntity(entity))
                 {
                     throw new InvalidOperationException(
-                        $"Entity ID {entity.Id} is not owned by column {previousColumnCoordinate}.");
+                        $"Entity ID {entity.Id} is not owned by Chunk {previousChunkCoordinate}.");
                 }
 
-                GetOrCreateColumn(nextColumnCoordinate).AddEntity(entity);
+                GetOrCreateChunk(nextChunkCoordinate).AddEntity(entity);
             }
 
             entity.MoveTo(destination);
         }
 
-        internal WorldChunkColumn EnsureColumnLoaded(
-            ChunkColumnCoordinate coordinate)
+        internal Chunk EnsureChunkLoaded(
+            ChunkCoordinate coordinate)
         {
             if ((uint)coordinate.X >= ChunkCountX
                 || (uint)coordinate.Z >= ChunkCountZ)
@@ -447,7 +450,7 @@ namespace MiniCivilization.World.Domain
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }
 
-            return GetOrCreateColumn(coordinate);
+            return GetOrCreateChunk(coordinate);
         }
 
         internal void SetCellBulk(int x, int y, int z, CellData cell)
@@ -469,80 +472,80 @@ namespace MiniCivilization.World.Domain
             int z,
             CellData cell)
         {
-            GetChunkAndLocal(
+            GetSectionAndLocal(
                 x,
                 y,
                 z,
-                createColumn: true,
-                createChunk: !cell.Equals(default),
-                out var chunk,
+                createChunk: true,
+                createSection: !cell.Equals(default),
+                out var section,
                 out var localIndex,
-                out var chunkY);
-            if (chunk == null)
+                out var sectionY);
+            if (section == null)
             {
                 return;
             }
 
-            chunk.SetCellRaw(localIndex, cell);
-            if (chunk.IsEmpty)
+            section.SetCellRaw(localIndex, cell);
+            if (section.IsEmpty)
             {
-                loadedColumns[ToChunkColumn(x, z)].ReleaseChunkIfEmpty(chunkY);
+                loadedChunks[ToChunk(x, z)].ReleaseSectionIfEmpty(sectionY);
             }
         }
 
-        private WorldChunkColumn GetOrCreateColumn(
-            ChunkColumnCoordinate coordinate)
+        private Chunk GetOrCreateChunk(
+            ChunkCoordinate coordinate)
         {
-            if (loadedColumns.TryGetValue(coordinate, out var column))
+            if (loadedChunks.TryGetValue(coordinate, out var chunk))
             {
-                return column;
+                return chunk;
             }
 
-            column = new WorldChunkColumn(coordinate, ChunkCountY);
-            loadedColumns.Add(coordinate, column);
-            return column;
+            chunk = new Chunk(coordinate, ChunkSectionCountY);
+            loadedChunks.Add(coordinate, chunk);
+            return chunk;
         }
 
-        private ChunkColumnCoordinate ToChunkColumn(int x, int z) =>
-            WorldCoordinateUtility.ToChunkColumn(x, z, ChunkSizeX);
+        private ChunkCoordinate ToChunk(int x, int z) =>
+            WorldCoordinateUtility.ToChunk(x, z, ChunkSizeX);
 
-        private void GetChunkAndLocal(
+        private void GetSectionAndLocal(
             int x,
             int y,
             int z,
-            bool createColumn,
             bool createChunk,
-            out ChunkData chunk,
+            bool createSection,
+            out ChunkSection section,
             out LocalCellIndex localIndex,
-            out int chunkY)
+            out int sectionY)
         {
-            var columnCoordinate = ToChunkColumn(x, z);
-            chunkY = WorldCoordinateUtility.FloorDivide(y, ChunkSizeY);
+            var chunkCoordinate = ToChunk(x, z);
+            sectionY = WorldCoordinateUtility.FloorDivide(y, ChunkSectionSizeY);
             localIndex = WorldCoordinateUtility.ToLocalCellIndex(
                 new CellCoordinate(x, y, z),
                 ChunkSizeX,
-                ChunkSizeY);
+                ChunkSectionSizeY);
 
-            if (!loadedColumns.TryGetValue(columnCoordinate, out var column))
+            if (!loadedChunks.TryGetValue(chunkCoordinate, out var chunk))
             {
-                if (!createColumn)
+                if (!createChunk)
                 {
                     throw new InvalidOperationException(
-                        $"World column {columnCoordinate} is not loaded.");
+                        $"Chunk {chunkCoordinate} is not loaded.");
                 }
 
-                column = GetOrCreateColumn(columnCoordinate);
+                chunk = GetOrCreateChunk(chunkCoordinate);
             }
 
-            if (column.TryGetChunk(chunkY, out chunk) || !createChunk)
+            if (chunk.TryGetSection(sectionY, out section) || !createSection)
             {
                 return;
             }
 
-            chunk = column.GetOrCreateChunk(
-                chunkY,
+            section = chunk.GetOrCreateSection(
+                sectionY,
                 ChunkSizeX,
-                ChunkSizeY,
+                ChunkSectionSizeY,
                 ChunkSizeZ);
         }
 

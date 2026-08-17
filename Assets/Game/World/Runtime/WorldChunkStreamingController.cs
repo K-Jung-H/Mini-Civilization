@@ -10,12 +10,14 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private Transform streamingTarget;
         [SerializeField] private Transform worldOrigin;
         [SerializeField, Min(0)] private int renderRadius = 1;
+        [SerializeField, Min(0)] private int entityRenderRadius = 1;
         [SerializeField, Min(0)] private int simulationRadius;
 
         private WorldRuntime runtime;
         private Transform resolvedTarget;
-        private ChunkColumnCoordinate currentCenter;
+        private ChunkCoordinate currentCenter;
         private int appliedRenderRadius = -1;
+        private int appliedEntityRenderRadius = -1;
         private int appliedSimulationRadius = -1;
         private bool hasCenter;
 
@@ -23,9 +25,10 @@ namespace MiniCivilization.World.Runtime
         public Transform ResolvedTarget => resolvedTarget;
         public Transform WorldOrigin => worldOrigin;
         public int RenderRadius => renderRadius;
+        public int EntityRenderRadius => entityRenderRadius;
         public int SimulationRadius => simulationRadius;
         public bool HasCenter => hasCenter;
-        public ChunkColumnCoordinate CurrentCenter => currentCenter;
+        public ChunkCoordinate CurrentCenter => currentCenter;
 
         private void Update()
         {
@@ -35,35 +38,27 @@ namespace MiniCivilization.World.Runtime
         private void OnValidate()
         {
             renderRadius = Math.Max(0, renderRadius);
-            simulationRadius = Math.Clamp(
-                simulationRadius,
-                0,
-                renderRadius);
+            entityRenderRadius = Math.Max(0, entityRenderRadius);
+            simulationRadius = Math.Max(0, simulationRadius);
         }
 
         public void Configure(
             Transform target,
             Transform origin,
-            int columnRenderRadius,
-            int columnSimulationRadius)
+            int chunkRenderRadius,
+            int entityRadius,
+            int chunkSimulationRadius)
         {
-            if (columnRenderRadius < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(columnRenderRadius));
-            }
-
-            if (columnSimulationRadius < 0
-                || columnSimulationRadius > columnRenderRadius)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(columnSimulationRadius));
-            }
+            ValidateRadii(
+                chunkRenderRadius,
+                entityRadius,
+                chunkSimulationRadius);
 
             streamingTarget = target;
             worldOrigin = origin;
-            renderRadius = columnRenderRadius;
-            simulationRadius = columnSimulationRadius;
+            renderRadius = chunkRenderRadius;
+            entityRenderRadius = entityRadius;
+            simulationRadius = chunkSimulationRadius;
             resolvedTarget = null;
             RefreshStreaming(force: true);
         }
@@ -76,25 +71,43 @@ namespace MiniCivilization.World.Runtime
         }
 
         public void SetRadii(
-            int columnRenderRadius,
-            int columnSimulationRadius)
+            int chunkRenderRadius,
+            int entityRadius,
+            int chunkSimulationRadius)
         {
-            if (columnRenderRadius < 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(columnRenderRadius));
-            }
+            ValidateRadii(
+                chunkRenderRadius,
+                entityRadius,
+                chunkSimulationRadius);
 
-            if (columnSimulationRadius < 0
-                || columnSimulationRadius > columnRenderRadius)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(columnSimulationRadius));
-            }
-
-            renderRadius = columnRenderRadius;
-            simulationRadius = columnSimulationRadius;
+            renderRadius = chunkRenderRadius;
+            entityRenderRadius = entityRadius;
+            simulationRadius = chunkSimulationRadius;
             RefreshStreaming(force: true);
+        }
+
+        private static void ValidateRadii(
+            int chunkRenderRadius,
+            int entityRadius,
+            int chunkSimulationRadius)
+        {
+            if (chunkRenderRadius < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(chunkRenderRadius));
+            }
+
+            if (entityRadius < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(entityRadius));
+            }
+
+            if (chunkSimulationRadius < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(chunkSimulationRadius));
+            }
         }
 
         public void Bind(WorldRuntime worldRuntime, Transform origin)
@@ -114,17 +127,19 @@ namespace MiniCivilization.World.Runtime
             resolvedTarget = null;
             hasCenter = false;
             appliedRenderRadius = -1;
+            appliedEntityRenderRadius = -1;
             appliedSimulationRadius = -1;
             RefreshStreaming(force: true);
         }
 
         public void Unbind()
         {
-            runtime?.ClearStreamingColumns();
+            runtime?.ClearStreamingChunks();
             runtime = null;
             resolvedTarget = null;
             hasCenter = false;
             appliedRenderRadius = -1;
+            appliedEntityRenderRadius = -1;
             appliedSimulationRadius = -1;
         }
 
@@ -141,11 +156,12 @@ namespace MiniCivilization.World.Runtime
                 return;
             }
 
-            var center = ResolveCenterColumn(target.position, runtime.Data);
+            var center = ResolveCenterChunk(target.position, runtime.Data);
             if (!force
                 && hasCenter
                 && center.Equals(currentCenter)
                 && appliedRenderRadius == renderRadius
+                && appliedEntityRenderRadius == entityRenderRadius
                 && appliedSimulationRadius == simulationRadius)
             {
                 return;
@@ -154,10 +170,12 @@ namespace MiniCivilization.World.Runtime
             currentCenter = center;
             hasCenter = true;
             appliedRenderRadius = renderRadius;
+            appliedEntityRenderRadius = entityRenderRadius;
             appliedSimulationRadius = simulationRadius;
-            runtime.UpdateStreamingColumns(
+            runtime.UpdateStreamingChunks(
                 center,
                 renderRadius,
+                entityRenderRadius,
                 simulationRadius);
         }
 
@@ -181,7 +199,7 @@ namespace MiniCivilization.World.Runtime
             return resolvedTarget;
         }
 
-        private ChunkColumnCoordinate ResolveCenterColumn(
+        private ChunkCoordinate ResolveCenterChunk(
             Vector3 targetPosition,
             WorldData world)
         {
@@ -191,7 +209,7 @@ namespace MiniCivilization.World.Runtime
             var chunkWorldSize = world.ChunkSizeX * world.CellSize;
             var chunkX = Mathf.FloorToInt(localPosition.x / chunkWorldSize);
             var chunkZ = Mathf.FloorToInt(localPosition.z / chunkWorldSize);
-            return new ChunkColumnCoordinate(
+            return new ChunkCoordinate(
                 Math.Clamp(chunkX, 0, world.ChunkCountX - 1),
                 Math.Clamp(chunkZ, 0, world.ChunkCountZ - 1));
         }

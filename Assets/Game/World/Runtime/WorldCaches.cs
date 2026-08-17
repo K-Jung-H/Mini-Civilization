@@ -6,9 +6,9 @@ namespace MiniCivilization.World.Runtime
 {
     public sealed class SurfaceCache
     {
-        private sealed class ColumnData
+        private sealed class ChunkCacheData
         {
-            public ColumnData(int cellCount)
+            public ChunkCacheData(int cellCount)
             {
                 Heights = new SurfaceHeightData[cellCount];
             }
@@ -17,7 +17,7 @@ namespace MiniCivilization.World.Runtime
         }
 
         private readonly WorldData world;
-        private readonly Dictionary<ChunkColumnCoordinate, ColumnData> columns =
+        private readonly Dictionary<ChunkCoordinate, ChunkCacheData> chunks =
             new();
 
         internal SurfaceCache(WorldData world)
@@ -25,14 +25,14 @@ namespace MiniCivilization.World.Runtime
             this.world = world ?? throw new ArgumentNullException(nameof(world));
         }
 
-        public int PreparedColumnCount => columns.Count;
+        public int PreparedChunkCount => chunks.Count;
 
-        public bool IsPrepared(ChunkColumnCoordinate coordinate) =>
-            columns.ContainsKey(coordinate);
+        public bool IsPrepared(ChunkCoordinate coordinate) =>
+            chunks.ContainsKey(coordinate);
 
         public bool IsPrepared(int x, int z) =>
             world.ContainsColumn(x, z)
-            && columns.ContainsKey(ToChunkColumn(x, z));
+            && chunks.ContainsKey(ToChunk(x, z));
 
         public SurfaceHeightData GetSurfaceHeight(int x, int z)
         {
@@ -41,8 +41,8 @@ namespace MiniCivilization.World.Runtime
                 return default;
             }
 
-            var coordinate = ToChunkColumn(x, z);
-            if (columns.TryGetValue(coordinate, out var column))
+            var coordinate = ToChunk(x, z);
+            if (chunks.TryGetValue(coordinate, out var column))
             {
                 return column.Heights[ToLocalColumnIndex(coordinate, x, z)];
             }
@@ -52,11 +52,11 @@ namespace MiniCivilization.World.Runtime
 
         public void RebuildAll()
         {
-            columns.Clear();
+            chunks.Clear();
             for (var chunkZ = 0; chunkZ < world.ChunkCountZ; chunkZ++)
             for (var chunkX = 0; chunkX < world.ChunkCountX; chunkX++)
             {
-                PrepareColumn(new ChunkColumnCoordinate(chunkX, chunkZ));
+                PrepareChunk(new ChunkCoordinate(chunkX, chunkZ));
             }
         }
 
@@ -68,25 +68,25 @@ namespace MiniCivilization.World.Runtime
                     $"World column ({x}, {z}) is outside the world.");
             }
 
-            var coordinate = ToChunkColumn(x, z);
-            if (columns.TryGetValue(coordinate, out var column))
+            var coordinate = ToChunk(x, z);
+            if (chunks.TryGetValue(coordinate, out var column))
             {
                 column.Heights[ToLocalColumnIndex(coordinate, x, z)] =
                     ResolveSurfaceHeight(x, z);
             }
         }
 
-        internal bool PrepareColumn(ChunkColumnCoordinate coordinate)
+        internal bool PrepareChunk(ChunkCoordinate coordinate)
         {
-            ValidateChunkColumn(coordinate);
-            if (columns.ContainsKey(coordinate))
+            ValidateChunk(coordinate);
+            if (chunks.ContainsKey(coordinate))
             {
                 return false;
             }
 
-            var column = new ColumnData(
+            var column = new ChunkCacheData(
                 checked(world.ChunkSizeX * world.ChunkSizeZ));
-            columns.Add(coordinate, column);
+            chunks.Add(coordinate, column);
             var startX = coordinate.X * world.ChunkSizeX;
             var startZ = coordinate.Z * world.ChunkSizeZ;
             var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
@@ -101,8 +101,8 @@ namespace MiniCivilization.World.Runtime
             return true;
         }
 
-        internal bool ReleaseColumn(ChunkColumnCoordinate coordinate) =>
-            columns.Remove(coordinate);
+        internal bool ReleaseChunk(ChunkCoordinate coordinate) =>
+            chunks.Remove(coordinate);
 
         private SurfaceHeightData ResolveSurfaceHeight(int x, int z)
         {
@@ -142,17 +142,17 @@ namespace MiniCivilization.World.Runtime
             };
         }
 
-        private ChunkColumnCoordinate ToChunkColumn(int x, int z) =>
-            WorldCoordinateUtility.ToChunkColumn(x, z, world.ChunkSizeX);
+        private ChunkCoordinate ToChunk(int x, int z) =>
+            WorldCoordinateUtility.ToChunk(x, z, world.ChunkSizeX);
 
         private int ToLocalColumnIndex(
-            ChunkColumnCoordinate coordinate,
+            ChunkCoordinate coordinate,
             int x,
             int z) =>
             x - coordinate.X * world.ChunkSizeX
             + world.ChunkSizeX * (z - coordinate.Z * world.ChunkSizeZ);
 
-        private void ValidateChunkColumn(ChunkColumnCoordinate coordinate)
+        private void ValidateChunk(ChunkCoordinate coordinate)
         {
             if ((uint)coordinate.X >= world.ChunkCountX
                 || (uint)coordinate.Z >= world.ChunkCountZ)
@@ -169,9 +169,9 @@ namespace MiniCivilization.World.Runtime
             (1, 0), (-1, 0), (0, 1), (0, -1)
         };
 
-        private sealed class ColumnData
+        private sealed class ChunkCacheData
         {
-            public ColumnData(int horizontalCellCount, int worldHeight)
+            public ChunkCacheData(int horizontalCellCount, int worldHeight)
             {
                 OpenHeights = new ushort[checked(
                     horizontalCellCount * worldHeight)];
@@ -186,7 +186,7 @@ namespace MiniCivilization.World.Runtime
 
         private readonly WorldData world;
         private readonly SurfaceCache surface;
-        private readonly Dictionary<ChunkColumnCoordinate, ColumnData> columns =
+        private readonly Dictionary<ChunkCoordinate, ChunkCacheData> chunks =
             new();
         private readonly Queue<CellColumnCoordinate> waterQueue = new();
 
@@ -196,16 +196,16 @@ namespace MiniCivilization.World.Runtime
             this.surface = surface ?? throw new ArgumentNullException(nameof(surface));
         }
 
-        public bool HasData => columns.Count > 0;
-        public int PreparedColumnCount => columns.Count;
+        public bool HasData => chunks.Count > 0;
+        public int PreparedChunkCount => chunks.Count;
 
-        public bool IsPrepared(ChunkColumnCoordinate coordinate) =>
-            columns.ContainsKey(coordinate);
+        public bool IsPrepared(ChunkCoordinate coordinate) =>
+            chunks.ContainsKey(coordinate);
 
         public PathData GetPathData(int x, int y, int z)
         {
             if (!world.Contains(x, y, z)
-                || !TryGetColumnData(x, z, out var coordinate, out var column))
+                || !TryGetChunkCacheData(x, z, out var coordinate, out var column))
             {
                 return default;
             }
@@ -231,7 +231,7 @@ namespace MiniCivilization.World.Runtime
             foreach (var changed in changedColumns)
             {
                 if (!world.ContainsColumn(changed.X, changed.Z)
-                    || !TryGetColumnData(
+                    || !TryGetChunkCacheData(
                         changed.X,
                         changed.Z,
                         out var coordinate,
@@ -251,7 +251,7 @@ namespace MiniCivilization.World.Runtime
         public void RebuildWaterDistances()
         {
             waterQueue.Clear();
-            foreach (var pair in columns)
+            foreach (var pair in chunks)
             {
                 var coordinate = pair.Key;
                 var column = pair.Value;
@@ -273,7 +273,7 @@ namespace MiniCivilization.World.Runtime
                 }
             }
 
-            foreach (var pair in columns)
+            foreach (var pair in chunks)
             {
                 var coordinate = pair.Key;
                 var column = pair.Value;
@@ -299,7 +299,7 @@ namespace MiniCivilization.World.Runtime
             while (waterQueue.Count > 0)
             {
                 var current = waterQueue.Dequeue();
-                if (!TryGetColumnData(
+                if (!TryGetChunkCacheData(
                         current.X,
                         current.Z,
                         out var currentCoordinate,
@@ -325,7 +325,7 @@ namespace MiniCivilization.World.Runtime
                     var direction = Directions[directionIndex];
                     var nextX = current.X + direction.x;
                     var nextZ = current.Z + direction.z;
-                    if (!TryGetColumnData(
+                    if (!TryGetChunkCacheData(
                             nextX,
                             nextZ,
                             out var nextCoordinate,
@@ -370,18 +370,18 @@ namespace MiniCivilization.World.Runtime
             }
         }
 
-        internal bool PrepareColumn(
-            ChunkColumnCoordinate coordinate,
+        internal bool PrepareChunk(
+            ChunkCoordinate coordinate,
             bool rebuildWaterDistances)
         {
-            ValidateChunkColumn(coordinate);
-            if (columns.ContainsKey(coordinate))
+            ValidateChunk(coordinate);
+            if (chunks.ContainsKey(coordinate))
             {
                 return false;
             }
 
-            var column = new ColumnData(HorizontalCellCount, world.Height);
-            columns.Add(coordinate, column);
+            var column = new ChunkCacheData(HorizontalCellCount, world.Height);
+            chunks.Add(coordinate, column);
             var startX = coordinate.X * world.ChunkSizeX;
             var startZ = coordinate.Z * world.ChunkSizeZ;
             var endX = Math.Min(startX + world.ChunkSizeX, world.Size);
@@ -400,11 +400,11 @@ namespace MiniCivilization.World.Runtime
             return true;
         }
 
-        internal bool ReleaseColumn(
-            ChunkColumnCoordinate coordinate,
+        internal bool ReleaseChunk(
+            ChunkCoordinate coordinate,
             bool rebuildWaterDistances)
         {
-            if (!columns.Remove(coordinate))
+            if (!chunks.Remove(coordinate))
             {
                 return false;
             }
@@ -418,8 +418,8 @@ namespace MiniCivilization.World.Runtime
         }
 
         private void RebuildOpenHeightColumn(
-            ChunkColumnCoordinate coordinate,
-            ColumnData column,
+            ChunkCoordinate coordinate,
+            ChunkCacheData column,
             int x,
             int z)
         {
@@ -460,7 +460,7 @@ namespace MiniCivilization.World.Runtime
                 var direction = Directions[directionIndex];
                 var nextX = x + direction.x;
                 var nextZ = z + direction.z;
-                if (!TryGetColumnData(
+                if (!TryGetChunkCacheData(
                         nextX,
                         nextZ,
                         out var coordinate,
@@ -503,16 +503,16 @@ namespace MiniCivilization.World.Runtime
 
         private bool IsPreparedCellColumn(int x, int z) =>
             world.ContainsColumn(x, z)
-            && columns.ContainsKey(WorldCoordinateUtility.ToChunkColumn(
+            && chunks.ContainsKey(WorldCoordinateUtility.ToChunk(
                 x,
                 z,
                 world.ChunkSizeX));
 
-        private bool TryGetColumnData(
+        private bool TryGetChunkCacheData(
             int x,
             int z,
-            out ChunkColumnCoordinate coordinate,
-            out ColumnData column)
+            out ChunkCoordinate coordinate,
+            out ChunkCacheData column)
         {
             if (!world.ContainsColumn(x, z))
             {
@@ -521,24 +521,24 @@ namespace MiniCivilization.World.Runtime
                 return false;
             }
 
-            coordinate = WorldCoordinateUtility.ToChunkColumn(
+            coordinate = WorldCoordinateUtility.ToChunk(
                 x,
                 z,
                 world.ChunkSizeX);
-            return columns.TryGetValue(coordinate, out column);
+            return chunks.TryGetValue(coordinate, out column);
         }
 
         private int HorizontalCellCount =>
             checked(world.ChunkSizeX * world.ChunkSizeZ);
 
         private int ToLocalColumnIndex(
-            ChunkColumnCoordinate coordinate,
+            ChunkCoordinate coordinate,
             int x,
             int z) =>
             x - coordinate.X * world.ChunkSizeX
             + world.ChunkSizeX * (z - coordinate.Z * world.ChunkSizeZ);
 
-        private void ValidateChunkColumn(ChunkColumnCoordinate coordinate)
+        private void ValidateChunk(ChunkCoordinate coordinate)
         {
             if ((uint)coordinate.X >= world.ChunkCountX
                 || (uint)coordinate.Z >= world.ChunkCountZ)

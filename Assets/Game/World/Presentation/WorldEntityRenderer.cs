@@ -17,7 +17,6 @@ namespace MiniCivilization.World.Presentation
         private readonly Dictionary<WorldEntityId, EntityController> viewsByEntityId = new();
         private readonly Dictionary<RenderGroupKey, EntityController> visibleViewsByGroup = new();
         private readonly List<Entity> entities = new();
-        private readonly List<DynamicEntity> movingEntities = new();
         private readonly HashSet<WorldEntityId> pendingEntityIds = new();
         private readonly HashSet<WorldEntityId> interactionEntityIds = new();
         private readonly List<EntityController> placementPreviewViews = new();
@@ -59,13 +58,12 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            runtime.Entities.CopyMovingEntitiesTo(movingEntities);
-            for (var index = 0; index < movingEntities.Count; index++)
+            foreach (var view in viewsByEntityId.Values)
             {
-                var entity = movingEntities[index];
-                if (viewsByEntityId.TryGetValue(entity.Id, out var view))
+                if (view != null
+                    && view.BoundEntity is DynamicEntity { IsMoving: true } moving)
                 {
-                    ApplyRenderPose(entity, view);
+                    ApplyRenderPose(moving, view);
                 }
             }
         }
@@ -95,12 +93,16 @@ namespace MiniCivilization.World.Presentation
             catalog = entityCatalog;
             runtime.Entities.Changed += OnEntitiesChanged;
             runtime.Entities.PresentationChanged += OnPresentationChanged;
+            runtime.EntityRenderStateChanged += OnEntityRenderStateChanged;
 
-            runtime.Entities.CopyEntitiesTo(entities);
-            for (var index = 0; index < entities.Count; index++)
+            foreach (var pair in runtime.ChunkRuntimes)
             {
-                SynchronizeEntity(entities[index]);
+                if (pair.Value.EntityRenderingEnabled)
+                {
+                    SynchronizeChunkEntities(pair.Key);
+                }
             }
+
             RefreshVisualGroups();
         }
 
@@ -111,6 +113,7 @@ namespace MiniCivilization.World.Presentation
             {
                 runtime.Entities.Changed -= OnEntitiesChanged;
                 runtime.Entities.PresentationChanged -= OnPresentationChanged;
+                runtime.EntityRenderStateChanged -= OnEntityRenderStateChanged;
                 runtime = null;
             }
 
@@ -137,7 +140,6 @@ namespace MiniCivilization.World.Presentation
             viewsByEntityId.Clear();
             visibleViewsByGroup.Clear();
             entities.Clear();
-            movingEntities.Clear();
             pendingEntityIds.Clear();
             interactionEntityIds.Clear();
         }
@@ -242,8 +244,57 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            SynchronizeEntity(entity);
+            if (runtime.Entities.IsEntityRendered(id))
+            {
+                SynchronizeEntity(entity);
+            }
+            else
+            {
+                RemoveView(id);
+            }
+
             RefreshVisualGroups();
+        }
+
+        private void OnEntityRenderStateChanged(ChunkRuntime chunkRuntime)
+        {
+            if (runtime == null || chunkRuntime == null)
+            {
+                return;
+            }
+
+            runtime.Entities.CopyEntitiesInChunkTo(
+                chunkRuntime.Coordinate,
+                entities);
+            if (chunkRuntime.EntityRenderingEnabled)
+            {
+                for (var index = 0; index < entities.Count; index++)
+                {
+                    SynchronizeEntity(entities[index]);
+                }
+            }
+            else
+            {
+                for (var index = 0; index < entities.Count; index++)
+                {
+                    var entity = entities[index];
+                    if (!runtime.Entities.IsEntityRendered(entity.Id))
+                    {
+                        RemoveView(entity.Id);
+                    }
+                }
+            }
+
+            RefreshVisualGroups();
+        }
+
+        private void SynchronizeChunkEntities(ChunkCoordinate coordinate)
+        {
+            runtime.Entities.CopyEntitiesInChunkTo(coordinate, entities);
+            for (var index = 0; index < entities.Count; index++)
+            {
+                SynchronizeEntity(entities[index]);
+            }
         }
 
         private void OnEntitiesChanged(EntityChangeSet changeSet)
@@ -268,7 +319,14 @@ namespace MiniCivilization.World.Presentation
             {
                 if (runtime.Entities.TryGet(id, out var entity))
                 {
-                    SynchronizeEntity(entity);
+                    if (runtime.Entities.IsEntityRendered(id))
+                    {
+                        SynchronizeEntity(entity);
+                    }
+                    else
+                    {
+                        RemoveView(id);
+                    }
                 }
             }
             RefreshVisualGroups();

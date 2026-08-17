@@ -253,11 +253,11 @@ namespace MiniCivilization.World.Editing
                 throw;
             }
 
-            var affectedChunks = BuildAffectedChunks(cellChanges);
+            var affectedSections = BuildAffectedSections(cellChanges);
             var changeSet = BuildChangeSet(
                 cellChanges,
                 changedColumns,
-                affectedChunks);
+                affectedSections);
             transaction.Complete();
             activeTransaction = null;
 
@@ -332,23 +332,23 @@ namespace MiniCivilization.World.Editing
                 rebuildWaterDistances: true);
         }
 
-        private ChunkCoordinate[] BuildAffectedChunks(CellEdit[] cellChanges)
+        private ChunkSectionCoordinate[] BuildAffectedSections(CellEdit[] cellChanges)
         {
-            var chunks = new HashSet<ChunkCoordinate>();
+            var sections = new HashSet<ChunkSectionCoordinate>();
             for (var index = 0; index < cellChanges.Length; index++)
             {
                 var cell = cellChanges[index].Coordinate;
-                AddCellAndBoundaryChunks(chunks, cell.X, cell.Y, cell.Z);
+                AddCellAndBoundarySections(sections, cell.X, cell.Y, cell.Z);
             }
 
-            var result = new ChunkCoordinate[chunks.Count];
-            chunks.CopyTo(result);
-            Array.Sort(result, CompareChunks);
+            var result = new ChunkSectionCoordinate[sections.Count];
+            sections.CopyTo(result);
+            Array.Sort(result, CompareSections);
             return result;
         }
 
-        private void AddCellAndBoundaryChunks(
-            HashSet<ChunkCoordinate> chunks,
+        private void AddCellAndBoundarySections(
+            HashSet<ChunkSectionCoordinate> sections,
             int x,
             int y,
             int z)
@@ -358,7 +358,7 @@ namespace MiniCivilization.World.Editing
                 boundWorld.ChunkSizeX);
             var chunkY = WorldCoordinateUtility.FloorDivide(
                 y,
-                boundWorld.ChunkSizeY);
+                boundWorld.ChunkSectionSizeY);
             var chunkZ = WorldCoordinateUtility.FloorDivide(
                 z,
                 boundWorld.ChunkSizeZ);
@@ -367,7 +367,7 @@ namespace MiniCivilization.World.Editing
                 boundWorld.ChunkSizeX);
             var localY = WorldCoordinateUtility.PositiveModulo(
                 y,
-                boundWorld.ChunkSizeY);
+                boundWorld.ChunkSectionSizeY);
             var localZ = WorldCoordinateUtility.PositiveModulo(
                 z,
                 boundWorld.ChunkSizeZ);
@@ -377,7 +377,7 @@ namespace MiniCivilization.World.Editing
                 ? chunkX + 1
                 : chunkX;
             var minimumY = localY == 0 ? chunkY - 1 : chunkY;
-            var maximumY = localY == boundWorld.ChunkSizeY - 1
+            var maximumY = localY == boundWorld.ChunkSectionSizeY - 1
                 ? chunkY + 1
                 : chunkY;
             var minimumZ = localZ == 0 ? chunkZ - 1 : chunkZ;
@@ -390,10 +390,10 @@ namespace MiniCivilization.World.Editing
             for (var affectedX = minimumX; affectedX <= maximumX; affectedX++)
             {
                 if ((uint)affectedX < boundWorld.ChunkCountX
-                    && (uint)affectedY < boundWorld.ChunkCountY
+                    && (uint)affectedY < boundWorld.ChunkSectionCountY
                     && (uint)affectedZ < boundWorld.ChunkCountZ)
                 {
-                    chunks.Add(new ChunkCoordinate(
+                    sections.Add(new ChunkSectionCoordinate(
                         affectedX,
                         affectedY,
                         affectedZ));
@@ -404,7 +404,7 @@ namespace MiniCivilization.World.Editing
         private WorldChangeSet BuildChangeSet(
             CellEdit[] cellChanges,
             HashSet<CellColumnCoordinate> changedColumns,
-            ChunkCoordinate[] affectedChunks)
+            ChunkSectionCoordinate[] affectedSections)
         {
             var changedCells = new CellCoordinate[cellChanges.Length];
             var changeTypes = WorldChangeType.None;
@@ -433,7 +433,7 @@ namespace MiniCivilization.World.Editing
                 changeTypes,
                 changedCells,
                 changedColumnArray,
-                affectedChunks,
+                affectedSections,
                 new CellBounds(minimum, maximum),
                 rebuildNavigationColumns: true,
                 rebuildWaterDistances: true);
@@ -501,9 +501,9 @@ namespace MiniCivilization.World.Editing
                 Math.Max(maximum.Z, coordinate.Z));
         }
 
-        private static int CompareChunks(
-            ChunkCoordinate left,
-            ChunkCoordinate right)
+        private static int CompareSections(
+            ChunkSectionCoordinate left,
+            ChunkSectionCoordinate right)
         {
             var y = left.Y.CompareTo(right.Y);
             if (y != 0) return y;

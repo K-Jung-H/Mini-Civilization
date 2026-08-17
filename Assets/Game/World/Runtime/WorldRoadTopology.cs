@@ -135,16 +135,37 @@ namespace MiniCivilization.World.Runtime
             var roadsByColumn =
                 new Dictionary<CellColumnCoordinate, RoadCellTopology>();
             var roads = new List<RoadCellTopology>();
-            for (var z = 0; z < runtime.Data.Size; z++)
-            for (var x = 0; x < runtime.Data.Size; x++)
+            foreach (var pair in runtime.ChunkRuntimes)
             {
-                if (!RoadTopologyResolver.TryGetRoad(runtime, x, z, out var road))
+                if (pair.Value.State == ChunkState.Unloaded)
                 {
                     continue;
                 }
 
-                roadsByColumn.Add(new CellColumnCoordinate(x, z), road);
-                roads.Add(road);
+                var coordinate = pair.Key;
+                var startX = coordinate.X * runtime.Data.ChunkSizeX;
+                var startZ = coordinate.Z * runtime.Data.ChunkSizeZ;
+                var endX = Math.Min(
+                    startX + runtime.Data.ChunkSizeX,
+                    runtime.Data.Size);
+                var endZ = Math.Min(
+                    startZ + runtime.Data.ChunkSizeZ,
+                    runtime.Data.Size);
+                for (var z = startZ; z < endZ; z++)
+                for (var x = startX; x < endX; x++)
+                {
+                    if (!RoadTopologyResolver.TryGetRoad(
+                            runtime,
+                            x,
+                            z,
+                            out var road))
+                    {
+                        continue;
+                    }
+
+                    roadsByColumn.Add(new CellColumnCoordinate(x, z), road);
+                    roads.Add(road);
+                }
             }
 
             var ports = CollectBuildingPorts(runtime, entities);
@@ -174,7 +195,7 @@ namespace MiniCivilization.World.Runtime
             EntityRuntime entities)
         {
             var entityBuffer = new List<Entity>();
-            entities.CopyEntitiesTo(entityBuffer);
+            entities.CopyEntitiesInPreparedChunksTo(entityBuffer);
             var ports = new List<BuildingRoadPort>();
             for (var entityIndex = 0; entityIndex < entityBuffer.Count; entityIndex++)
             {
@@ -195,6 +216,15 @@ namespace MiniCivilization.World.Runtime
                     var buildingCell = layout.ToWorld(
                         building.Data,
                         point.LocalCellOffset);
+                    if (!runtime.IsChunkPrepared(
+                            WorldCoordinateUtility.ToChunk(
+                                buildingCell.X,
+                                buildingCell.Z,
+                                runtime.Data.ChunkSizeX)))
+                    {
+                        continue;
+                    }
+
                     var direction = layout.ToWorldDirection(
                         point.ExternalDirection,
                         building.Direction);

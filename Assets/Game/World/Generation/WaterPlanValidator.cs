@@ -134,7 +134,8 @@ namespace MiniCivilization.World.Generation
             var flowState = new WaterFlowState(
                 world,
                 WaterBodyResolver.Resolve(world, preview.SurfaceCache));
-            var resolver = new WaterFlowResolver(flowState.CellCount);
+            var resolver = new WaterFlowResolver(
+                world.ChunkSizeX);
             resolver.RestoreFrontier(
                 world,
                 flowState,
@@ -147,7 +148,7 @@ namespace MiniCivilization.World.Generation
                     world,
                     flowState,
                     parameters,
-                    flowState.CellCount,
+                    int.MaxValue,
                     out _);
                 completedWaveCount++;
             }
@@ -379,9 +380,9 @@ namespace MiniCivilization.World.Generation
             public static WaterPreview Create(WorldData source)
             {
                 var data = new WorldData(source.Settings);
-                foreach (var column in source.EnumerateLoadedColumns())
+                foreach (var chunk in source.EnumerateLoadedChunks())
                 {
-                    data.EnsureColumnLoaded(column.Coordinate);
+                    data.EnsureChunkLoaded(chunk.Coordinate);
                 }
 
                 for (var y = 0; y < source.Height; y++)
