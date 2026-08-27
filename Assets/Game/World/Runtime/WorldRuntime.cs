@@ -21,7 +21,6 @@ namespace MiniCivilization.World.Runtime
         private readonly Queue<ChunkCoordinate> pendingChunkBuilds = new();
         private readonly HashSet<ChunkCoordinate> pendingChunkBuildSet = new();
         private readonly List<ChunkCoordinate> chunkBuildCandidates = new();
-        private readonly WorldFieldSampler chunkFieldSampler;
         private Task<WorldChunkBuildData> activeChunkBuild;
         private ChunkCoordinate activeChunkBuildCoordinate;
         private bool hasActiveChunkBuild;
@@ -31,7 +30,6 @@ namespace MiniCivilization.World.Runtime
         private WorldRuntime(WorldData data)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
-            chunkFieldSampler = new WorldFieldSampler(data.Settings);
             SurfaceCache = new SurfaceCache(data);
             NavigationCache = new NavigationCache(data, SurfaceCache);
             Context = new WorldContext(this);
@@ -416,7 +414,7 @@ namespace MiniCivilization.World.Runtime
                 if (desiredPreparedChunks.Contains(build.Coordinate)
                     && !Data.IsChunkLoaded(build.Coordinate))
                 {
-                    WorldChunkGenerator.Apply(Data, build);
+                    WorldDataBuilder.ApplyChunk(Data, build);
                     EnqueueGeneratedWaterSources(build.Coordinate);
                     var chunkRuntime = PrepareChunkRuntime(build.Coordinate);
                     ApplyDesiredChunkState(chunkRuntime);
@@ -516,14 +514,13 @@ namespace MiniCivilization.World.Runtime
                     continue;
                 }
 
-                var settings = Data.Settings;
+                var input = WorldChunkBuildInput.Create(
+                    Data.Settings,
+                    coordinate);
                 activeChunkBuildCoordinate = coordinate;
                 hasActiveChunkBuild = true;
                 activeChunkBuild = Task.Run(
-                    () => WorldChunkGenerator.Build(
-                        settings,
-                        coordinate,
-                        chunkFieldSampler));
+                    () => WorldChunkGenerator.Build(input));
                 return;
             }
         }

@@ -8,6 +8,291 @@ namespace MiniCivilization.World.Domain
         Infinite
     }
 
+    public enum TerrainNoiseMode : byte
+    {
+        Value,
+        Signed,
+        Ridge,
+        SignedRidge
+    }
+
+    public readonly struct TerrainNoiseFieldSettingsData
+    {
+        public TerrainNoiseFieldSettingsData(
+            TerrainNoiseMode mode,
+            float scale,
+            int layers,
+            float frequencySpacing,
+            float persistence)
+        {
+            if (!Enum.IsDefined(typeof(TerrainNoiseMode), mode)
+                || !float.IsFinite(scale)
+                || scale <= 0f
+                || layers <= 0
+                || !float.IsFinite(frequencySpacing)
+                || frequencySpacing < 1f
+                || !float.IsFinite(persistence)
+                || persistence <= 0f
+                || persistence >= 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(scale),
+                    "Terrain Noise Field settings are invalid.");
+            }
+
+            Mode = mode;
+            Scale = scale;
+            Layers = layers;
+            FrequencySpacing = frequencySpacing;
+            Persistence = persistence;
+        }
+
+        public TerrainNoiseMode Mode { get; }
+        public float Scale { get; }
+        public int Layers { get; }
+        public float FrequencySpacing { get; }
+        public float Persistence { get; }
+    }
+
+    public readonly struct TerrainCurveSettingsData
+    {
+        public TerrainCurveSettingsData(
+            float atZero,
+            float atQuarter,
+            float atHalf,
+            float atThreeQuarters,
+            float atOne)
+        {
+            if (!float.IsFinite(atZero)
+                || !float.IsFinite(atQuarter)
+                || !float.IsFinite(atHalf)
+                || !float.IsFinite(atThreeQuarters)
+                || !float.IsFinite(atOne))
+            {
+                throw new ArgumentOutOfRangeException(nameof(atZero));
+            }
+
+            AtZero = atZero;
+            AtQuarter = atQuarter;
+            AtHalf = atHalf;
+            AtThreeQuarters = atThreeQuarters;
+            AtOne = atOne;
+        }
+
+        public float AtZero { get; }
+        public float AtQuarter { get; }
+        public float AtHalf { get; }
+        public float AtThreeQuarters { get; }
+        public float AtOne { get; }
+
+        public float Evaluate(float input)
+        {
+            input = Math.Clamp(input, 0f, 1f);
+            var scaled = input * 4f;
+            var segment = Math.Min(3, (int)scaled);
+            var amount = scaled - segment;
+            amount = amount * amount * (3f - 2f * amount);
+            return segment switch
+            {
+                0 => Lerp(AtZero, AtQuarter, amount),
+                1 => Lerp(AtQuarter, AtHalf, amount),
+                2 => Lerp(AtHalf, AtThreeQuarters, amount),
+                _ => Lerp(AtThreeQuarters, AtOne, amount)
+            };
+        }
+
+        public float EvaluateMonotonic(float input)
+        {
+            input = Math.Clamp(input, 0f, 1f);
+            var scaled = input * 4f;
+            var segment = Math.Min(3, (int)scaled);
+            var amount = scaled - segment;
+            var from = GetValue(segment);
+            var to = GetValue(segment + 1);
+            var delta = to - from;
+            var fromTangent = segment == 0
+                ? delta
+                : MonotoneTangent(
+                    from - GetValue(segment - 1),
+                    delta);
+            var toTangent = segment == 3
+                ? delta
+                : MonotoneTangent(
+                    delta,
+                    GetValue(segment + 2) - to);
+            var amount2 = amount * amount;
+            var amount3 = amount2 * amount;
+            return (2f * amount3 - 3f * amount2 + 1f) * from
+                + (amount3 - 2f * amount2 + amount) * fromTangent
+                + (-2f * amount3 + 3f * amount2) * to
+                + (amount3 - amount2) * toTangent;
+        }
+
+        private float GetValue(int index) => index switch
+        {
+            0 => AtZero,
+            1 => AtQuarter,
+            2 => AtHalf,
+            3 => AtThreeQuarters,
+            4 => AtOne,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        private static float MonotoneTangent(float before, float after) =>
+            before <= 0f || after <= 0f
+                ? 0f
+                : 2f * before * after / (before + after);
+
+        private static float Lerp(float from, float to, float amount) =>
+            from + (to - from) * amount;
+    }
+
+    public readonly struct TerrainNoiseRouterSettingsData
+    {
+        public TerrainNoiseRouterSettingsData(
+            TerrainNoiseFieldSettingsData patternRegion,
+            TerrainNoiseFieldSettingsData continentalness,
+            TerrainNoiseFieldSettingsData erosion,
+            TerrainNoiseFieldSettingsData weirdness,
+            TerrainNoiseFieldSettingsData peaksValleys,
+            TerrainNoiseFieldSettingsData roughness,
+            TerrainNoiseFieldSettingsData detail)
+        {
+            PatternRegion = patternRegion;
+            Continentalness = continentalness;
+            Erosion = erosion;
+            Weirdness = weirdness;
+            PeaksValleys = peaksValleys;
+            Roughness = roughness;
+            Detail = detail;
+        }
+
+        public TerrainNoiseFieldSettingsData PatternRegion { get; }
+        public TerrainNoiseFieldSettingsData Continentalness { get; }
+        public TerrainNoiseFieldSettingsData Erosion { get; }
+        public TerrainNoiseFieldSettingsData Weirdness { get; }
+        public TerrainNoiseFieldSettingsData PeaksValleys { get; }
+        public TerrainNoiseFieldSettingsData Roughness { get; }
+        public TerrainNoiseFieldSettingsData Detail { get; }
+    }
+
+    public readonly struct TerrainBaseDensitySettingsData
+    {
+        public TerrainBaseDensitySettingsData(
+            TerrainCurveSettingsData surfaceByContinentalness,
+            TerrainCurveSettingsData surfaceByErosion,
+            TerrainCurveSettingsData verticalFactorByErosion,
+            TerrainCurveSettingsData detailByRoughness)
+        {
+            SurfaceByContinentalness = surfaceByContinentalness;
+            SurfaceByErosion = surfaceByErosion;
+            VerticalFactorByErosion = verticalFactorByErosion;
+            DetailByRoughness = detailByRoughness;
+        }
+
+        public TerrainCurveSettingsData SurfaceByContinentalness { get; }
+        public TerrainCurveSettingsData SurfaceByErosion { get; }
+        public TerrainCurveSettingsData VerticalFactorByErosion { get; }
+        public TerrainCurveSettingsData DetailByRoughness { get; }
+    }
+
+    public readonly struct SmoothTerrainSettingsData
+    {
+        public SmoothTerrainSettingsData(
+            TerrainCurveSettingsData influenceByRegion,
+            TerrainCurveSettingsData undulationByWeirdness,
+            TerrainCurveSettingsData detailByRoughness)
+        {
+            InfluenceByRegion = influenceByRegion;
+            UndulationByWeirdness = undulationByWeirdness;
+            DetailByRoughness = detailByRoughness;
+        }
+
+        public TerrainCurveSettingsData InfluenceByRegion { get; }
+        public TerrainCurveSettingsData UndulationByWeirdness { get; }
+        public TerrainCurveSettingsData DetailByRoughness { get; }
+    }
+
+    public readonly struct RuggedTerrainSettingsData
+    {
+        public RuggedTerrainSettingsData(
+            TerrainCurveSettingsData influenceByRegion,
+            TerrainCurveSettingsData reliefByPeaksValleys,
+            TerrainCurveSettingsData reliefScaleByRoughness,
+            TerrainCurveSettingsData detailByRoughness)
+        {
+            InfluenceByRegion = influenceByRegion;
+            ReliefByPeaksValleys = reliefByPeaksValleys;
+            ReliefScaleByRoughness = reliefScaleByRoughness;
+            DetailByRoughness = detailByRoughness;
+        }
+
+        public TerrainCurveSettingsData InfluenceByRegion { get; }
+        public TerrainCurveSettingsData ReliefByPeaksValleys { get; }
+        public TerrainCurveSettingsData ReliefScaleByRoughness { get; }
+        public TerrainCurveSettingsData DetailByRoughness { get; }
+    }
+
+    public readonly struct MountainTerrainSettingsData
+    {
+        public MountainTerrainSettingsData(
+            TerrainCurveSettingsData influenceByRegion,
+            TerrainCurveSettingsData centerProximityByRegion,
+            TerrainCurveSettingsData heightByCenterProximity,
+            TerrainCurveSettingsData progressExponentByErosion)
+        {
+            InfluenceByRegion = influenceByRegion;
+            CenterProximityByRegion = centerProximityByRegion;
+            HeightByCenterProximity = heightByCenterProximity;
+            ProgressExponentByErosion = progressExponentByErosion;
+        }
+
+        public TerrainCurveSettingsData InfluenceByRegion { get; }
+        public TerrainCurveSettingsData CenterProximityByRegion { get; }
+        public TerrainCurveSettingsData HeightByCenterProximity { get; }
+        public TerrainCurveSettingsData ProgressExponentByErosion { get; }
+    }
+
+    public readonly struct CanyonTerrainSettingsData
+    {
+        public CanyonTerrainSettingsData(
+            TerrainCurveSettingsData influenceByRegion,
+            TerrainCurveSettingsData widthByVariation,
+            TerrainCurveSettingsData maximumDepthByVariation)
+        {
+            InfluenceByRegion = influenceByRegion;
+            WidthByVariation = widthByVariation;
+            MaximumDepthByVariation = maximumDepthByVariation;
+        }
+
+        public TerrainCurveSettingsData InfluenceByRegion { get; }
+        public TerrainCurveSettingsData WidthByVariation { get; }
+        public TerrainCurveSettingsData MaximumDepthByVariation { get; }
+    }
+
+    public readonly struct TerrainPatternSettingsData
+    {
+        public TerrainPatternSettingsData(
+            TerrainBaseDensitySettingsData baseDensity,
+            SmoothTerrainSettingsData smooth,
+            RuggedTerrainSettingsData rugged,
+            MountainTerrainSettingsData mountain,
+            CanyonTerrainSettingsData canyon)
+        {
+            BaseDensity = baseDensity;
+            Smooth = smooth;
+            Rugged = rugged;
+            Mountain = mountain;
+            Canyon = canyon;
+        }
+
+        public TerrainBaseDensitySettingsData BaseDensity { get; }
+        public SmoothTerrainSettingsData Smooth { get; }
+        public RuggedTerrainSettingsData Rugged { get; }
+        public MountainTerrainSettingsData Mountain { get; }
+        public CanyonTerrainSettingsData Canyon { get; }
+    }
+
     public sealed class WorldSettingsData
     {
         public WorldSettingsData(
@@ -20,21 +305,17 @@ namespace MiniCivilization.World.Domain
             int chunkSectionCountY,
             int renderChunksPerPatch,
             int roadMaxHeightSteps,
-            float terrainScale,
-            int terrainLayers,
-            float terrainSpacing,
-            float terrainDetail,
-            int baseHeightUnits,
-            int heightVariationUnits,
-            float mountainScale,
-            int mountainHeightUnits,
-            float mountainCoverage,
-            float mountainSteepness,
-            int seaLevelUnits,
+            TerrainNoiseRouterSettingsData terrainNoiseRouter,
+            TerrainPatternSettingsData terrainPatterns,
+            float temperatureScale,
+            int terrainBaseHeightUnits,
+            int defaultSeaSurfaceUnits,
             int maximumSeaDepthUnits,
-            float continentalScale,
             float landThreshold,
-            float coastTransitionWidth,
+            float deepSeaThreshold,
+            float seaDepthSteepness,
+            float seaDepthNoiseScale,
+            float seaDepthNoiseStrength,
             float riverScale,
             float riverDensity,
             int riverDepthCells,
@@ -90,21 +371,17 @@ namespace MiniCivilization.World.Domain
             ChunkSectionCountY = chunkSectionCountY;
             RenderChunksPerPatch = renderChunksPerPatch;
             RoadMaxHeightSteps = roadMaxHeightSteps;
-            TerrainScale = terrainScale;
-            TerrainLayers = terrainLayers;
-            TerrainSpacing = terrainSpacing;
-            TerrainDetail = terrainDetail;
-            BaseHeightUnits = baseHeightUnits;
-            HeightVariationUnits = heightVariationUnits;
-            MountainScale = mountainScale;
-            MountainHeightUnits = mountainHeightUnits;
-            MountainCoverage = mountainCoverage;
-            MountainSteepness = mountainSteepness;
-            SeaLevelUnits = seaLevelUnits;
+            TerrainNoiseRouter = terrainNoiseRouter;
+            TerrainPatterns = terrainPatterns;
+            TemperatureScale = temperatureScale;
+            TerrainBaseHeightUnits = terrainBaseHeightUnits;
+            DefaultSeaSurfaceUnits = defaultSeaSurfaceUnits;
             MaximumSeaDepthUnits = maximumSeaDepthUnits;
-            ContinentalScale = continentalScale;
             LandThreshold = landThreshold;
-            CoastTransitionWidth = coastTransitionWidth;
+            DeepSeaThreshold = deepSeaThreshold;
+            SeaDepthSteepness = seaDepthSteepness;
+            SeaDepthNoiseScale = seaDepthNoiseScale;
+            SeaDepthNoiseStrength = seaDepthNoiseStrength;
             RiverScale = riverScale;
             RiverDensity = riverDensity;
             RiverDepthCells = riverDepthCells;
@@ -123,28 +400,69 @@ namespace MiniCivilization.World.Domain
                 0f,
                 0.5f);
 
-            if (SeaLevelUnits <= 0
-                || SeaLevelUnits >= WorldHeight * WorldGrid.HeightStepsPerCell)
+            if (TerrainBaseHeightUnits < 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(seaLevelUnits),
-                    "Sea level must be inside the vertical world range.");
+                    nameof(terrainBaseHeightUnits),
+                    "Terrain base height must be non-negative.");
+            }
+
+            if (!float.IsFinite(TemperatureScale)
+                || TemperatureScale <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(temperatureScale),
+                    "Temperature Field scale must be finite and positive.");
+            }
+
+            if (DefaultSeaSurfaceUnits <= 0
+                || DefaultSeaSurfaceUnits
+                >= WorldHeight * WorldGrid.HeightStepsPerCell)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(defaultSeaSurfaceUnits),
+                    "The default Sea surface must be inside the vertical world range.");
             }
 
             if (MaximumSeaDepthUnits <= 0
-                || MaximumSeaDepthUnits >= SeaLevelUnits)
+                || MaximumSeaDepthUnits >= DefaultSeaSurfaceUnits)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(maximumSeaDepthUnits),
-                    "Maximum sea depth must be positive and lower than sea level.");
+                    "Maximum Sea depth must be positive and fit below the default Sea surface.");
             }
 
-            if (!float.IsFinite(CoastTransitionWidth)
-                || CoastTransitionWidth <= 0f)
+            if (!float.IsFinite(DeepSeaThreshold)
+                || DeepSeaThreshold < 0f
+                || DeepSeaThreshold >= LandThreshold)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(coastTransitionWidth),
-                    "Coast transition width must be finite and positive.");
+                    nameof(deepSeaThreshold),
+                    "Deep sea threshold must be non-negative and lower than the land threshold.");
+            }
+
+            if (!float.IsFinite(SeaDepthSteepness)
+                || SeaDepthSteepness < 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(seaDepthSteepness),
+                    "Sea depth steepness must be finite and at least one.");
+            }
+
+            if (!float.IsFinite(SeaDepthNoiseScale)
+                || SeaDepthNoiseScale <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(seaDepthNoiseScale),
+                    "Sea depth Noise scale must be finite and positive.");
+            }
+
+            if (!float.IsFinite(SeaDepthNoiseStrength)
+                || SeaDepthNoiseStrength < 0f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(seaDepthNoiseStrength),
+                    "Sea depth Noise strength must be finite and non-negative.");
             }
         }
 
@@ -168,21 +486,17 @@ namespace MiniCivilization.World.Domain
         public int WorldHeight => checked(ChunkSectionCellCountY * ChunkSectionCountY);
         public int RenderPatchSizeXZ => checked(ChunkCellCountXZ * RenderChunksPerPatch);
 
-        public float TerrainScale { get; }
-        public int TerrainLayers { get; }
-        public float TerrainSpacing { get; }
-        public float TerrainDetail { get; }
-        public int BaseHeightUnits { get; }
-        public int HeightVariationUnits { get; }
-        public float MountainScale { get; }
-        public int MountainHeightUnits { get; }
-        public float MountainCoverage { get; }
-        public float MountainSteepness { get; }
-        public int SeaLevelUnits { get; }
+        public TerrainNoiseRouterSettingsData TerrainNoiseRouter { get; }
+        public TerrainPatternSettingsData TerrainPatterns { get; }
+        public float TemperatureScale { get; }
+        public int TerrainBaseHeightUnits { get; }
+        public int DefaultSeaSurfaceUnits { get; }
         public int MaximumSeaDepthUnits { get; }
-        public float ContinentalScale { get; }
         public float LandThreshold { get; }
-        public float CoastTransitionWidth { get; }
+        public float DeepSeaThreshold { get; }
+        public float SeaDepthSteepness { get; }
+        public float SeaDepthNoiseScale { get; }
+        public float SeaDepthNoiseStrength { get; }
         public float RiverScale { get; }
         public float RiverDensity { get; }
         public int RiverDepthCells { get; }

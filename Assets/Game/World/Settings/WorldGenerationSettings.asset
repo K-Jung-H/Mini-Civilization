@@ -17,29 +17,55 @@ MonoBehaviour:
   chunkCellCountXZ: 8
   chunkSectionCellCountY: 8
   initialChunkCountXZ: 15
-  chunkSectionCountY: 4
+  chunkSectionCountY: 5
   renderChunksPerPatch: 1
   roadMaxHeightSteps: 5
-  terrainScale: 0.09
-  terrainLayers: 3
-  terrainSpacing: 2
-  terrainDetail: 0.4
-  baseHeightCells: 10
-  heightVariationCells: 6
-  mountainScale: 0.018
-  mountainHeightCells: 8
-  mountainCoverage: 0.58
-  mountainSteepness: 1.8
-  continentalScale: 0.004
+  terrainNoiseRouter:
+    patternRegion: {mode: 0, scale: 0.0035, layers: 1, frequencySpacing: 2, persistence: 0.4}
+    continentalness: {mode: 0, scale: 0.004, layers: 4, frequencySpacing: 2, persistence: 0.4}
+    erosion: {mode: 0, scale: 0.0055, layers: 4, frequencySpacing: 2, persistence: 0.4}
+    weirdness: {mode: 0, scale: 0.008, layers: 4, frequencySpacing: 2, persistence: 0.4}
+    peaksValleys: {mode: 2, scale: 0.014, layers: 4, frequencySpacing: 2, persistence: 0.4}
+    roughness: {mode: 0, scale: 0.018, layers: 4, frequencySpacing: 2, persistence: 0.4}
+    detail: {mode: 1, scale: 0.09, layers: 3, frequencySpacing: 2, persistence: 0.4}
+  terrainPatterns:
+    baseDensity:
+      surfaceByContinentalness: {atZero: -5, atQuarter: -2, atHalf: 0, atThreeQuarters: 3, atOne: 6}
+      surfaceByErosion: {atZero: 2, atQuarter: 1, atHalf: 0, atThreeQuarters: -1, atOne: -2}
+      verticalFactorByErosion: {atZero: 1, atQuarter: 1, atHalf: 1, atThreeQuarters: 1, atOne: 1}
+      detailByRoughness: {atZero: 0.25, atQuarter: 0.4, atHalf: 0.6, atThreeQuarters: 0.8, atOne: 1}
+    smooth:
+      influenceByRegion: {atZero: 1, atQuarter: 1, atHalf: 0.2, atThreeQuarters: 0, atOne: 0}
+      undulationByWeirdness: {atZero: -2, atQuarter: -1, atHalf: 0, atThreeQuarters: 1, atOne: 2}
+      detailByRoughness: {atZero: 0.15, atQuarter: 0.2, atHalf: 0.25, atThreeQuarters: 0.3, atOne: 0.35}
+    rugged:
+      influenceByRegion: {atZero: 0, atQuarter: 0.5, atHalf: 1, atThreeQuarters: 0.35, atOne: 0.15}
+      reliefByPeaksValleys: {atZero: -4, atQuarter: -2, atHalf: 0, atThreeQuarters: 4, atOne: 8}
+      reliefScaleByRoughness: {atZero: 0.5, atQuarter: 0.8, atHalf: 1, atThreeQuarters: 1.3, atOne: 1.7}
+      detailByRoughness: {atZero: 0.5, atQuarter: 0.8, atHalf: 1.2, atThreeQuarters: 1.8, atOne: 2.5}
+    mountain:
+      influenceByRegion: {atZero: 0, atQuarter: 0, atHalf: 0.15, atThreeQuarters: 1, atOne: 0.1}
+      centerProximityByRegion: {atZero: 0, atQuarter: 0, atHalf: 0, atThreeQuarters: 1, atOne: 0}
+      heightByCenterProximity: {atZero: 0, atQuarter: 4, atHalf: 11, atThreeQuarters: 21, atOne: 30}
+      progressExponentByErosion: {atZero: 0.65, atQuarter: 0.8, atHalf: 1, atThreeQuarters: 1.25, atOne: 1.55}
+    canyon:
+      influenceByRegion: {atZero: 0, atQuarter: 0, atHalf: 0, atThreeQuarters: 0.1, atOne: 1}
+      widthByVariation: {atZero: 2, atQuarter: 3, atHalf: 4, atThreeQuarters: 6, atOne: 8}
+      maximumDepthByVariation: {atZero: 12, atQuarter: 15, atHalf: 18, atThreeQuarters: 22, atOne: 26}
+  temperatureScale: 0.003
+  terrainBaseHeightCells: 19
   landThreshold: 0.5
-  coastTransitionWidth: 0.08
-  seaLevelCell: 3
-  seaLevelStep: 0
-  maximumSeaDepthCells: 3
+  defaultSeaSurfaceCell: 12
+  defaultSeaSurfaceStep: 0
+  maximumSeaDepthCells: 10
+  deepSeaThreshold: 0.3
+  seaDepthSteepness: 3
+  seaDepthNoiseScale: 0.01
+  seaDepthNoiseStrength: 0.08
   riverScale: 0.0125
   riverDensity: 0.2
   riverDepthCells: 2
-  maximumRiverWidthCells: 5
+  maximumRiverWidthCells: 7
   maximumRiverDepthCells: 4
   lakeDensity: 0.15
   lakeRegionSizeCells: 32

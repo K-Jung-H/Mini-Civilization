@@ -383,7 +383,6 @@ namespace MiniCivilization.World.WaterFlow
 
             if (current.HasWater && current.Role == WaterRole.Source)
             {
-                current.Amount = WaterAmount.Full;
                 current.Flow = FlowDirection.None;
 
                 if (CanFlowDown(world, state, coordinate))
@@ -560,13 +559,14 @@ namespace MiniCivilization.World.WaterFlow
             CellCoordinate source,
             in WaterFlowParameters parameters)
         {
-            if (WaterAmount.Full <= parameters.SpreadAmountLoss)
+            var sourceWater = state.GetWater(source);
+            if (sourceWater.Amount <= parameters.SpreadAmountLoss)
             {
                 return FlowDirection.None;
             }
 
             var candidateAmount = checked((byte)(
-                WaterAmount.Full - parameters.SpreadAmountLoss));
+                sourceWater.Amount - parameters.SpreadAmountLoss));
             if (candidateAmount < parameters.MinimumSpreadAmount)
             {
                 return FlowDirection.None;
@@ -1178,7 +1178,7 @@ namespace MiniCivilization.World.WaterFlow
 
             var spreadAmount = (byte)Math.Max(
                 0,
-                WaterAmount.Full
+                sourceCell.Water.Amount
                 - world.Settings.WaterFlowRules.SpreadAmountLoss);
             for (var index = 0; index < HorizontalDirections.Length; index++)
             {

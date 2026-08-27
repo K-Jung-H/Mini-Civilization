@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D;
         private const uint WaterFlowScheduleMarker = 0x31534657;
         private const uint EntitiesMarker = 0x31544E45;
-        private const ushort CurrentVersion = 12;
+        private const ushort CurrentVersion = 19;
         private const int CellByteSize = 18;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -649,6 +649,94 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
+        private static void WriteNoiseField(
+            BinaryWriter writer,
+            in TerrainNoiseFieldSettingsData field)
+        {
+            writer.Write((byte)field.Mode);
+            writer.Write(field.Scale);
+            writer.Write(field.Layers);
+            writer.Write(field.FrequencySpacing);
+            writer.Write(field.Persistence);
+        }
+
+        private static TerrainNoiseFieldSettingsData ReadNoiseField(
+            BinaryReader reader) => new(
+            (TerrainNoiseMode)reader.ReadByte(),
+            reader.ReadSingle(),
+            reader.ReadInt32(),
+            reader.ReadSingle(),
+            reader.ReadSingle());
+
+        private static void WriteCurve(
+            BinaryWriter writer,
+            in TerrainCurveSettingsData curve)
+        {
+            writer.Write(curve.AtZero);
+            writer.Write(curve.AtQuarter);
+            writer.Write(curve.AtHalf);
+            writer.Write(curve.AtThreeQuarters);
+            writer.Write(curve.AtOne);
+        }
+
+        private static TerrainCurveSettingsData ReadCurve(
+            BinaryReader reader) => new(
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle());
+
+        private static void WriteTerrainPatterns(
+            BinaryWriter writer,
+            in TerrainPatternSettingsData patterns)
+        {
+            WriteCurve(writer, patterns.BaseDensity.SurfaceByContinentalness);
+            WriteCurve(writer, patterns.BaseDensity.SurfaceByErosion);
+            WriteCurve(writer, patterns.BaseDensity.VerticalFactorByErosion);
+            WriteCurve(writer, patterns.BaseDensity.DetailByRoughness);
+            WriteCurve(writer, patterns.Smooth.InfluenceByRegion);
+            WriteCurve(writer, patterns.Smooth.UndulationByWeirdness);
+            WriteCurve(writer, patterns.Smooth.DetailByRoughness);
+            WriteCurve(writer, patterns.Rugged.InfluenceByRegion);
+            WriteCurve(writer, patterns.Rugged.ReliefByPeaksValleys);
+            WriteCurve(writer, patterns.Rugged.ReliefScaleByRoughness);
+            WriteCurve(writer, patterns.Rugged.DetailByRoughness);
+            WriteCurve(writer, patterns.Mountain.InfluenceByRegion);
+            WriteCurve(writer, patterns.Mountain.CenterProximityByRegion);
+            WriteCurve(writer, patterns.Mountain.HeightByCenterProximity);
+            WriteCurve(writer, patterns.Mountain.ProgressExponentByErosion);
+            WriteCurve(writer, patterns.Canyon.InfluenceByRegion);
+            WriteCurve(writer, patterns.Canyon.WidthByVariation);
+            WriteCurve(writer, patterns.Canyon.MaximumDepthByVariation);
+        }
+
+        private static TerrainPatternSettingsData ReadTerrainPatterns(
+            BinaryReader reader) => new(
+            new TerrainBaseDensitySettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader)),
+            new SmoothTerrainSettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader)),
+            new RuggedTerrainSettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader)),
+            new MountainTerrainSettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader)),
+            new CanyonTerrainSettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                ReadCurve(reader)));
+
         private static void WriteSettings(
             BinaryWriter writer,
             WorldSettingsData settings)
@@ -662,21 +750,24 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.ChunkSectionCountY);
             writer.Write(settings.RenderChunksPerPatch);
             writer.Write(settings.RoadMaxHeightSteps);
-            writer.Write(settings.TerrainScale);
-            writer.Write(settings.TerrainLayers);
-            writer.Write(settings.TerrainSpacing);
-            writer.Write(settings.TerrainDetail);
-            writer.Write(settings.BaseHeightUnits);
-            writer.Write(settings.HeightVariationUnits);
-            writer.Write(settings.MountainScale);
-            writer.Write(settings.MountainHeightUnits);
-            writer.Write(settings.MountainCoverage);
-            writer.Write(settings.MountainSteepness);
-            writer.Write(settings.SeaLevelUnits);
+            var router = settings.TerrainNoiseRouter;
+            WriteNoiseField(writer, router.PatternRegion);
+            WriteNoiseField(writer, router.Continentalness);
+            WriteNoiseField(writer, router.Erosion);
+            WriteNoiseField(writer, router.Weirdness);
+            WriteNoiseField(writer, router.PeaksValleys);
+            WriteNoiseField(writer, router.Roughness);
+            WriteNoiseField(writer, router.Detail);
+            WriteTerrainPatterns(writer, settings.TerrainPatterns);
+            writer.Write(settings.TemperatureScale);
+            writer.Write(settings.TerrainBaseHeightUnits);
+            writer.Write(settings.DefaultSeaSurfaceUnits);
             writer.Write(settings.MaximumSeaDepthUnits);
-            writer.Write(settings.ContinentalScale);
             writer.Write(settings.LandThreshold);
-            writer.Write(settings.CoastTransitionWidth);
+            writer.Write(settings.DeepSeaThreshold);
+            writer.Write(settings.SeaDepthSteepness);
+            writer.Write(settings.SeaDepthNoiseScale);
+            writer.Write(settings.SeaDepthNoiseStrength);
             writer.Write(settings.RiverScale);
             writer.Write(settings.RiverDensity);
             writer.Write(settings.RiverDepthCells);
@@ -717,47 +808,50 @@ namespace MiniCivilization.World.Persistence
                 "render chunks per patch");
 
             var settings = new WorldSettingsData(
-                seed,
-                worldType,
-                cellSize,
-                chunkCellCountXZ,
-                chunkSectionCellCountY,
-                worldChunkCountXZ,
-                chunkSectionCountY,
-                renderChunksPerPatch,
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                new WaterFlowRules(
+                seed: seed,
+                worldType: worldType,
+                cellSize: cellSize,
+                chunkCellCountXZ: chunkCellCountXZ,
+                chunkSectionCellCountY: chunkSectionCellCountY,
+                initialChunkCountXZ: worldChunkCountXZ,
+                chunkSectionCountY: chunkSectionCountY,
+                renderChunksPerPatch: renderChunksPerPatch,
+                roadMaxHeightSteps: reader.ReadInt32(),
+                terrainNoiseRouter: new TerrainNoiseRouterSettingsData(
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader)),
+                terrainPatterns: ReadTerrainPatterns(reader),
+                temperatureScale: reader.ReadSingle(),
+                terrainBaseHeightUnits: reader.ReadInt32(),
+                defaultSeaSurfaceUnits: reader.ReadInt32(),
+                maximumSeaDepthUnits: reader.ReadInt32(),
+                landThreshold: reader.ReadSingle(),
+                deepSeaThreshold: reader.ReadSingle(),
+                seaDepthSteepness: reader.ReadSingle(),
+                seaDepthNoiseScale: reader.ReadSingle(),
+                seaDepthNoiseStrength: reader.ReadSingle(),
+                riverScale: reader.ReadSingle(),
+                riverDensity: reader.ReadSingle(),
+                riverDepthCells: reader.ReadInt32(),
+                maximumRiverWidthCells: reader.ReadInt32(),
+                maximumRiverDepthCells: reader.ReadInt32(),
+                lakeDensity: reader.ReadSingle(),
+                lakeRegionSizeCells: reader.ReadInt32(),
+                maximumLakeRadiusCells: reader.ReadInt32(),
+                maximumLakeDepthSteps: reader.ReadInt32(),
+                minimumInlandLakeArea: reader.ReadInt32(),
+                minimumInlandLakeDepthSteps: reader.ReadInt32(),
+                pondMaximumArea: reader.ReadInt32(),
+                waterFlowRules: new WaterFlowRules(
                     reader.ReadByte(),
                     reader.ReadByte(),
                     reader.ReadByte()),
-                reader.ReadSingle());
+                coldClimateThreshold: reader.ReadSingle());
 
             var cellCount = checked(
                 (long)settings.WorldSize

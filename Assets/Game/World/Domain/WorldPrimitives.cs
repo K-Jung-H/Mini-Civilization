@@ -190,7 +190,7 @@ namespace MiniCivilization.World.Domain
             }
 
             return checked((byte)Math.Clamp(
-                (renderFill * Full + capacitySteps - 1) / capacitySteps,
+                renderFill * Full / capacitySteps,
                 1,
                 Full));
         }

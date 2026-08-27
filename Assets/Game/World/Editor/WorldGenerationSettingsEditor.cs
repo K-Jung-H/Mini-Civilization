@@ -30,7 +30,8 @@ namespace MiniCivilization.World.Editor
                 $"Initial Chunks: -{halfChunkCount}..{halfChunkCount} x -{halfChunkCount}..{halfChunkCount}\n" +
                 $"Initial Cells: {settings.WorldSize} x {settings.WorldHeight} x {settings.WorldSize}\n" +
                 $"Initial Cell capacity: {cells:N0}\n" +
-                $"Sea level: {settings.SeaLevelUnits * settings.HeightStep:g}",
+                $"Terrain base height: {settings.TerrainBaseHeightUnits * settings.HeightStep:g}\n" +
+                $"Default Sea surface: {settings.DefaultSeaSurfaceUnits * settings.HeightStep:g}",
                 MessageType.None);
         }
     }

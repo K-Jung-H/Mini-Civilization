@@ -732,6 +732,7 @@ MonoBehaviour:
   renderRadius: 5
   entityRenderRadius: 4
   simulationRadius: 3
+  chunkApplicationsPerFrame: 1
 --- !u!1 &1910000000
 GameObject:
   m_ObjectHideFlags: 0
@@ -775,6 +776,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1910000011}
   - component: {fileID: 1900000003}
+  - component: {fileID: 1910000012}
   m_Layer: 0
   m_Name: World Generation
   m_TagString: Untagged
@@ -797,6 +799,20 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1900000001}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1910000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1910000010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a0c8e61d9bd4f49a6ca431b5978712e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldTerrainPatternDebugger
+  generationController: {fileID: 1900000003}
+  worldManager: {fileID: 1900000002}
 --- !u!1 &1910000020
 GameObject:
   m_ObjectHideFlags: 0

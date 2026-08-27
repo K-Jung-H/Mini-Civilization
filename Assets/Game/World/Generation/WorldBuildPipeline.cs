@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Generation
 {
@@ -12,1546 +10,1652 @@ namespace MiniCivilization.World.Generation
             Settings = settings.CreateData(seed);
         }
 
-        internal WorldBuildInput(WorldSettingsData settings)
+        public WorldSettingsData Settings { get; }
+        public int Seed => Settings.Seed;
+
+        public static WorldBuildInput Create(
+            WorldGenerationSettings settings,
+            int seed)
         {
-            Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (!settings.TryValidate(out var error))
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            return new WorldBuildInput(settings, seed);
+        }
+
+        internal WorldChunkBuildInput CreateChunkInput(
+            ChunkCoordinate coordinate) =>
+            WorldChunkBuildInput.Create(Settings, coordinate);
+    }
+
+    internal sealed class WorldChunkBuildInput
+    {
+        private WorldChunkBuildInput(
+            WorldSettingsData settings,
+            ChunkCoordinate coordinate)
+        {
+            Settings = settings;
+            Coordinate = coordinate;
+            OriginX = checked(coordinate.X * settings.ChunkCellCountXZ);
+            OriginZ = checked(coordinate.Z * settings.ChunkCellCountXZ);
         }
 
         public WorldSettingsData Settings { get; }
-        public int Seed => Settings.Seed;
-        public int WorldSize => Settings.InitialWorldSize;
-        public int WorldHeight => Settings.WorldHeight;
+        public ChunkCoordinate Coordinate { get; }
         public int ChunkSizeXZ => Settings.ChunkCellCountXZ;
-        public int ChunkHeight => Settings.ChunkSectionCellCountY;
-        public int MinimumCellCoordinate => Settings.MinimumCellCoordinate;
-        public int SeaLevelUnits => Settings.SeaLevelUnits;
-        public float ColdClimateThreshold => Settings.ColdClimateThreshold;
-        public WaterFlowRules WaterFlowRules => Settings.WaterFlowRules;
-
-        public static WorldBuildInput Create(WorldGenerationSettings settings, int seed)
-        {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (!settings.TryValidate(out var error)) throw new InvalidOperationException(error);
-            return new WorldBuildInput(settings, seed);
-        }
-    }
-
-    public sealed class WorldBuildData
-    {
-        public WorldBuildData(WorldBuildInput input)
-        {
-            Input = input ?? throw new ArgumentNullException(nameof(input));
-            Size = input.WorldSize;
-            Height = input.WorldHeight;
-            Seed = input.Seed;
-            OriginX = input.MinimumCellCoordinate;
-            OriginZ = input.MinimumCellCoordinate;
-            var columns = checked(Size * Size);
-            SolidHeights = new int[columns];
-            WaterSurfaces = new int[columns];
-            WaterRoles = new WaterRole[columns];
-            WaterTypes = new WaterType[columns];
-            WaterBedSurfaces = new SurfaceType[columns];
-            TopSurfaces = new SurfaceType[columns];
-            Biomes = new CellBiome[columns];
-        }
-
-        public WorldBuildInput Input { get; }
-        public int Size { get; }
-        public int Height { get; }
-        public int Seed { get; }
+        public int WorldHeight => Settings.WorldHeight;
+        public int HeightUnitCount => checked(
+            WorldHeight * WorldGrid.HeightStepsPerCell);
         public int OriginX { get; }
         public int OriginZ { get; }
-        public int[] SolidHeights { get; }
-        public int[] WaterSurfaces { get; }
-        public WaterRole[] WaterRoles { get; }
-        public WaterType[] WaterTypes { get; }
-        public SurfaceType[] WaterBedSurfaces { get; }
-        public SurfaceType[] TopSurfaces { get; }
-        public CellBiome[] Biomes { get; }
-        public WaterFlowRules WaterFlowRules => Input.WaterFlowRules;
-        public bool ContainsColumn(int x, int z) =>
-            (uint)(x - OriginX) < Size && (uint)(z - OriginZ) < Size;
-        public int ToColumnIndex(int x, int z) =>
-            checked(x - OriginX + Size * (z - OriginZ));
-        public int ToWorldX(int localX) => checked(OriginX + localX);
-        public int ToWorldZ(int localZ) => checked(OriginZ + localZ);
-    }
 
-    internal readonly struct TerrainFieldParameters
-    {
-        public readonly int TerrainSeed;
-        public readonly int MountainSeed;
-        public readonly int MountainMaskSeed;
-        public readonly int ContinentalSeed;
-        public readonly int MaximumHeightUnits;
-        public readonly float TerrainScale;
-        public readonly int TerrainLayers;
-        public readonly float TerrainSpacing;
-        public readonly float TerrainDetail;
-        public readonly int BaseHeightUnits;
-        public readonly int HeightVariationUnits;
-        public readonly int SeaLevelUnits;
-        public readonly int MaximumSeaDepthUnits;
-        public readonly float MountainScale;
-        public readonly int MountainHeightUnits;
-        public readonly float MountainCoverage;
-        public readonly float MountainSteepness;
-        public readonly float ContinentalScale;
-        public readonly float LandThreshold;
-        public readonly float CoastTransitionWidth;
-
-        public TerrainFieldParameters(WorldSettingsData settings)
+        public static WorldChunkBuildInput Create(
+            WorldSettingsData settings,
+            ChunkCoordinate coordinate)
         {
-            TerrainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "terrain");
-            MountainSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountains");
-            MountainMaskSeed = DeterministicNoise.DeriveSeed(settings.Seed, "mountain-mask");
-            ContinentalSeed = DeterministicNoise.DeriveSeed(settings.Seed, "continental");
-            MaximumHeightUnits = settings.WorldHeight * WorldGrid.HeightStepsPerCell - 1;
-            TerrainScale = settings.TerrainScale;
-            TerrainLayers = settings.TerrainLayers;
-            TerrainSpacing = settings.TerrainSpacing;
-            TerrainDetail = settings.TerrainDetail;
-            BaseHeightUnits = settings.BaseHeightUnits;
-            HeightVariationUnits = settings.HeightVariationUnits;
-            SeaLevelUnits = settings.SeaLevelUnits;
-            MaximumSeaDepthUnits = settings.MaximumSeaDepthUnits;
-            MountainScale = settings.MountainScale;
-            MountainHeightUnits = settings.MountainHeightUnits;
-            MountainCoverage = settings.MountainCoverage;
-            MountainSteepness = settings.MountainSteepness;
-            ContinentalScale = settings.ContinentalScale;
-            LandThreshold = settings.LandThreshold;
-            CoastTransitionWidth = settings.CoastTransitionWidth;
-        }
-
-        public float SampleContinental(int x, int z) =>
-            DeterministicNoise.FractalNoise(
-                x * ContinentalScale,
-                z * ContinentalScale,
-                ContinentalSeed,
-                4,
-                2f,
-                0.5f);
-
-        public int SampleHeight(int x, int z)
-        {
-            var noise = DeterministicNoise.FractalNoise(
-                x * TerrainScale,
-                z * TerrainScale,
-                TerrainSeed,
-                TerrainLayers,
-                TerrainSpacing,
-                TerrainDetail);
-            var ridge = DeterministicNoise.RidgedFractalNoise(
-                x * MountainScale,
-                z * MountainScale,
-                MountainSeed,
-                TerrainLayers,
-                TerrainSpacing,
-                TerrainDetail);
-            var maskNoise = DeterministicNoise.FractalNoise(
-                x * MountainScale * 0.4f,
-                z * MountainScale * 0.4f,
-                MountainMaskSeed,
-                3,
-                2f,
-                0.5f);
-            var continental = SampleContinental(x, z);
-            var coastAmount = SmoothStep01(
-                (continental - LandThreshold)
-                / CoastTransitionWidth);
-            var mountainMask = SmoothStep01(
-                (maskNoise - MountainCoverage) / 0.2f);
-            var mountainHeight = MathF.Pow(ridge, MountainSteepness)
-                * mountainMask * MountainHeightUnits;
-            if (continental < LandThreshold)
+            if (settings == null)
             {
-                var oceanAmount = SmoothStep01(
-                    (LandThreshold - continental)
-                    / Math.Max(0.0001f, LandThreshold));
-                var depthAmount = MathF.Sqrt(oceanAmount);
-                var oceanDepth = 1 + (int)MathF.Round(
-                    depthAmount * Math.Max(0, MaximumSeaDepthUnits - 1));
-                var seabedDetail = (noise * 2f - 1f)
-                    * Math.Min(HeightVariationUnits, MaximumSeaDepthUnits)
-                    * oceanAmount * 0.2f;
-                return Math.Clamp(
-                    SeaLevelUnits - oceanDepth
-                        + (int)MathF.Round(seabedDetail),
-                    1,
-                    SeaLevelUnits - 1);
+                throw new ArgumentNullException(nameof(settings));
             }
 
-            var inlandHeight = BaseHeightUnits
-                + (noise * 2f - 1f) * HeightVariationUnits
-                + mountainHeight;
-            var height = (int)MathF.Round(
-                SeaLevelUnits
-                + (inlandHeight - SeaLevelUnits) * coastAmount);
-            return Math.Clamp(height, 1, MaximumHeightUnits);
+            if (settings.WorldType == WorldType.Finite
+                && (coordinate.X < settings.MinimumChunkCoordinate
+                    || coordinate.X > settings.MaximumChunkCoordinate
+                    || coordinate.Z < settings.MinimumChunkCoordinate
+                    || coordinate.Z > settings.MaximumChunkCoordinate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(coordinate));
+            }
+
+            return new WorldChunkBuildInput(settings, coordinate);
         }
 
-        private static float SmoothStep01(float value)
+        public int ToWorldX(int localX)
         {
-            value = Math.Clamp(value, 0f, 1f);
-            return value * value * (3f - 2f * value);
+            ValidateLocalCoordinate(localX, nameof(localX));
+            return checked(OriginX + localX);
+        }
+
+        public int ToWorldZ(int localZ)
+        {
+            ValidateLocalCoordinate(localZ, nameof(localZ));
+            return checked(OriginZ + localZ);
+        }
+
+        private void ValidateLocalCoordinate(int value, string parameterName)
+        {
+            if ((uint)value >= ChunkSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(parameterName);
+            }
         }
     }
 
-    internal readonly struct WorldFieldColumn
+    internal readonly struct TerrainFieldSample
     {
-        public readonly int SolidHeight;
-        public readonly int WaterSurface;
-        public readonly WaterRole WaterRole;
-        public readonly WaterType WaterType;
-        public readonly SurfaceType WaterBedSurface;
-        public readonly SurfaceType TopSurface;
-        public readonly CellBiome Biome;
+        public TerrainFieldSample(
+            float patternRegion,
+            float continentalness,
+            float erosion,
+            float weirdness,
+            float peaksValleys,
+            float roughness,
+            float detail)
+        {
+            PatternRegion = patternRegion;
+            Continentalness = continentalness;
+            Erosion = erosion;
+            Weirdness = weirdness;
+            PeaksValleys = peaksValleys;
+            Roughness = roughness;
+            Detail = detail;
+        }
 
-        public WorldFieldColumn(
-            int solidHeight,
-            int waterSurface,
+        public float PatternRegion { get; }
+        public float Continentalness { get; }
+        public float Erosion { get; }
+        public float Weirdness { get; }
+        public float PeaksValleys { get; }
+        public float Roughness { get; }
+        public float Detail { get; }
+    }
+
+    internal readonly struct TerrainDensityProfile
+    {
+        public TerrainDensityProfile(
+            float surfaceOffsetUnits,
+            float verticalFactor,
+            float detailUnits)
+        {
+            SurfaceOffsetUnits = surfaceOffsetUnits;
+            VerticalFactor = verticalFactor;
+            DetailUnits = detailUnits;
+        }
+
+        public float SurfaceOffsetUnits { get; }
+        public float VerticalFactor { get; }
+        public float DetailUnits { get; }
+    }
+
+    internal readonly struct TerrainPatternContribution
+    {
+        public TerrainPatternContribution(
+            float surfaceOffsetUnits,
+            float detailUnits)
+        {
+            SurfaceOffsetUnits = surfaceOffsetUnits;
+            DetailUnits = detailUnits;
+        }
+
+        public float SurfaceOffsetUnits { get; }
+        public float DetailUnits { get; }
+    }
+
+    internal readonly struct TerrainPatternWeights
+    {
+        public TerrainPatternWeights(
+            float smooth,
+            float rugged,
+            float mountain,
+            float canyon)
+        {
+            Smooth = smooth;
+            Rugged = rugged;
+            Mountain = mountain;
+            Canyon = canyon;
+        }
+
+        public float Smooth { get; }
+        public float Rugged { get; }
+        public float Mountain { get; }
+        public float Canyon { get; }
+    }
+
+    internal readonly struct TerrainDensityContributions
+    {
+        public TerrainDensityContributions(
+            float verticalGradient,
+            float surfaceOffset,
+            float surfaceDetail,
+            float densityDetail)
+        {
+            VerticalGradient = verticalGradient;
+            SurfaceOffset = surfaceOffset;
+            SurfaceDetail = surfaceDetail;
+            DensityDetail = densityDetail;
+        }
+
+        public float VerticalGradient { get; }
+        public float SurfaceOffset { get; }
+        public float SurfaceDetail { get; }
+        public float DensityDetail { get; }
+        public float Total => VerticalGradient
+            + SurfaceOffset
+            + SurfaceDetail
+            + DensityDetail;
+    }
+
+    internal sealed class GenerationWorkingData
+    {
+        private TerrainFieldSample[] terrainFieldSamples;
+        private TerrainDensityProfile[] terrainDensityProfiles;
+        private float[] preliminaryDensity;
+        private float[] preliminarySurfaceUnits;
+        private float[] finalDensity;
+        private float[] finalSurfaceUnits;
+        private WorldColumnBuildData[] finalColumns;
+        private bool[] finalColumnWritten;
+
+        public GenerationWorkingData(
+            WorldChunkBuildInput input,
+            int haloCellCount)
+        {
+            Input = input ?? throw new ArgumentNullException(nameof(input));
+            if (haloCellCount < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(haloCellCount));
+            }
+
+            HaloCellCount = haloCellCount;
+            SampleOriginX = checked(input.OriginX - haloCellCount);
+            SampleOriginZ = checked(input.OriginZ - haloCellCount);
+            SampleSizeXZ = checked(input.ChunkSizeXZ + haloCellCount * 2);
+            terrainFieldSamples = new TerrainFieldSample[checked(
+                SampleSizeXZ * SampleSizeXZ)];
+            terrainDensityProfiles = new TerrainDensityProfile[
+                terrainFieldSamples.Length];
+            preliminaryDensity = new float[checked(
+                SampleSizeXZ
+                * SampleSizeXZ
+                * DensityHeightUnitCount)];
+            preliminarySurfaceUnits = new float[terrainFieldSamples.Length];
+            finalDensity = new float[preliminaryDensity.Length];
+            finalSurfaceUnits = new float[preliminarySurfaceUnits.Length];
+            finalColumns = new WorldColumnBuildData[
+                checked(input.ChunkSizeXZ * input.ChunkSizeXZ)];
+            finalColumnWritten = new bool[finalColumns.Length];
+        }
+
+        public WorldChunkBuildInput Input { get; }
+        public int HaloCellCount { get; }
+        public int SampleOriginX { get; }
+        public int SampleOriginZ { get; }
+        public int SampleSizeXZ { get; }
+        public int DensityHeightUnitCount => checked(Input.HeightUnitCount + 1);
+        public bool HasTerrainField { get; private set; }
+        public bool HasTerrainDensityProfile { get; private set; }
+        public bool HasPreliminaryDensity { get; private set; }
+        public bool HasPreliminarySurface { get; private set; }
+        public bool HasFinalDensity { get; private set; }
+        public bool HasFinalSurface { get; private set; }
+        public bool IsCompleted => finalColumns == null;
+
+        public void SetTerrainField(
+            int sampleLocalX,
+            int sampleLocalZ,
+            in TerrainFieldSample value)
+        {
+            EnsureNotCompleted();
+            if (HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field has already been finalized.");
+            }
+
+            terrainFieldSamples[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)] =
+                value;
+        }
+
+        public void CompleteTerrainField()
+        {
+            EnsureNotCompleted();
+            if (HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field has already been finalized.");
+            }
+
+            HasTerrainField = true;
+        }
+
+        public TerrainFieldSample GetTerrainField(
+            int sampleLocalX,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field is not ready.");
+            }
+
+            return terrainFieldSamples[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)];
+        }
+
+        public void SetTerrainDensityProfile(
+            int sampleLocalX,
+            int sampleLocalZ,
+            in TerrainDensityProfile value)
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field must be ready before its Density Profile is built.");
+            }
+
+            if (HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile has already been finalized.");
+            }
+
+            terrainDensityProfiles[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)] = value;
+        }
+
+        public void CompleteTerrainDensityProfile()
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field must be ready before its Density Profile is finalized.");
+            }
+
+            if (HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile has already been finalized.");
+            }
+
+            HasTerrainDensityProfile = true;
+        }
+
+        public TerrainDensityProfile GetTerrainDensityProfile(
+            int sampleLocalX,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile is not ready.");
+            }
+
+            return terrainDensityProfiles[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)];
+        }
+
+        public void SetPreliminaryDensity(
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ,
+            float density)
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile must be ready before Preliminary Density is built.");
+            }
+
+            if (HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density has already been finalized.");
+            }
+
+            if (!float.IsFinite(density))
+            {
+                throw new ArgumentOutOfRangeException(nameof(density));
+            }
+
+            preliminaryDensity[ToDensityIndex(
+                sampleLocalX,
+                heightUnit,
+                sampleLocalZ)] = density;
+        }
+
+        public void CompletePreliminaryDensity()
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile must be ready before Preliminary Density is finalized.");
+            }
+
+            if (HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density has already been finalized.");
+            }
+
+            HasPreliminaryDensity = true;
+        }
+
+        public float GetPreliminaryDensity(
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density is not ready.");
+            }
+
+            return preliminaryDensity[ToDensityIndex(
+                sampleLocalX,
+                heightUnit,
+                sampleLocalZ)];
+        }
+
+        public void SetPreliminarySurfaceUnits(
+            int sampleLocalX,
+            int sampleLocalZ,
+            float surfaceUnits)
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density must be ready before its surface is extracted.");
+            }
+
+            if (HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface has already been finalized.");
+            }
+
+            if (!float.IsFinite(surfaceUnits)
+                || surfaceUnits < 0f
+                || surfaceUnits > Input.HeightUnitCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(surfaceUnits));
+            }
+
+            preliminarySurfaceUnits[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)] = surfaceUnits;
+        }
+
+        public void CompletePreliminarySurface()
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density must be ready before its surface is finalized.");
+            }
+
+            if (HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface has already been finalized.");
+            }
+
+            HasPreliminarySurface = true;
+        }
+
+        public float GetPreliminarySurfaceUnits(
+            int sampleLocalX,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface is not ready.");
+            }
+
+            return preliminarySurfaceUnits[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)];
+        }
+
+        public void SetFinalDensity(
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ,
+            float density)
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface must be ready before Final Density is built.");
+            }
+
+            if (HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density has already been finalized.");
+            }
+
+            if (!float.IsFinite(density))
+            {
+                throw new ArgumentOutOfRangeException(nameof(density));
+            }
+
+            finalDensity[ToDensityIndex(
+                sampleLocalX,
+                heightUnit,
+                sampleLocalZ)] = density;
+        }
+
+        public void CompleteFinalDensity()
+        {
+            EnsureNotCompleted();
+            if (!HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface must be ready before Final Density is finalized.");
+            }
+
+            if (HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density has already been finalized.");
+            }
+
+            HasFinalDensity = true;
+        }
+
+        public float GetFinalDensity(
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density is not ready.");
+            }
+
+            return finalDensity[ToDensityIndex(
+                sampleLocalX,
+                heightUnit,
+                sampleLocalZ)];
+        }
+
+        public void SetFinalSurfaceUnits(
+            int sampleLocalX,
+            int sampleLocalZ,
+            float surfaceUnits)
+        {
+            EnsureNotCompleted();
+            if (!HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density must be ready before Final Surface is extracted.");
+            }
+
+            if (HasFinalSurface)
+            {
+                throw new InvalidOperationException(
+                    "Final Surface has already been finalized.");
+            }
+
+            if (!float.IsFinite(surfaceUnits)
+                || surfaceUnits < 0f
+                || surfaceUnits > Input.HeightUnitCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(surfaceUnits));
+            }
+
+            finalSurfaceUnits[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)] = surfaceUnits;
+        }
+
+        public void CompleteFinalSurface()
+        {
+            EnsureNotCompleted();
+            if (!HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density must be ready before Final Surface is finalized.");
+            }
+
+            if (HasFinalSurface)
+            {
+                throw new InvalidOperationException(
+                    "Final Surface has already been finalized.");
+            }
+
+            HasFinalSurface = true;
+        }
+
+        public float GetFinalSurfaceUnits(
+            int sampleLocalX,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasFinalSurface)
+            {
+                throw new InvalidOperationException(
+                    "Final Surface is not ready.");
+            }
+
+            return finalSurfaceUnits[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)];
+        }
+
+        public void SetFinalColumn(
+            int localX,
+            int localZ,
+            in WorldColumnBuildData column)
+        {
+            EnsureNotCompleted();
+            if ((uint)localX >= Input.ChunkSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(localX));
+            }
+
+            if ((uint)localZ >= Input.ChunkSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(localZ));
+            }
+
+            var index = localX + Input.ChunkSizeXZ * localZ;
+            finalColumns[index] = column;
+            finalColumnWritten[index] = true;
+        }
+
+        public WorldChunkBuildData Complete()
+        {
+            EnsureNotCompleted();
+            if (!HasTerrainField
+                || !HasTerrainDensityProfile
+                || !HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field, Terrain Density Profile, and Preliminary Density must be ready before final output is transferred.");
+            }
+
+            if (!HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface must be ready before final output is transferred.");
+            }
+
+            if (!HasFinalDensity || !HasFinalSurface)
+            {
+                throw new InvalidOperationException(
+                    "Final Density and Final Surface must be ready before output is transferred.");
+            }
+
+            for (var index = 0; index < finalColumnWritten.Length; index++)
+            {
+                if (!finalColumnWritten[index])
+                {
+                    throw new InvalidOperationException(
+                        "Every Chunk Column must be explicitly finalized before output is transferred.");
+                }
+            }
+
+            var columns = finalColumns;
+            terrainFieldSamples = null;
+            terrainDensityProfiles = null;
+            preliminaryDensity = null;
+            preliminarySurfaceUnits = null;
+            finalDensity = null;
+            finalSurfaceUnits = null;
+            finalColumns = null;
+            finalColumnWritten = null;
+            return new WorldChunkBuildData(Input, columns);
+        }
+
+        private void EnsureNotCompleted()
+        {
+            if (IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    "Generation working data has already transferred its final output.");
+            }
+        }
+
+        private int ToDensityIndex(
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ)
+        {
+            if ((uint)sampleLocalX >= SampleSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleLocalX));
+            }
+
+            if ((uint)sampleLocalZ >= SampleSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleLocalZ));
+            }
+
+            if ((uint)heightUnit >= DensityHeightUnitCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(heightUnit));
+            }
+
+            return checked(
+                heightUnit
+                + DensityHeightUnitCount
+                * (sampleLocalX + SampleSizeXZ * sampleLocalZ));
+        }
+
+        private int ToSurfaceIndex(int sampleLocalX, int sampleLocalZ)
+        {
+            if ((uint)sampleLocalX >= SampleSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleLocalX));
+            }
+
+            if ((uint)sampleLocalZ >= SampleSizeXZ)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleLocalZ));
+            }
+
+            return checked(sampleLocalX + SampleSizeXZ * sampleLocalZ);
+        }
+    }
+
+    internal static class TerrainFieldStage
+    {
+        public const int RequiredHaloCellCount = 1;
+
+        public static GenerationWorkingData Build(WorldChunkBuildInput input)
+        {
+            if (input == null)
+            {
+                throw new ArgumentNullException(nameof(input));
+            }
+
+            var working = new GenerationWorkingData(
+                input,
+                RequiredHaloCellCount);
+            var router = new TerrainNoiseRouter(input.Settings);
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                var worldX = checked(working.SampleOriginX + sampleLocalX);
+                var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
+                working.SetTerrainField(
+                    sampleLocalX,
+                    sampleLocalZ,
+                    router.Sample(worldX, worldZ));
+            }
+
+            working.CompleteTerrainField();
+            return working;
+        }
+    }
+
+    internal static class TerrainNoiseFieldSampler
+    {
+        public static float Sample2D(
+            long worldX,
+            long worldZ,
+            in TerrainNoiseFieldSettingsData field,
+            int seed)
+        {
+            var sample = field.Mode is TerrainNoiseMode.Ridge
+                or TerrainNoiseMode.SignedRidge
+                ? DeterministicNoise.RidgedFractalNoise(
+                    worldX * field.Scale,
+                    worldZ * field.Scale,
+                    seed,
+                    field.Layers,
+                    field.FrequencySpacing,
+                    field.Persistence)
+                : DeterministicNoise.FractalNoise(
+                    worldX * field.Scale,
+                    worldZ * field.Scale,
+                    seed,
+                    field.Layers,
+                    field.FrequencySpacing,
+                    field.Persistence);
+            return field.Mode is TerrainNoiseMode.Signed
+                or TerrainNoiseMode.SignedRidge
+                ? sample * 2f - 1f
+                : sample;
+        }
+
+        public static float Sample3D(
+            double worldX,
+            double worldY,
+            double worldZ,
+            in TerrainNoiseFieldSettingsData field,
+            int seed)
+        {
+            var sample = field.Mode is TerrainNoiseMode.Ridge
+                or TerrainNoiseMode.SignedRidge
+                ? DeterministicNoise.RidgedFractalNoise(
+                    worldX * field.Scale,
+                    worldY * field.Scale,
+                    worldZ * field.Scale,
+                    seed,
+                    field.Layers,
+                    field.FrequencySpacing,
+                    field.Persistence)
+                : DeterministicNoise.FractalNoise(
+                    worldX * field.Scale,
+                    worldY * field.Scale,
+                    worldZ * field.Scale,
+                    seed,
+                    field.Layers,
+                    field.FrequencySpacing,
+                    field.Persistence);
+            return field.Mode is TerrainNoiseMode.Signed
+                or TerrainNoiseMode.SignedRidge
+                ? sample * 2f - 1f
+                : sample;
+        }
+
+    }
+
+    internal readonly struct TerrainNoiseRouter
+    {
+        private readonly int patternRegionSeed;
+        private readonly int continentalSeed;
+        private readonly int erosionSeed;
+        private readonly int weirdnessSeed;
+        private readonly int peaksValleysSeed;
+        private readonly int roughnessSeed;
+        private readonly int detailSeed;
+        private readonly TerrainNoiseRouterSettingsData settings;
+
+        public TerrainNoiseRouter(WorldSettingsData worldSettings)
+        {
+            patternRegionSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-pattern-region");
+            continentalSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-continentalness");
+            erosionSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-erosion");
+            weirdnessSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-weirdness");
+            peaksValleysSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-peaks-valleys");
+            roughnessSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-roughness");
+            detailSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "terrain-router-detail");
+            settings = worldSettings.TerrainNoiseRouter;
+        }
+
+        public TerrainFieldSample Sample(int worldX, int worldZ) => new(
+                SamplePatternRegion(worldX, worldZ),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                    settings.Continentalness,
+                    continentalSeed),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                    settings.Erosion,
+                    erosionSeed),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                    settings.Weirdness,
+                    weirdnessSeed),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                    settings.PeaksValleys,
+                    peaksValleysSeed),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                    settings.Roughness,
+                    roughnessSeed),
+                TerrainNoiseFieldSampler.Sample2D(
+                    worldX,
+                    worldZ,
+                settings.Detail,
+                detailSeed));
+
+        public float SamplePatternRegion(int worldX, int worldZ) =>
+            TerrainNoiseFieldSampler.Sample2D(
+                worldX,
+                worldZ,
+                settings.PatternRegion,
+                patternRegionSeed);
+
+        public float SampleContinentalness(int worldX, int worldZ) =>
+            TerrainNoiseFieldSampler.Sample2D(
+                worldX,
+                worldZ,
+                settings.Continentalness,
+                continentalSeed);
+
+        public float SampleErosion(int worldX, int worldZ) =>
+            TerrainNoiseFieldSampler.Sample2D(
+                worldX,
+                worldZ,
+                settings.Erosion,
+                erosionSeed);
+
+        public float SampleDetail3D(
+            double worldX,
+            double worldY,
+            double worldZ) => TerrainNoiseFieldSampler.Sample3D(
+                worldX,
+                worldY,
+                worldZ,
+                settings.Detail,
+                detailSeed);
+    }
+
+    internal static class TerrainPatternStage
+    {
+        public static void Build(GenerationWorkingData working)
+        {
+            if (working == null)
+            {
+                throw new ArgumentNullException(nameof(working));
+            }
+
+            if (!working.HasTerrainField)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Field is not ready.");
+            }
+
+            var settings = working.Input.Settings;
+            var router = new TerrainNoiseRouter(settings);
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                var worldX = checked(
+                    working.SampleOriginX + sampleLocalX);
+                var worldZ = checked(
+                    working.SampleOriginZ + sampleLocalZ);
+                var field = working.GetTerrainField(
+                    sampleLocalX,
+                    sampleLocalZ);
+                working.SetTerrainDensityProfile(
+                    sampleLocalX,
+                    sampleLocalZ,
+                    TerrainPatternResolver.Resolve(
+                        router,
+                        worldX,
+                        worldZ,
+                        field,
+                        settings.TerrainPatterns,
+                        out _));
+            }
+
+            working.CompleteTerrainDensityProfile();
+        }
+    }
+
+    internal static class TerrainPatternResolver
+    {
+        public static TerrainDensityProfile Resolve(
+            in TerrainNoiseRouter router,
+            int worldX,
+            int worldZ,
+            in TerrainFieldSample field,
+            in TerrainPatternSettingsData settings,
+            out TerrainPatternWeights weights)
+        {
+            var smoothWeight = SmoothTerrainGenerator.EvaluateInfluence(
+                field,
+                settings.Smooth);
+            var ruggedWeight = RuggedTerrainGenerator.EvaluateInfluence(
+                field,
+                settings.Rugged);
+            var mountainWeight = MountainTerrainGenerator.EvaluateInfluence(
+                field,
+                settings.Mountain);
+            var canyonWeight = CanyonTerrainGenerator.EvaluateInfluence(
+                field,
+                settings.Canyon);
+            var canyonShape = CanyonTerrainGenerator.SampleShape(
+                router,
+                worldX,
+                worldZ,
+                field,
+                settings.Canyon);
+            var total = smoothWeight
+                + ruggedWeight
+                + mountainWeight
+                + canyonWeight;
+            if (!float.IsFinite(total) || total <= 0f)
+            {
+                throw new InvalidOperationException(
+                    "Terrain pattern weights must produce a positive total.");
+            }
+
+            var inverseTotal = 1f / total;
+            weights = new TerrainPatternWeights(
+                smoothWeight * inverseTotal,
+                ruggedWeight * inverseTotal,
+                mountainWeight * inverseTotal,
+                canyonWeight * inverseTotal);
+
+            var smooth = SmoothTerrainGenerator.Generate(
+                field,
+                settings.Smooth);
+            var rugged = RuggedTerrainGenerator.Generate(
+                field,
+                settings.Rugged);
+            var mountain = MountainTerrainGenerator.Generate(
+                field,
+                settings.Mountain);
+            var canyon = CanyonTerrainGenerator.Generate(
+                field,
+                canyonShape,
+                settings.Canyon);
+            var baseDensity = settings.BaseDensity;
+            var surfaceOffset =
+                baseDensity.SurfaceByContinentalness.Evaluate(
+                    field.Continentalness)
+                + baseDensity.SurfaceByErosion.Evaluate(field.Erosion)
+                + smooth.SurfaceOffsetUnits * weights.Smooth
+                + rugged.SurfaceOffsetUnits * weights.Rugged
+                + mountain.SurfaceOffsetUnits * weights.Mountain
+                + canyon.SurfaceOffsetUnits * weights.Canyon;
+            var detailUnits = baseDensity.DetailByRoughness.Evaluate(
+                    field.Roughness)
+                + smooth.DetailUnits * weights.Smooth
+                + rugged.DetailUnits * weights.Rugged
+                + mountain.DetailUnits * weights.Mountain
+                + canyon.DetailUnits * weights.Canyon;
+            return new TerrainDensityProfile(
+                surfaceOffset,
+                baseDensity.VerticalFactorByErosion.Evaluate(field.Erosion),
+                detailUnits);
+        }
+    }
+
+    internal static class SmoothTerrainGenerator
+    {
+        public static float EvaluateInfluence(
+            in TerrainFieldSample field,
+            in SmoothTerrainSettingsData settings) =>
+            settings.InfluenceByRegion.Evaluate(field.PatternRegion);
+
+        public static TerrainPatternContribution Generate(
+            in TerrainFieldSample field,
+            in SmoothTerrainSettingsData settings) => new(
+                settings.UndulationByWeirdness.Evaluate(field.Weirdness),
+                settings.DetailByRoughness.Evaluate(field.Roughness));
+    }
+
+    internal static class RuggedTerrainGenerator
+    {
+        public static float EvaluateInfluence(
+            in TerrainFieldSample field,
+            in RuggedTerrainSettingsData settings) =>
+            settings.InfluenceByRegion.Evaluate(field.PatternRegion);
+
+        public static TerrainPatternContribution Generate(
+            in TerrainFieldSample field,
+            in RuggedTerrainSettingsData settings) => new(
+                settings.ReliefByPeaksValleys.Evaluate(field.PeaksValleys)
+                * settings.ReliefScaleByRoughness.Evaluate(field.Roughness),
+                settings.DetailByRoughness.Evaluate(field.Roughness));
+    }
+
+    internal static class MountainTerrainGenerator
+    {
+        public static float EvaluateInfluence(
+            in TerrainFieldSample field,
+            in MountainTerrainSettingsData settings) =>
+            settings.InfluenceByRegion.Evaluate(field.PatternRegion);
+
+        public static TerrainPatternContribution Generate(
+            in TerrainFieldSample field,
+            in MountainTerrainSettingsData settings)
+        {
+            var centerProximity = Math.Clamp(
+                settings.CenterProximityByRegion.Evaluate(
+                    field.PatternRegion),
+                0f,
+                1f);
+            var progressExponent = settings.ProgressExponentByErosion
+                .Evaluate(field.Erosion);
+            var warpedProgress = MathF.Pow(
+                centerProximity,
+                progressExponent);
+            var height = settings.HeightByCenterProximity.EvaluateMonotonic(
+                warpedProgress);
+            return new TerrainPatternContribution(
+                height,
+                0f);
+        }
+    }
+
+    internal static class CanyonTerrainGenerator
+    {
+        internal readonly struct ShapeSample
+        {
+            public ShapeSample(float axisProximity)
+            {
+                AxisProximity = axisProximity;
+            }
+
+            public float AxisProximity { get; }
+        }
+
+        public static float EvaluateInfluence(
+            in TerrainFieldSample field,
+            in CanyonTerrainSettingsData settings) =>
+            settings.InfluenceByRegion.Evaluate(field.PatternRegion);
+
+        public static ShapeSample SampleShape(
+            in TerrainNoiseRouter router,
+            int worldX,
+            int worldZ,
+            in TerrainFieldSample field,
+            in CanyonTerrainSettingsData settings)
+        {
+            var axisValue = field.Continentalness - field.Erosion;
+            var left = router.SampleContinentalness(worldX - 1, worldZ)
+                - router.SampleErosion(worldX - 1, worldZ);
+            var right = router.SampleContinentalness(worldX + 1, worldZ)
+                - router.SampleErosion(worldX + 1, worldZ);
+            var back = router.SampleContinentalness(worldX, worldZ - 1)
+                - router.SampleErosion(worldX, worldZ - 1);
+            var forward = router.SampleContinentalness(worldX, worldZ + 1)
+                - router.SampleErosion(worldX, worldZ + 1);
+            var gradientX = (right - left) * 0.5f;
+            var gradientZ = (forward - back) * 0.5f;
+            var gradientLength = MathF.Sqrt(
+                gradientX * gradientX + gradientZ * gradientZ);
+            var width = settings.WidthByVariation.Evaluate(field.Erosion);
+            var axisProximity = gradientLength > float.Epsilon
+                ? 1f - Math.Clamp(
+                    MathF.Abs(axisValue) / gradientLength / width,
+                    0f,
+                    1f)
+                : 0f;
+            return new ShapeSample(axisProximity);
+        }
+
+        public static TerrainPatternContribution Generate(
+            in TerrainFieldSample field,
+            in ShapeSample shape,
+            in CanyonTerrainSettingsData settings)
+        {
+            var maximumDepth = settings.MaximumDepthByVariation.Evaluate(
+                field.PatternRegion);
+            var depthShape = SmootherStep(shape.AxisProximity);
+            return new TerrainPatternContribution(
+                -maximumDepth * depthShape,
+                0f);
+        }
+
+        private static float SmootherStep(float value)
+        {
+            value = Math.Clamp(value, 0f, 1f);
+            return value * value * value
+                * (value * (value * 6f - 15f) + 10f);
+        }
+    }
+
+    internal static class PreliminaryTerrainDensityStage
+    {
+        public static void Build(GenerationWorkingData working)
+        {
+            if (working == null)
+            {
+                throw new ArgumentNullException(nameof(working));
+            }
+
+            if (!working.HasTerrainDensityProfile)
+            {
+                throw new InvalidOperationException(
+                    "Terrain Density Profile is not ready.");
+            }
+
+            var field = new PreliminaryTerrainDensityField(
+                working.Input.Settings);
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                var worldX = checked(working.SampleOriginX + sampleLocalX);
+                var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
+                var fieldSample = working.GetTerrainField(
+                    sampleLocalX,
+                    sampleLocalZ);
+                var profile = working.GetTerrainDensityProfile(
+                    sampleLocalX,
+                    sampleLocalZ);
+                for (var heightUnit = 0;
+                     heightUnit < working.DensityHeightUnitCount;
+                     heightUnit++)
+                {
+                    working.SetPreliminaryDensity(
+                        sampleLocalX,
+                        heightUnit,
+                        sampleLocalZ,
+                        field.Sample(
+                            worldX,
+                            heightUnit,
+                            worldZ,
+                            fieldSample,
+                            profile));
+                }
+            }
+
+            working.CompletePreliminaryDensity();
+        }
+    }
+
+    internal readonly struct PreliminaryTerrainDensityField
+    {
+        private readonly TerrainNoiseRouter noiseRouter;
+        private readonly int terrainBaseHeightUnits;
+        private readonly int maximumHeightUnit;
+
+        public PreliminaryTerrainDensityField(WorldSettingsData settings)
+        {
+            noiseRouter = new TerrainNoiseRouter(settings);
+            terrainBaseHeightUnits = settings.TerrainBaseHeightUnits;
+            maximumHeightUnit = checked(
+                settings.WorldHeight * WorldGrid.HeightStepsPerCell);
+        }
+
+        public float Sample(
+            int worldX,
+            int heightUnit,
+            int worldZ,
+            in TerrainFieldSample field,
+            in TerrainDensityProfile profile) =>
+            Sample(
+                worldX,
+                heightUnit,
+                worldZ,
+                field,
+                profile,
+                out _);
+
+        public float Sample(
+            int worldX,
+            int heightUnit,
+            int worldZ,
+            in TerrainFieldSample field,
+            in TerrainDensityProfile profile,
+            out TerrainDensityContributions contributions)
+        {
+            if ((uint)heightUnit > maximumHeightUnit)
+            {
+                throw new ArgumentOutOfRangeException(nameof(heightUnit));
+            }
+
+            var worldY = heightUnit
+                / (double)WorldGrid.HeightStepsPerCell;
+            var detail3D = noiseRouter.SampleDetail3D(
+                worldX,
+                worldY,
+                worldZ);
+            var verticalContribution = (
+                terrainBaseHeightUnits - heightUnit)
+                * profile.VerticalFactor;
+            var surfaceOffsetContribution =
+                profile.SurfaceOffsetUnits * profile.VerticalFactor;
+            var surfaceDetailContribution = field.Detail
+                * profile.DetailUnits
+                * profile.VerticalFactor;
+            var densityDetailContribution = detail3D
+                * profile.DetailUnits;
+            contributions = new TerrainDensityContributions(
+                verticalContribution,
+                surfaceOffsetContribution,
+                surfaceDetailContribution,
+                densityDetailContribution);
+            var density = contributions.Total;
+
+            return heightUnit == 0 ? Math.Max(1f, density) : density;
+        }
+    }
+
+    internal static class DensitySurfaceStage
+    {
+        public static void BuildPreliminarySurface(
+            GenerationWorkingData working)
+        {
+            ValidateWorkingData(working);
+            if (!working.HasPreliminaryDensity)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Density is not ready.");
+            }
+
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                working.SetPreliminarySurfaceUnits(
+                    sampleLocalX,
+                    sampleLocalZ,
+                    FindSurfaceUnits(
+                        working,
+                        sampleLocalX,
+                        sampleLocalZ,
+                        useFinalDensity: false));
+            }
+
+            working.CompletePreliminarySurface();
+        }
+
+        public static void BuildFinalSurface(
+            GenerationWorkingData working)
+        {
+            ValidateWorkingData(working);
+            if (!working.HasFinalDensity)
+            {
+                throw new InvalidOperationException(
+                    "Final Density is not ready.");
+            }
+
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                working.SetFinalSurfaceUnits(
+                    sampleLocalX,
+                    sampleLocalZ,
+                    FindSurfaceUnits(
+                        working,
+                        sampleLocalX,
+                        sampleLocalZ,
+                        useFinalDensity: true));
+            }
+
+            working.CompleteFinalSurface();
+        }
+
+        private static float FindSurfaceUnits(
+            GenerationWorkingData working,
+            int sampleLocalX,
+            int sampleLocalZ,
+            bool useFinalDensity)
+        {
+            var topUnit = working.Input.HeightUnitCount;
+            if (GetDensity(
+                    working,
+                    sampleLocalX,
+                    topUnit,
+                    sampleLocalZ,
+                    useFinalDensity) >= 0f)
+            {
+                return topUnit;
+            }
+
+            if (GetDensity(
+                    working,
+                    sampleLocalX,
+                    0,
+                    sampleLocalZ,
+                    useFinalDensity) < 0f)
+            {
+                return 0;
+            }
+
+            for (var lowerUnit = working.Input.HeightUnitCount - 1;
+                 lowerUnit >= 0;
+                 lowerUnit--)
+            {
+                var lowerDensity = GetDensity(
+                    working,
+                    sampleLocalX,
+                    lowerUnit,
+                    sampleLocalZ,
+                    useFinalDensity);
+                var upperDensity = GetDensity(
+                    working,
+                    sampleLocalX,
+                    lowerUnit + 1,
+                    sampleLocalZ,
+                    useFinalDensity);
+                if (lowerDensity < 0f || upperDensity >= 0f)
+                {
+                    continue;
+                }
+
+                var denominator = lowerDensity - upperDensity;
+                var fraction = denominator > 0f
+                    ? lowerDensity / denominator
+                    : 0f;
+                var continuousSurface = lowerUnit
+                    + Math.Clamp(fraction, 0f, 1f);
+                return Math.Clamp(
+                    continuousSurface,
+                    0f,
+                    working.Input.HeightUnitCount);
+            }
+
+            throw new InvalidOperationException(
+                "Terrain Density does not contain a solid-to-air surface.");
+        }
+
+        private static float GetDensity(
+            GenerationWorkingData working,
+            int sampleLocalX,
+            int heightUnit,
+            int sampleLocalZ,
+            bool useFinalDensity) =>
+            useFinalDensity
+                ? working.GetFinalDensity(
+                    sampleLocalX,
+                    heightUnit,
+                    sampleLocalZ)
+                : working.GetPreliminaryDensity(
+                    sampleLocalX,
+                    heightUnit,
+                    sampleLocalZ);
+
+        private static void ValidateWorkingData(
+            GenerationWorkingData working)
+        {
+            if (working == null)
+            {
+                throw new ArgumentNullException(nameof(working));
+            }
+        }
+    }
+
+    internal static class TerrainDensityFinalizationStage
+    {
+        public static void Build(GenerationWorkingData working)
+        {
+            if (working == null)
+            {
+                throw new ArgumentNullException(nameof(working));
+            }
+
+            if (!working.HasPreliminarySurface)
+            {
+                throw new InvalidOperationException(
+                    "Preliminary Surface is not ready.");
+            }
+
+            for (var sampleLocalZ = 0;
+                 sampleLocalZ < working.SampleSizeXZ;
+                 sampleLocalZ++)
+            for (var sampleLocalX = 0;
+                 sampleLocalX < working.SampleSizeXZ;
+                 sampleLocalX++)
+            {
+                for (var heightUnit = 0;
+                     heightUnit < working.DensityHeightUnitCount;
+                     heightUnit++)
+                {
+                    working.SetFinalDensity(
+                        sampleLocalX,
+                        heightUnit,
+                        sampleLocalZ,
+                        working.GetPreliminaryDensity(
+                            sampleLocalX,
+                            heightUnit,
+                            sampleLocalZ));
+                }
+            }
+
+            working.CompleteFinalDensity();
+        }
+    }
+
+    internal static class DensityToFilledStage
+    {
+        public static void Build(GenerationWorkingData working)
+        {
+            if (working == null)
+            {
+                throw new ArgumentNullException(nameof(working));
+            }
+
+            if (!working.HasFinalSurface)
+            {
+                throw new InvalidOperationException(
+                    "Final Surface is not ready.");
+            }
+
+            var halo = working.HaloCellCount;
+            var emptyBiome = default(CellBiome);
+            for (var localZ = 0;
+                 localZ < working.Input.ChunkSizeXZ;
+                 localZ++)
+            for (var localX = 0;
+                 localX < working.Input.ChunkSizeXZ;
+                 localX++)
+            {
+                var sampleLocalX = localX + halo;
+                var sampleLocalZ = localZ + halo;
+                var solidHeightUnits = Math.Clamp(
+                    (int)MathF.Round(
+                        working.GetFinalSurfaceUnits(
+                            sampleLocalX,
+                            sampleLocalZ),
+                        MidpointRounding.AwayFromZero),
+                    0,
+                    working.Input.HeightUnitCount);
+                working.SetFinalColumn(
+                    localX,
+                    localZ,
+                    new WorldColumnBuildData(
+                        solidHeightUnits,
+                        0,
+                        WaterRole.None,
+                        WaterType.None,
+                        SurfaceType.None,
+                        solidHeightUnits > 0
+                            ? SurfaceType.Ground
+                            : SurfaceType.None,
+                        emptyBiome));
+            }
+        }
+    }
+
+    internal readonly struct WorldColumnBuildData
+    {
+        public WorldColumnBuildData(
+            int solidHeightUnits,
+            int waterSurfaceUnits,
             WaterRole waterRole,
             WaterType waterType,
             SurfaceType waterBedSurface,
             SurfaceType topSurface,
             CellBiome biome)
         {
-            SolidHeight = solidHeight;
-            WaterSurface = waterSurface;
+            SolidHeightUnits = solidHeightUnits;
+            WaterSurfaceUnits = waterSurfaceUnits;
             WaterRole = waterRole;
             WaterType = waterType;
             WaterBedSurface = waterBedSurface;
             TopSurface = topSurface;
             Biome = biome;
         }
+
+        public int SolidHeightUnits { get; }
+        public int WaterSurfaceUnits { get; }
+        public WaterRole WaterRole { get; }
+        public WaterType WaterType { get; }
+        public SurfaceType WaterBedSurface { get; }
+        public SurfaceType TopSurface { get; }
+        public CellBiome Biome { get; }
     }
 
-    internal sealed class WorldFieldSampler
+    internal sealed class WorldChunkBuildData
     {
-        private enum RiverExecutionMode : byte
+        private readonly WorldColumnBuildData[] columns;
+
+        internal WorldChunkBuildData(
+            WorldChunkBuildInput input,
+            WorldColumnBuildData[] columns)
         {
-            Dynamic,
-            Source
+            if (input == null)
+            {
+                throw new ArgumentNullException(nameof(input));
+            }
+
+            this.columns = columns ?? throw new ArgumentNullException(nameof(columns));
+            var expectedColumnCount = checked(
+                input.ChunkSizeXZ * input.ChunkSizeXZ);
+            if (columns.Length != expectedColumnCount)
+            {
+                throw new ArgumentException(
+                    "Chunk output does not match the requested Chunk size.",
+                    nameof(columns));
+            }
+
+            Coordinate = input.Coordinate;
+            ChunkSizeXZ = input.ChunkSizeXZ;
         }
 
-        private static readonly (int x, int z)[] Directions =
+        public ChunkCoordinate Coordinate { get; }
+        public int ChunkSizeXZ { get; }
+        public int ColumnCount => columns.Length;
+
+        public WorldColumnBuildData GetColumn(int localX, int localZ)
         {
-            (1, 0), (-1, 0), (0, 1), (0, -1)
-        };
-
-        private readonly WorldSettingsData settings;
-        private readonly TerrainFieldParameters terrain;
-        private readonly int riverSeed;
-        private readonly int lakeSeed;
-        private readonly int climateSeed;
-        private readonly Dictionary<long, LakeBasin> lakeBasins = new();
-        private readonly Dictionary<long, RiverFeature> riverFeatures = new();
-        private readonly Dictionary<long, RiverRegionField> riverRegionFields = new();
-        private readonly Queue<long> lakeBasinOrder = new();
-        private readonly Queue<long> riverFeatureOrder = new();
-        private readonly Queue<long> riverRegionFieldOrder = new();
-
-        public WorldFieldSampler(WorldSettingsData settings)
-        {
-            this.settings = settings ?? throw new ArgumentNullException(nameof(settings));
-            terrain = new TerrainFieldParameters(settings);
-            riverSeed = DeterministicNoise.DeriveSeed(settings.Seed, "river-channel");
-            lakeSeed = DeterministicNoise.DeriveSeed(settings.Seed, "lake-basin");
-            climateSeed = DeterministicNoise.DeriveSeed(settings.Seed, "climate");
-        }
-
-        public WorldFieldColumn Sample(int x, int z) =>
-            Sample(x, z, terrain.SampleHeight(x, z));
-
-        public WorldFieldColumn Sample(int x, int z, int baseHeight)
-        {
-            var core = SampleCore(x, z, baseHeight);
-            var topSurface = core.WaterType != WaterType.None
-                ? core.WaterBedSurface
-                : IsShore(x, z, core.SolidHeight)
-                    ? SurfaceType.Shore
-                    : SurfaceType.Ground;
-            var biome = SampleBiome(
-                x,
-                z,
-                core.SolidHeight,
-                core.WaterType);
-            return new WorldFieldColumn(
-                core.SolidHeight,
-                core.WaterSurface,
-                core.WaterRole,
-                core.WaterType,
-                core.WaterBedSurface,
-                topSurface,
-                biome);
-        }
-
-        public CellBiome SampleBiome(
-            int x,
-            int z,
-            int solidHeight,
-            WaterType waterType)
-        {
-            var climate = ResolveClimate(x, z, solidHeight);
-            var altitude = solidHeight /
-                (float)(settings.WorldHeight * WorldGrid.HeightStepsPerCell);
-            return new CellBiome(
-                climate,
-                BiomeStage.ResolveTerrain(climate, altitude),
-                BiomeStage.ResolveWater(waterType));
-        }
-
-        private CoreColumn SampleCore(int x, int z) =>
-            SampleCore(x, z, terrain.SampleHeight(x, z));
-
-        private CoreColumn SampleCore(int x, int z, int baseHeight)
-        {
-            if (terrain.SampleContinental(x, z) < settings.LandThreshold
-                && baseHeight < settings.SeaLevelUnits)
+            if ((uint)localX >= ChunkSizeXZ)
             {
-                return new CoreColumn(
-                    baseHeight,
-                    settings.SeaLevelUnits,
-                    WaterRole.Source,
-                    WaterType.Sea,
-                    SurfaceType.Seabed);
+                throw new ArgumentOutOfRangeException(nameof(localX));
             }
 
-            if (TrySampleLake(x, z, baseHeight, out var lake))
+            if ((uint)localZ >= ChunkSizeXZ)
             {
-                return lake;
+                throw new ArgumentOutOfRangeException(nameof(localZ));
             }
 
-            if (TrySampleRiver(x, z, baseHeight, out var river))
-            {
-                return river;
-            }
-
-            return new CoreColumn(
-                baseHeight,
-                0,
-                WaterRole.None,
-                WaterType.None,
-                SurfaceType.None);
-        }
-
-        private bool TrySampleLake(
-            int x,
-            int z,
-            int terrainHeight,
-            out CoreColumn column)
-        {
-            column = default;
-            if (settings.LakeDensity <= 0f)
-            {
-                return false;
-            }
-
-            var regionSize = settings.LakeRegionSizeCells;
-            var regionX = WorldCoordinateUtility.FloorDivide(x, regionSize);
-            var regionZ = WorldCoordinateUtility.FloorDivide(z, regionSize);
-            var found = false;
-            var bestDistance = float.MaxValue;
-            var bestBasin = default(LakeBasin);
-            for (var offsetZ = -1; offsetZ <= 1; offsetZ++)
-            for (var offsetX = -1; offsetX <= 1; offsetX++)
-            {
-                var basin = GetLakeBasin(
-                    regionX + offsetX,
-                    regionZ + offsetZ);
-                if (!basin.Exists)
-                {
-                    continue;
-                }
-
-                var deltaX = x - basin.CenterX;
-                var deltaZ = z - basin.CenterZ;
-                var distance = MathF.Sqrt(
-                    deltaX * deltaX + deltaZ * deltaZ) / basin.Radius;
-                if (distance > 1f || distance >= bestDistance)
-                {
-                    continue;
-                }
-
-                found = true;
-                bestDistance = distance;
-                bestBasin = basin;
-            }
-
-            if (!found)
-            {
-                return false;
-            }
-
-            var centerFactor = 1f - bestDistance;
-            var depth = Math.Max(
-                settings.MinimumInlandLakeDepthSteps,
-                (int)MathF.Round(
-                    bestBasin.MaximumDepth * centerFactor));
-            var solidHeight = Math.Max(
-                1,
-                Math.Min(terrainHeight, bestBasin.Surface - depth));
-            var type = bestBasin.Area <= settings.PondMaximumArea
-                ? WaterType.Pond
-                : WaterType.Lake;
-            column = new CoreColumn(
-                solidHeight,
-                bestBasin.Surface,
-                WaterRole.Source,
-                type,
-                SurfaceType.Lakebed);
-            return true;
-        }
-
-        private LakeBasin GetLakeBasin(int regionX, int regionZ)
-        {
-            var key = CoordinateKey(regionX, regionZ);
-            if (lakeBasins.TryGetValue(key, out var cached))
-            {
-                return cached;
-            }
-
-            var basin = BuildLakeBasin(regionX, regionZ);
-            AddBounded(
-                lakeBasins,
-                lakeBasinOrder,
-                key,
-                basin,
-                2048);
-            return basin;
-        }
-
-        private LakeBasin BuildLakeBasin(int regionX, int regionZ)
-        {
-            if (DeterministicNoise.Value01(regionX, regionZ, lakeSeed)
-                > settings.LakeDensity)
-            {
-                return default;
-            }
-
-            var regionSize = settings.LakeRegionSizeCells;
-            var centerX = regionX * regionSize
-                + (int)(DeterministicNoise.Hash(regionX, regionZ, lakeSeed + 101)
-                    % (uint)regionSize);
-            var centerZ = regionZ * regionSize
-                + (int)(DeterministicNoise.Hash(regionX, regionZ, lakeSeed + 211)
-                    % (uint)regionSize);
-            if (terrain.SampleContinental(centerX, centerZ) < settings.LandThreshold)
-            {
-                return default;
-            }
-
-            var radius = Math.Max(
-                1,
-                1 + (int)MathF.Round(
-                    DeterministicNoise.Value01(regionX, regionZ, lakeSeed + 307)
-                    * Math.Max(0, settings.MaximumLakeRadiusCells - 1)));
-            var area = 0;
-            for (var offsetZ = -radius; offsetZ <= radius; offsetZ++)
-            for (var offsetX = -radius; offsetX <= radius; offsetX++)
-            {
-                if (offsetX * offsetX + offsetZ * offsetZ <= radius * radius)
-                {
-                    area++;
-                }
-            }
-
-            if (area < settings.MinimumInlandLakeArea)
-            {
-                return default;
-            }
-
-            var rimRadius = radius + 1;
-            var surface = int.MaxValue;
-            for (var offsetZ = -rimRadius; offsetZ <= rimRadius; offsetZ++)
-            for (var offsetX = -rimRadius; offsetX <= rimRadius; offsetX++)
-            {
-                var distanceSquared = offsetX * offsetX + offsetZ * offsetZ;
-                if (distanceSquared <= radius * radius
-                    || distanceSquared > rimRadius * rimRadius)
-                {
-                    continue;
-                }
-
-                var sampleX = centerX + offsetX;
-                var sampleZ = centerZ + offsetZ;
-                if (terrain.SampleContinental(sampleX, sampleZ)
-                    < settings.LandThreshold)
-                {
-                    return default;
-                }
-
-                surface = Math.Min(surface, terrain.SampleHeight(sampleX, sampleZ));
-            }
-
-            if (surface <= settings.SeaLevelUnits)
-            {
-                return default;
-            }
-
-            var sizeFactor = radius /
-                (float)Math.Max(1, settings.MaximumLakeRadiusCells);
-            var maximumDepth = Math.Max(
-                settings.MinimumInlandLakeDepthSteps,
-                (int)MathF.Round(settings.MaximumLakeDepthSteps * sizeFactor));
-            return new LakeBasin(
-                centerX,
-                centerZ,
-                radius,
-                surface,
-                maximumDepth,
-                area);
-        }
-
-        private bool TrySampleRiver(
-            int x,
-            int z,
-            int terrainHeight,
-            out CoreColumn column)
-        {
-            column = default;
-            if (settings.RiverDensity <= 0f
-                || terrain.SampleContinental(x, z) < settings.LandThreshold)
-            {
-                return false;
-            }
-
-            var regionSize = ResolveRiverRegionSize();
-            var regionX = WorldCoordinateUtility.FloorDivide(x, regionSize);
-            var regionZ = WorldCoordinateUtility.FloorDivide(z, regionSize);
-            var field = GetRiverRegionField(regionX, regionZ);
-            if (field.TryGetChannel(x, z, out var river))
-            {
-                column = new CoreColumn(
-                    Math.Max(1, Math.Min(terrainHeight, river.BedHeight)),
-                    river.SurfaceHeight,
-                    river.Mode == RiverExecutionMode.Source
-                        ? WaterRole.Source
-                        : WaterRole.Dynamic,
-                    WaterType.River,
-                    SurfaceType.Riverbed);
-                return true;
-            }
-
-            if (!field.TryGetTerrainHeight(x, z, out var riverTerrainHeight))
-            {
-                return false;
-            }
-
-            column = new CoreColumn(
-                riverTerrainHeight,
-                0,
-                WaterRole.None,
-                WaterType.None,
-                SurfaceType.None);
-            return true;
-        }
-
-        private RiverRegionField GetRiverRegionField(int regionX, int regionZ)
-        {
-            var key = CoordinateKey(regionX, regionZ);
-            if (riverRegionFields.TryGetValue(key, out var cached))
-            {
-                return cached;
-            }
-
-            var regionSize = ResolveRiverRegionSize();
-            var minimumX = checked(regionX * regionSize);
-            var minimumZ = checked(regionZ * regionSize);
-            var maximumX = checked(minimumX + regionSize - 1);
-            var maximumZ = checked(minimumZ + regionSize - 1);
-            var blendRadius = Math.Max(3, ResolveMaximumRiverWidth() + 2);
-            var field = new RiverRegionField();
-            var searchRadius = ResolveMaximumRiverCourseRegions() + 1;
-            for (var offsetZ = -searchRadius; offsetZ <= searchRadius; offsetZ++)
-            for (var offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
-            {
-                var feature = GetRiverFeature(
-                    regionX + offsetX,
-                    regionZ + offsetZ);
-                feature.CopyChannelsTo(
-                    field,
-                    minimumX - blendRadius,
-                    maximumX + blendRadius,
-                    minimumZ - blendRadius,
-                    maximumZ + blendRadius);
-            }
-
-            field.BuildTerrainHeights(
-                terrain,
-                minimumX,
-                maximumX,
-                minimumZ,
-                maximumZ,
-                blendRadius);
-            AddBounded(
-                riverRegionFields,
-                riverRegionFieldOrder,
-                key,
-                field,
-                256);
-            return field;
-        }
-
-        private RiverFeature GetRiverFeature(int sourceRegionX, int sourceRegionZ)
-        {
-            var key = CoordinateKey(sourceRegionX, sourceRegionZ);
-            if (riverFeatures.TryGetValue(key, out var cached))
-            {
-                return cached;
-            }
-
-            var feature = BuildRiverFeature(sourceRegionX, sourceRegionZ);
-            AddBounded(
-                riverFeatures,
-                riverFeatureOrder,
-                key,
-                feature,
-                2048);
-            return feature;
-        }
-
-        private static void AddBounded<T>(
-            IDictionary<long, T> cache,
-            Queue<long> order,
-            long key,
-            T value,
-            int capacity)
-        {
-            while (cache.Count >= capacity && order.Count > 0)
-            {
-                cache.Remove(order.Dequeue());
-            }
-
-            cache.Add(key, value);
-            order.Enqueue(key);
-        }
-
-        private RiverFeature BuildRiverFeature(int sourceRegionX, int sourceRegionZ)
-        {
-            if (!IsRiverSourceRegion(sourceRegionX, sourceRegionZ))
-            {
-                return RiverFeature.Empty;
-            }
-
-            var nodes = new List<RiverNode>();
-            var visitedRegions = new HashSet<long>();
-            var current = GetRiverNode(sourceRegionX, sourceRegionZ);
-            if (current.Height <= settings.SeaLevelUnits
-                || terrain.SampleContinental(current.X, current.Z)
-                    < settings.LandThreshold)
-            {
-                return RiverFeature.Empty;
-            }
-
-            nodes.Add(current);
-            visitedRegions.Add(CoordinateKey(current.RegionX, current.RegionZ));
-            var maximumRegions = ResolveMaximumRiverCourseRegions();
-            for (var index = 1; index <= maximumRegions; index++)
-            {
-                if (!TryGetNextRiverNode(current, visitedRegions, out var next))
-                {
-                    break;
-                }
-
-                nodes.Add(next);
-                visitedRegions.Add(CoordinateKey(next.RegionX, next.RegionZ));
-                current = next;
-                if (terrain.SampleContinental(current.X, current.Z)
-                        < settings.LandThreshold
-                    || current.Height <= settings.SeaLevelUnits)
-                {
-                    break;
-                }
-
-                if (index >= 4
-                    && DeterministicNoise.Value01(
-                        current.RegionX,
-                        current.RegionZ,
-                        riverSeed + 907) < 0.08f)
-                {
-                    break;
-                }
-            }
-
-            if (nodes.Count < 2)
-            {
-                return RiverFeature.Empty;
-            }
-
-            var path = new List<RiverPoint>();
-            for (var index = 1; index < nodes.Count; index++)
-            {
-                AppendGridPath(path, nodes[index - 1], nodes[index]);
-            }
-
-            if (path.Count < 4)
-            {
-                return RiverFeature.Empty;
-            }
-
-            return BuildRiverFeature(path);
-        }
-
-        private RiverFeature BuildRiverFeature(IReadOnlyList<RiverPoint> path)
-        {
-            var surfaces = BuildRiverSurfaceProfile(path);
-            var widths = BuildRiverWidthProfile(path.Count);
-            var feature = new RiverFeature();
-            var maximumDepth = Math.Max(
-                settings.RiverDepthCells,
-                settings.MaximumRiverDepthCells)
-                * WorldGrid.HeightStepsPerCell;
-            var minimumDepth = Math.Max(
-                1,
-                settings.RiverDepthCells * WorldGrid.HeightStepsPerCell);
-            var maximumDynamicRun = WaterFlowReachability
-                .GetSafeHorizontalSpreadCount(settings.WaterFlowRules);
-            var dynamicRun = 0;
-            for (var index = 0; index < path.Count; index++)
-            {
-                var progress = index / (float)Math.Max(1, path.Count - 1);
-                var centerDepth = Math.Max(
-                    minimumDepth,
-                    (int)MathF.Round(
-                        maximumDepth
-                        + (minimumDepth - maximumDepth) * progress));
-                var width = widths[index];
-                var radius = (width - 1) / 2;
-                ResolveRiverPerpendicular(path, index, out var perpendicularX, out var perpendicularZ);
-                var descends = index > 0
-                    && surfaces[index] < surfaces[index - 1];
-                var mode = descends && dynamicRun < maximumDynamicRun
-                    ? RiverExecutionMode.Dynamic
-                    : RiverExecutionMode.Source;
-                dynamicRun = mode == RiverExecutionMode.Dynamic
-                    ? dynamicRun + 1
-                    : 0;
-                for (var offset = -radius; offset <= radius; offset++)
-                {
-                    var lateralAmount = radius == 0
-                        ? 0f
-                        : Math.Abs(offset) / (float)radius;
-                    var depth = Math.Max(
-                        1,
-                        (int)MathF.Round(
-                            centerDepth
-                            + (minimumDepth - centerDepth) * lateralAmount));
-                    feature.AddChannel(
-                        path[index].X + perpendicularX * offset,
-                        path[index].Z + perpendicularZ * offset,
-                        new RiverChannel(
-                            Math.Max(1, surfaces[index] - depth),
-                            surfaces[index],
-                            mode));
-                }
-            }
-
-            return feature;
-        }
-
-        private int[] BuildRiverSurfaceProfile(IReadOnlyList<RiverPoint> path)
-        {
-            var surfaces = new int[path.Count];
-            var previous = int.MaxValue;
-            var minimumSurface =
-                (settings.SeaLevelUnits + WorldGrid.HeightStepsPerCell - 1)
-                / WorldGrid.HeightStepsPerCell
-                * WorldGrid.HeightStepsPerCell;
-            for (var index = 0; index < path.Count; index++)
-            {
-                var terrainHeight = terrain.SampleHeight(path[index].X, path[index].Z);
-                var aligned = terrainHeight
-                    - terrainHeight % WorldGrid.HeightStepsPerCell;
-                aligned = Math.Max(minimumSurface, aligned);
-                previous = Math.Min(previous, aligned);
-                surfaces[index] = previous;
-            }
-
-            return surfaces;
-        }
-
-        private int[] BuildRiverWidthProfile(int pathLength)
-        {
-            var widths = new int[pathLength];
-            var maximumWidth = ResolveMaximumRiverWidth();
-            var regionSize = ResolveRiverRegionSize();
-            var courseWidth = pathLength >= regionSize * 4
-                ? maximumWidth
-                : pathLength >= regionSize * 2
-                    ? Math.Min(3, maximumWidth)
-                    : 1;
-            for (var index = 0; index < pathLength; index++)
-            {
-                var progress = index / (float)Math.Max(1, pathLength - 1);
-                var width = progress < 0.2f
-                    ? 1
-                    : progress < 0.6f
-                        ? Math.Min(3, courseWidth)
-                        : courseWidth;
-                var remaining = pathLength - 1 - index;
-                if (remaining <= 1)
-                {
-                    width = 1;
-                }
-                else if (remaining <= 3)
-                {
-                    width = Math.Min(width, 3);
-                }
-
-                widths[index] = width;
-            }
-
-            return widths;
-        }
-
-        private static void ResolveRiverPerpendicular(
-            IReadOnlyList<RiverPoint> path,
-            int index,
-            out int perpendicularX,
-            out int perpendicularZ)
-        {
-            var previous = path[Math.Max(0, index - 1)];
-            var next = path[Math.Min(path.Count - 1, index + 1)];
-            var deltaX = next.X - previous.X;
-            var deltaZ = next.Z - previous.Z;
-            if (Math.Abs(deltaX) >= Math.Abs(deltaZ))
-            {
-                perpendicularX = 0;
-                perpendicularZ = 1;
-                return;
-            }
-
-            perpendicularX = 1;
-            perpendicularZ = 0;
-        }
-
-        private static void AppendGridPath(
-            ICollection<RiverPoint> path,
-            RiverNode start,
-            RiverNode end)
-        {
-            var x = start.X;
-            var z = start.Z;
-            AppendRiverPoint(path, x, z);
-            while (x != end.X || z != end.Z)
-            {
-                var remainingX = end.X - x;
-                var remainingZ = end.Z - z;
-                if (Math.Abs(remainingX) >= Math.Abs(remainingZ)
-                    && remainingX != 0)
-                {
-                    x += Math.Sign(remainingX);
-                }
-                else
-                {
-                    z += Math.Sign(remainingZ);
-                }
-
-                AppendRiverPoint(path, x, z);
-            }
-        }
-
-        private static void AppendRiverPoint(
-            ICollection<RiverPoint> path,
-            int x,
-            int z)
-        {
-            if (path is List<RiverPoint> list
-                && list.Count > 0
-                && list[list.Count - 1].X == x
-                && list[list.Count - 1].Z == z)
-            {
-                return;
-            }
-
-            path.Add(new RiverPoint(x, z));
-        }
-
-        private RiverNode GetRiverNode(int regionX, int regionZ)
-        {
-            var regionSize = ResolveRiverRegionSize();
-            var margin = Math.Max(1, regionSize / 5);
-            var span = Math.Max(1, regionSize - margin * 2);
-            var x = regionX * regionSize + margin
-                + (int)(DeterministicNoise.Hash(regionX, regionZ, riverSeed + 101)
-                    % (uint)span);
-            var z = regionZ * regionSize + margin
-                + (int)(DeterministicNoise.Hash(regionX, regionZ, riverSeed + 211)
-                    % (uint)span);
-            return new RiverNode(
-                regionX,
-                regionZ,
-                x,
-                z,
-                terrain.SampleHeight(x, z));
-        }
-
-        private int ResolveRiverRegionSize() => Math.Max(
-            settings.ChunkCellCountXZ,
-            (int)MathF.Round(0.25f / Math.Max(0.001f, settings.RiverScale)));
-
-        private int ResolveMaximumRiverCourseRegions() => 8;
-
-        private int ResolveMaximumRiverWidth()
-        {
-            var width = Math.Clamp(settings.MaximumRiverWidthCells, 1, 5);
-            return (width & 1) == 0 ? width - 1 : width;
-        }
-
-        private bool IsRiverSourceRegion(int regionX, int regionZ) =>
-            DeterministicNoise.Value01(regionX, regionZ, riverSeed)
-            <= settings.RiverDensity * 0.35f;
-
-        private bool TryGetNextRiverNode(
-            RiverNode start,
-            ISet<long> visitedRegions,
-            out RiverNode downstream)
-        {
-            var found = false;
-            downstream = default;
-            var bestScore = float.MaxValue;
-            for (var offsetZ = -1; offsetZ <= 1; offsetZ++)
-            for (var offsetX = -1; offsetX <= 1; offsetX++)
-            {
-                if (offsetX == 0 && offsetZ == 0)
-                {
-                    continue;
-                }
-
-                var candidateRegionX = start.RegionX + offsetX;
-                var candidateRegionZ = start.RegionZ + offsetZ;
-                if (visitedRegions.Contains(CoordinateKey(
-                        candidateRegionX,
-                        candidateRegionZ)))
-                {
-                    continue;
-                }
-
-                var candidate = GetRiverNode(candidateRegionX, candidateRegionZ);
-                var isSea = terrain.SampleContinental(candidate.X, candidate.Z)
-                    < settings.LandThreshold;
-                if (!isSea
-                    && candidate.Height > start.Height
-                        + WorldGrid.HeightStepsPerCell * 2)
-                {
-                    continue;
-                }
-
-                var meander = DeterministicNoise.Value01(
-                    start.RegionX + candidateRegionX,
-                    start.RegionZ + candidateRegionZ,
-                    riverSeed + 613) * WorldGrid.HeightStepsPerCell;
-                var score = isSea
-                    ? settings.SeaLevelUnits - WorldGrid.HeightStepsPerCell * 4
-                    : candidate.Height + meander;
-                if (found && score >= bestScore)
-                {
-                    continue;
-                }
-
-                found = true;
-                downstream = candidate;
-                bestScore = score;
-            }
-
-            return found;
-        }
-
-        private static long CoordinateKey(int x, int z) =>
-            ((long)x << 32) ^ (uint)z;
-
-        private static void DecodeCoordinateKey(
-            long key,
-            out int x,
-            out int z)
-        {
-            x = (int)(key >> 32);
-            z = (int)key;
-        }
-
-        private bool IsShore(int x, int z, int height)
-        {
-            for (var index = 0; index < Directions.Length; index++)
-            {
-                var next = SampleCore(
-                    x + Directions[index].x,
-                    z + Directions[index].z);
-                if (next.WaterType != WaterType.None
-                    && Math.Abs(height - next.WaterSurface) <= 2)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private ClimateBiome ResolveClimate(int x, int z, int height)
-        {
-            var altitude = height /
-                (float)(settings.WorldHeight * WorldGrid.HeightStepsPerCell);
-            var temperature = DeterministicNoise.FractalNoise(
-                x * 0.00625f,
-                z * 0.00625f,
-                climateSeed,
-                4,
-                2f,
-                0.5f);
-            temperature = Math.Clamp(
-                temperature * 0.85f + 0.15f - altitude * 0.35f,
-                0f,
-                1f);
-            return BiomeStage.ResolveClimate(
-                temperature,
-                settings.ColdClimateThreshold);
-        }
-
-        private static float SmoothStep01(float value)
-        {
-            value = Math.Clamp(value, 0f, 1f);
-            return value * value * (3f - 2f * value);
-        }
-
-        private readonly struct CoreColumn
-        {
-            public readonly int SolidHeight;
-            public readonly int WaterSurface;
-            public readonly WaterRole WaterRole;
-            public readonly WaterType WaterType;
-            public readonly SurfaceType WaterBedSurface;
-
-            public CoreColumn(
-                int solidHeight,
-                int waterSurface,
-                WaterRole waterRole,
-                WaterType waterType,
-                SurfaceType waterBedSurface)
-            {
-                SolidHeight = solidHeight;
-                WaterSurface = waterSurface;
-                WaterRole = waterRole;
-                WaterType = waterType;
-                WaterBedSurface = waterBedSurface;
-            }
-        }
-
-        private readonly struct LakeBasin
-        {
-            public readonly bool Exists;
-            public readonly int CenterX;
-            public readonly int CenterZ;
-            public readonly int Radius;
-            public readonly int Surface;
-            public readonly int MaximumDepth;
-            public readonly int Area;
-
-            public LakeBasin(
-                int centerX,
-                int centerZ,
-                int radius,
-                int surface,
-                int maximumDepth,
-                int area)
-            {
-                Exists = true;
-                CenterX = centerX;
-                CenterZ = centerZ;
-                Radius = radius;
-                Surface = surface;
-                MaximumDepth = maximumDepth;
-                Area = area;
-            }
-        }
-
-        private readonly struct RiverNode
-        {
-            public readonly int RegionX;
-            public readonly int RegionZ;
-            public readonly int X;
-            public readonly int Z;
-            public readonly int Height;
-
-            public RiverNode(
-                int regionX,
-                int regionZ,
-                int x,
-                int z,
-                int height)
-            {
-                RegionX = regionX;
-                RegionZ = regionZ;
-                X = x;
-                Z = z;
-                Height = height;
-            }
-        }
-
-        private readonly struct RiverPoint
-        {
-            public readonly int X;
-            public readonly int Z;
-
-            public RiverPoint(int x, int z)
-            {
-                X = x;
-                Z = z;
-            }
-        }
-
-        private readonly struct RiverChannel
-        {
-            public readonly int BedHeight;
-            public readonly int SurfaceHeight;
-            public readonly RiverExecutionMode Mode;
-
-            public RiverChannel(
-                int bedHeight,
-                int surfaceHeight,
-                RiverExecutionMode mode)
-            {
-                BedHeight = bedHeight;
-                SurfaceHeight = surfaceHeight;
-                Mode = mode;
-            }
-
-            public static RiverChannel Merge(
-                RiverChannel current,
-                RiverChannel candidate)
-            {
-                if (candidate.SurfaceHeight < current.SurfaceHeight)
-                {
-                    return new RiverChannel(
-                        Math.Min(current.BedHeight, candidate.BedHeight),
-                        candidate.SurfaceHeight,
-                        candidate.Mode);
-                }
-
-                return new RiverChannel(
-                    Math.Min(current.BedHeight, candidate.BedHeight),
-                    current.SurfaceHeight,
-                    current.Mode);
-            }
-        }
-
-        private sealed class RiverFeature
-        {
-            public static readonly RiverFeature Empty = new();
-
-            private readonly Dictionary<long, RiverChannel> channels = new();
-
-            public void AddChannel(int x, int z, RiverChannel channel)
-            {
-                var key = CoordinateKey(x, z);
-                if (channels.TryGetValue(key, out var current))
-                {
-                    channels[key] = RiverChannel.Merge(current, channel);
-                    return;
-                }
-
-                channels.Add(key, channel);
-            }
-
-            public void CopyChannelsTo(
-                RiverRegionField target,
-                int minimumX,
-                int maximumX,
-                int minimumZ,
-                int maximumZ)
-            {
-                foreach (var pair in channels)
-                {
-                    DecodeCoordinateKey(pair.Key, out var x, out var z);
-                    if (x < minimumX || x > maximumX
-                        || z < minimumZ || z > maximumZ)
-                    {
-                        continue;
-                    }
-
-                    target.AddChannel(x, z, pair.Value);
-                }
-            }
-        }
-
-        private sealed class RiverRegionField
-        {
-            private readonly Dictionary<long, RiverChannel> channels = new();
-            private readonly Dictionary<long, RiverTerrainHeight> terrainHeights = new();
-
-            public void AddChannel(int x, int z, RiverChannel channel)
-            {
-                var key = CoordinateKey(x, z);
-                if (channels.TryGetValue(key, out var current))
-                {
-                    channels[key] = RiverChannel.Merge(current, channel);
-                    return;
-                }
-
-                channels.Add(key, channel);
-            }
-
-            public bool TryGetChannel(int x, int z, out RiverChannel channel) =>
-                channels.TryGetValue(CoordinateKey(x, z), out channel);
-
-            public bool TryGetTerrainHeight(int x, int z, out int height)
-            {
-                if (terrainHeights.TryGetValue(
-                        CoordinateKey(x, z),
-                        out var target))
-                {
-                    height = target.Height;
-                    return true;
-                }
-
-                height = 0;
-                return false;
-            }
-
-            public void BuildTerrainHeights(
-                TerrainFieldParameters terrain,
-                int minimumX,
-                int maximumX,
-                int minimumZ,
-                int maximumZ,
-                int blendRadius)
-            {
-                foreach (var pair in channels)
-                {
-                    DecodeCoordinateKey(pair.Key, out var channelX, out var channelZ);
-                    var channel = pair.Value;
-                    for (var offsetZ = -blendRadius; offsetZ <= blendRadius; offsetZ++)
-                    for (var offsetX = -blendRadius; offsetX <= blendRadius; offsetX++)
-                    {
-                        var x = channelX + offsetX;
-                        var z = channelZ + offsetZ;
-                        if (x < minimumX || x > maximumX
-                            || z < minimumZ || z > maximumZ
-                            || channels.ContainsKey(CoordinateKey(x, z)))
-                        {
-                            continue;
-                        }
-
-                        var distance = MathF.Sqrt(
-                            offsetX * offsetX + offsetZ * offsetZ);
-                        if (distance > blendRadius)
-                        {
-                            continue;
-                        }
-
-                        var influence = 1f - distance / (blendRadius + 1f);
-                        var terrainHeight = terrain.SampleHeight(x, z);
-                        var height = (int)MathF.Round(
-                            terrainHeight
-                            + (channel.SurfaceHeight - terrainHeight) * influence);
-                        if (Math.Abs(offsetX) + Math.Abs(offsetZ) == 1)
-                        {
-                            height = Math.Max(height, channel.SurfaceHeight);
-                        }
-
-                        var key = CoordinateKey(x, z);
-                        if (terrainHeights.TryGetValue(key, out var current)
-                            && current.Influence >= influence)
-                        {
-                            if (Math.Abs(offsetX) + Math.Abs(offsetZ) == 1
-                                && height > current.Height)
-                            {
-                                terrainHeights[key] = new RiverTerrainHeight(
-                                    height,
-                                    current.Influence);
-                            }
-
-                            continue;
-                        }
-
-                        terrainHeights[key] = new RiverTerrainHeight(
-                            height,
-                            influence);
-                    }
-                }
-            }
-        }
-
-        private readonly struct RiverTerrainHeight
-        {
-            public readonly int Height;
-            public readonly float Influence;
-
-            public RiverTerrainHeight(int height, float influence)
-            {
-                Height = height;
-                Influence = influence;
-            }
+            return columns[localX + ChunkSizeXZ * localZ];
         }
     }
 
     public static class WorldDataBuilder
     {
-        public static WorldData Build(WorldBuildData build)
+        public static WorldData CreateWorld(WorldBuildInput input)
         {
-            if (build == null) throw new ArgumentNullException(nameof(build));
-            var world = new WorldData(build.Input.Settings);
-            for (var localZ = 0; localZ < build.Size; localZ++)
-            for (var localX = 0; localX < build.Size; localX++)
+            if (input == null)
             {
-                var index = localX + build.Size * localZ;
-                WriteColumn(
-                    world,
-                    build.ToWorldX(localX),
-                    build.ToWorldZ(localZ),
-                    build.SolidHeights[index],
-                    build.TopSurfaces[index] == SurfaceType.None
-                        ? SurfaceType.Ground
-                        : build.TopSurfaces[index],
-                    build.WaterSurfaces[index],
-                    build.WaterRoles[index],
-                    build.WaterTypes[index],
-                    build.Biomes[index]);
+                throw new ArgumentNullException(nameof(input));
             }
 
-            return world;
+            return new WorldData(input.Settings);
         }
 
-        internal static void WriteColumn(
+        internal static void ApplyChunk(
             WorldData world,
-            int x,
-            int z,
-            int solidHeightUnits,
-            SurfaceType surface,
-            int waterSurfaceUnits,
-            WaterRole waterRole,
-            WaterType waterType,
-            CellBiome biome)
+            WorldChunkBuildData build)
         {
-            var maximumUnits = world.Height * WorldGrid.HeightStepsPerCell;
-            solidHeightUnits = Math.Clamp(solidHeightUnits, 0, maximumUnits);
-            waterSurfaceUnits = Math.Clamp(waterSurfaceUnits, 0, maximumUnits);
-            var usedHeightUnits = Math.Max(solidHeightUnits, waterSurfaceUnits);
-            var usedCellCount = Math.Min(
-                world.Height,
-                Math.Max(0, (usedHeightUnits + WorldGrid.HeightStepsPerCell - 1)
-                    / WorldGrid.HeightStepsPerCell));
-            for (var y = 0; y < usedCellCount; y++)
+            if (world == null)
             {
-                var baseUnits = y * WorldGrid.HeightStepsPerCell;
-                var solidFill = (byte)Math.Clamp(
-                    solidHeightUnits - baseUnits,
-                    0,
-                    WorldGrid.HeightStepsPerCell);
-                var cell = new CellData
-                {
-                    Terrain = new TerrainData { SolidHeight = solidFill }
-                };
-                if (solidFill > 0)
-                {
-                    cell.Terrain.Material = y < Math.Max(
-                        0,
-                        solidHeightUnits / WorldGrid.HeightStepsPerCell - 2)
-                            ? MaterialType.Rock
-                            : MaterialType.Soil;
-                    cell.Terrain.Geology = MaterialType.Rock;
-                    cell.Terrain.Surface = solidFill < WorldGrid.HeightStepsPerCell
-                        || baseUnits + solidFill == solidHeightUnits
-                            ? surface
-                            : SurfaceType.None;
-                }
-
-                var available = WorldGrid.HeightStepsPerCell - solidFill;
-                var desiredTop = Math.Clamp(
-                    waterSurfaceUnits - baseUnits,
-                    0,
-                    WorldGrid.HeightStepsPerCell);
-                var waterFill = (byte)Math.Clamp(
-                    desiredTop - solidFill,
-                    0,
-                    available);
-                if (waterFill > 0 && waterRole == WaterRole.Source)
-                {
-                    cell.Water = new WaterData
-                    {
-                        Amount = WaterAmount.FromRenderFill(waterFill, available),
-                        Role = WaterRole.Source,
-                        Type = waterType,
-                        Flow = FlowDirection.None
-                    };
-                }
-
-                if (cell.HasTerrain || cell.HasWater)
-                {
-                    cell.Biome = biome;
-                    world.SetCellBulk(x, y, z, cell);
-                }
-            }
-        }
-    }
-
-    internal static class TerrainStage
-    {
-        public static void Build(WorldBuildData build)
-        {
-            if (build == null) throw new ArgumentNullException(nameof(build));
-            var field = new TerrainFieldParameters(build.Input.Settings);
-            for (var localZ = 0; localZ < build.Size; localZ++)
-            for (var localX = 0; localX < build.Size; localX++)
-            {
-                var index = localX + build.Size * localZ;
-                build.SolidHeights[index] = field.SampleHeight(
-                    build.ToWorldX(localX),
-                    build.ToWorldZ(localZ));
-            }
-        }
-    }
-
-    internal static class WaterFeatureStage
-    {
-        public static void Build(WorldBuildData build)
-        {
-            if (build == null) throw new ArgumentNullException(nameof(build));
-            var sampler = new WorldFieldSampler(build.Input.Settings);
-            for (var localZ = 0; localZ < build.Size; localZ++)
-            for (var localX = 0; localX < build.Size; localX++)
-            {
-                var index = localX + build.Size * localZ;
-                var column = sampler.Sample(
-                    build.ToWorldX(localX),
-                    build.ToWorldZ(localZ),
-                    build.SolidHeights[index]);
-                build.SolidHeights[index] = column.SolidHeight;
-                build.WaterSurfaces[index] = column.WaterSurface;
-                build.WaterRoles[index] = column.WaterRole;
-                build.WaterTypes[index] = column.WaterType;
-                build.WaterBedSurfaces[index] = column.WaterBedSurface;
-                build.TopSurfaces[index] = column.TopSurface;
-                build.Biomes[index] = column.Biome;
-            }
-        }
-    }
-
-    internal static class BiomeStage
-    {
-        public static void Build(WorldBuildData build)
-        {
-            if (build == null) throw new ArgumentNullException(nameof(build));
-            var sampler = new WorldFieldSampler(build.Input.Settings);
-            for (var localZ = 0; localZ < build.Size; localZ++)
-            for (var localX = 0; localX < build.Size; localX++)
-            {
-                var index = localX + build.Size * localZ;
-                build.Biomes[index] = sampler.SampleBiome(
-                    build.ToWorldX(localX),
-                    build.ToWorldZ(localZ),
-                    build.SolidHeights[index],
-                    build.WaterTypes[index]);
-            }
-        }
-
-        internal static ClimateBiome ResolveClimate(
-            float temperature,
-            float coldThreshold)
-        {
-            if (temperature <= coldThreshold)
-            {
-                return ClimateBiome.Cold;
+                throw new ArgumentNullException(nameof(world));
             }
 
-            return temperature >= 1f - coldThreshold
-                ? ClimateBiome.Warm
-                : ClimateBiome.Temperate;
-        }
-
-        internal static TerrainBiome ResolveTerrain(
-            ClimateBiome climate,
-            float altitude)
-        {
-            if (altitude >= 0.72f)
+            if (build == null)
             {
-                return TerrainBiome.Mountain;
+                throw new ArgumentNullException(nameof(build));
             }
 
-            return climate switch
-            {
-                ClimateBiome.Cold => TerrainBiome.Snow,
-                ClimateBiome.Warm => TerrainBiome.Desert,
-                _ => TerrainBiome.Field
-            };
-        }
-
-        internal static WaterBiome ResolveWater(WaterType waterType) =>
-            waterType switch
-            {
-                WaterType.Pond => WaterBiome.Pond,
-                WaterType.Lake => WaterBiome.Lake,
-                WaterType.Sea => WaterBiome.Sea,
-                WaterType.River => WaterBiome.River,
-                _ => WaterBiome.None
-            };
-    }
-
-    internal static class WorldChunkGenerator
-    {
-        public static void Generate(WorldData world, ChunkCoordinate coordinate)
-        {
-            if (world == null) throw new ArgumentNullException(nameof(world));
-            if (!world.IsChunkWithinBounds(coordinate))
-            {
-                throw new ArgumentOutOfRangeException(nameof(coordinate));
-            }
-
-            if (world.IsChunkLoaded(coordinate))
-            {
-                return;
-            }
-
-            Apply(world, Build(world.Settings, coordinate));
-        }
-
-        public static WorldChunkBuildData Build(
-            WorldSettingsData settings,
-            ChunkCoordinate coordinate)
-        {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            return Build(settings, coordinate, new WorldFieldSampler(settings));
-        }
-
-        internal static WorldChunkBuildData Build(
-            WorldSettingsData settings,
-            ChunkCoordinate coordinate,
-            WorldFieldSampler sampler)
-        {
-            if (settings == null) throw new ArgumentNullException(nameof(settings));
-            if (sampler == null) throw new ArgumentNullException(nameof(sampler));
-            lock (sampler)
-            {
-                return BuildLocked(settings, coordinate, sampler);
-            }
-        }
-
-        private static WorldChunkBuildData BuildLocked(
-            WorldSettingsData settings,
-            ChunkCoordinate coordinate,
-            WorldFieldSampler sampler)
-        {
-            var columns = new WorldFieldColumn[
-                settings.ChunkCellCountXZ * settings.ChunkCellCountXZ];
-            var startX = checked(coordinate.X * settings.ChunkCellCountXZ);
-            var startZ = checked(coordinate.Z * settings.ChunkCellCountXZ);
-            for (var localZ = 0; localZ < settings.ChunkCellCountXZ; localZ++)
-            for (var localX = 0; localX < settings.ChunkCellCountXZ; localX++)
-            {
-                var x = startX + localX;
-                var z = startZ + localZ;
-                columns[localX + settings.ChunkCellCountXZ * localZ] =
-                    sampler.Sample(x, z);
-            }
-
-            return new WorldChunkBuildData(coordinate, columns);
-        }
-
-        public static void Apply(WorldData world, WorldChunkBuildData build)
-        {
-            if (world == null) throw new ArgumentNullException(nameof(world));
-            if (build == null) throw new ArgumentNullException(nameof(build));
             if (!world.IsChunkWithinBounds(build.Coordinate))
             {
                 throw new ArgumentOutOfRangeException(nameof(build));
@@ -1562,47 +1666,178 @@ namespace MiniCivilization.World.Generation
                 return;
             }
 
-            var expectedColumnCount = world.ChunkSizeX * world.ChunkSizeZ;
-            if (build.Columns.Length != expectedColumnCount)
+            if (build.ChunkSizeXZ != world.ChunkSizeX
+                || build.ColumnCount != world.ChunkSizeX * world.ChunkSizeZ)
             {
                 throw new InvalidOperationException(
-                    "Chunk build data does not match the world chunk size.");
+                    "Chunk output does not match the target world settings.");
             }
 
+            ValidateColumns(world, build);
             world.EnsureChunkLoaded(build.Coordinate);
             var startX = checked(build.Coordinate.X * world.ChunkSizeX);
             var startZ = checked(build.Coordinate.Z * world.ChunkSizeZ);
             for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
             for (var localX = 0; localX < world.ChunkSizeX; localX++)
             {
-                var x = startX + localX;
-                var z = startZ + localZ;
-                var column = build.Columns[localX + world.ChunkSizeX * localZ];
-                WorldDataBuilder.WriteColumn(
+                WriteColumn(
                     world,
-                    x,
-                    z,
-                    column.SolidHeight,
-                    column.TopSurface,
-                    column.WaterSurface,
-                    column.WaterRole,
-                    column.WaterType,
-                    column.Biome);
+                    startX + localX,
+                    startZ + localZ,
+                    build.GetColumn(localX, localZ));
+            }
+        }
+
+        private static void ValidateColumns(
+            WorldData world,
+            WorldChunkBuildData build)
+        {
+            var maximumUnits = checked(
+                world.Height * WorldGrid.HeightStepsPerCell);
+            for (var localZ = 0; localZ < build.ChunkSizeXZ; localZ++)
+            for (var localX = 0; localX < build.ChunkSizeXZ; localX++)
+            {
+                var column = build.GetColumn(localX, localZ);
+                if ((uint)column.SolidHeightUnits > maximumUnits
+                    || (uint)column.WaterSurfaceUnits > maximumUnits)
+                {
+                    throw new InvalidOperationException(
+                        "Chunk output contains a height outside the world range.");
+                }
+
+                var hasWater = column.WaterSurfaceUnits
+                    > column.SolidHeightUnits;
+                if (hasWater
+                    && (column.WaterRole == WaterRole.None
+                        || column.WaterType == WaterType.None))
+                {
+                    throw new InvalidOperationException(
+                        "Chunk output Water height, role, and type do not describe the same final fact.");
+                }
+
+                if (!hasWater
+                    && (column.WaterSurfaceUnits != 0
+                        || column.WaterRole != WaterRole.None
+                        || column.WaterType != WaterType.None
+                        || column.WaterBedSurface != SurfaceType.None))
+                {
+                    throw new InvalidOperationException(
+                        "A dry Chunk Column cannot contain Water output values.");
+                }
+
+                if (hasWater
+                    && (column.WaterBedSurface == SurfaceType.None
+                        || column.TopSurface != column.WaterBedSurface))
+                {
+                    throw new InvalidOperationException(
+                        "Water output must use the same final bed and top surface.");
+                }
+
+                if (column.SolidHeightUnits > 0)
+                {
+                    if (column.TopSurface == SurfaceType.None)
+                    {
+                        throw new InvalidOperationException(
+                            "Solid output must identify its top surface.");
+                    }
+                }
+                else if (column.TopSurface != SurfaceType.None)
+                {
+                    throw new InvalidOperationException(
+                        "An empty Chunk Column cannot contain a top surface.");
+                }
+            }
+        }
+
+        private static void WriteColumn(
+            WorldData world,
+            int x,
+            int z,
+            in WorldColumnBuildData column)
+        {
+            var usedHeightUnits = Math.Max(
+                column.SolidHeightUnits,
+                column.WaterSurfaceUnits);
+            var usedCellCount = Math.Min(
+                world.Height,
+                Math.Max(
+                    0,
+                    (usedHeightUnits + WorldGrid.HeightStepsPerCell - 1)
+                    / WorldGrid.HeightStepsPerCell));
+            for (var y = 0; y < usedCellCount; y++)
+            {
+                var baseUnits = y * WorldGrid.HeightStepsPerCell;
+                var solidFill = (byte)Math.Clamp(
+                    column.SolidHeightUnits - baseUnits,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                var cell = new CellData
+                {
+                    Terrain = new TerrainData { SolidHeight = solidFill }
+                };
+                if (solidFill > 0)
+                {
+                    cell.Terrain.Material = y < Math.Max(
+                        0,
+                        column.SolidHeightUnits
+                        / WorldGrid.HeightStepsPerCell - 2)
+                            ? MaterialType.Rock
+                            : MaterialType.Soil;
+                    cell.Terrain.Geology = MaterialType.Rock;
+                    cell.Terrain.Surface = solidFill < WorldGrid.HeightStepsPerCell
+                        || baseUnits + solidFill == column.SolidHeightUnits
+                            ? column.TopSurface
+                            : SurfaceType.None;
+                }
+
+                var available = WorldGrid.HeightStepsPerCell - solidFill;
+                var desiredTop = Math.Clamp(
+                    column.WaterSurfaceUnits - baseUnits,
+                    0,
+                    WorldGrid.HeightStepsPerCell);
+                var waterFill = (byte)Math.Clamp(
+                    desiredTop - solidFill,
+                    0,
+                    available);
+                if (waterFill > 0)
+                {
+                    cell.Water = new WaterData
+                    {
+                        Amount = WaterAmount.FromRenderFill(
+                            waterFill,
+                            available),
+                        Role = column.WaterRole,
+                        Type = column.WaterType,
+                        Flow = FlowDirection.None
+                    };
+                }
+
+                if (cell.HasTerrain || cell.HasWater)
+                {
+                    cell.Biome = column.Biome;
+                    world.SetCellBulk(x, y, z, cell);
+                }
             }
         }
     }
 
-    internal sealed class WorldChunkBuildData
+    internal static class WorldChunkGenerator
     {
-        public WorldChunkBuildData(
-            ChunkCoordinate coordinate,
-            WorldFieldColumn[] columns)
+        public static WorldChunkBuildData Build(WorldChunkBuildInput input)
         {
-            Coordinate = coordinate;
-            Columns = columns ?? throw new ArgumentNullException(nameof(columns));
-        }
+            if (input == null)
+            {
+                throw new ArgumentNullException(nameof(input));
+            }
 
-        public ChunkCoordinate Coordinate { get; }
-        public WorldFieldColumn[] Columns { get; }
+            var working = TerrainFieldStage.Build(input);
+            TerrainPatternStage.Build(working);
+            PreliminaryTerrainDensityStage.Build(working);
+            DensitySurfaceStage.BuildPreliminarySurface(working);
+            TerrainDensityFinalizationStage.Build(working);
+            DensitySurfaceStage.BuildFinalSurface(working);
+            DensityToFilledStage.Build(working);
+            return working.Complete();
+        }
     }
 }

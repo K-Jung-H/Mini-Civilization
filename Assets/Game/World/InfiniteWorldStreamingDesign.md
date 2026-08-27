@@ -10,7 +10,7 @@
 
 ## 현재 진행 상태
 
-기준일: 2026-08-17
+기준일: 2026-08-26
 
 | 단계 | 상태 | 현재 적용 결과 |
 |---|---|---|
@@ -23,7 +23,7 @@
 | 6. Chunk별 Cache와 경계 갱신 | 완료·테스트 통과 | Surface·Navigation·Exposure Cache를 준비된 Chunk 단위로 관리하고 준비·해제 시 경계를 갱신한다. |
 | 7. Entity·Building·Road/Way 스트리밍 | 완료·테스트 통과 | Minecraft 용어 통일, Entity 소유·Tick·렌더 범위, 다중 Chunk Building 참조, 준비된 Chunk의 Way Graph를 적용했다. |
 | 8. Water 스트리밍 | 구현 완료·직접 테스트 필요 | Chunk별 Frontier 소유, Active 범위 실행, 비활성 경계 보류, 준비된 Chunk 한정 WaterBody 해석을 적용했다. |
-| 9. 절대 좌표 Field 생성 | 구현 완료·직접 테스트 필요 | WorldType, 원점 중심 초기 범위, 절대 좌표 Terrain·Climate·Continental·River·Lake Field와 요청 Chunk 추가 생성을 적용했다. |
+| 9. 3D Density 기반 절대 좌표 생성 | 교체 진행 중·1~5단계 완료 | 절대 Y 지형 기준과 Water Distribution의 개별 수면 높이를 분리했다. Continental Sea Distribution은 연속 깊이 곡선으로 해안·해저 Density를 합성하며, 설정 Y 범위 밖 Density를 강제로 공기로 바꾸지 않는다. |
 | 10~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
 
 현재 런타임 범위는 다음과 같다.
@@ -269,10 +269,13 @@ Chunk 준비가 끝나면 필요한 RenderPatch를 계산하고 Pool에서 View�
 
 ```text
 Chunk 요청
-→ 절대 좌표 기반 Terrain·Mountain·Continental Field 계산
-→ Sea·Lake/Pond·River Field 계산
-→ River 실행 정책(Source/Dynamic) 결정
-→ 최종 Terrain·Water 구조 확정
+→ 절대 좌표 기반 Preliminary Terrain Density 계산
+→ Preliminary Surface Map 추출
+→ Sea·River·Lake/Pond Water Distribution 통합
+→ Water Terrain Density Modifier 적용
+→ Final Terrain Density 확정
+→ 동굴 없는 연결 지형으로 Filled 0~5 변환
+→ 정확한 Water Amount와 Source/Dynamic 실행 정책 확정
 → CellBiome 확정
 → 필요한 Y Section만 조립
 → Chunk Cache 준비
@@ -283,15 +286,20 @@ Chunk 요청
 
 - 생성기는 월드 전체 Size나 가장자리 좌표를 입력으로 사용하지 않는다.
 - `EdgeLowering`, 유한 외곽 Flood Fill, 월드 크기 기반 Latitude를 사용하지 않는다.
-- Terrain·Mountain·Climate·Continental·River Channel·Lake Basin은 Seed와 절대 좌표를 사용한다.
-- Sea는 Continental Field가 Ocean이고 최종 지형이 Sea Level보다 낮은 Cell에만 생성한다.
-- Lake와 Pond는 같은 Lake Basin Field를 사용하며 크기로 구분하고, 크기가 클수록 중심부 최대 깊이가 커진다.
-- 수역 우선순위는 `Sea > Lake/Pond > River > None`이다.
-- River Channel은 연속 Field로 만들며 하류로 갈수록 폭이 넓고 수심은 얕아진다.
-- River가 끝나는 구간은 폭과 절삭 깊이를 완만하게 줄여 주변 지형으로 닫는다.
-- River 경로 생성은 하나이며 `Source/Dynamic`은 마지막 실행 정책이다.
-- 급한 하강 구간은 실제 WaterFlow 확산 가능 범위가 있을 때 Dynamic을 사용하고, 완만하거나 긴 수평 구간은 Source를 사용한다.
-- Dynamic 구간의 WaterData를 직접 배치하지 않고 Source에서 기존 WaterFlow가 확산한다.
+- Terrain·Mountain·Continental과 수직 Detail은 Seed와 절대 XYZ 좌표를 사용하는 3D Density로 계산한다.
+- Density는 생성 중에만 존재하며 `WorldData`나 저장 데이터에 넣지 않는다.
+- 동굴 Density와 Carver는 추가하지 않고, 확정 표면 아래를 연결된 고체로 Filled 변환한다.
+- Sea·River·Lake/Pond는 완성된 지형을 개별적으로 절삭하지 않고 하나의 Water Distribution에서 최종 Density를 수정한다.
+- Sea는 Continental Field와 해안 전이값으로 해저·해안 Density를 연속적으로 만든다.
+- Preliminary Terrain의 기준 높이는 절대 Y 값이며 WaterBody 수면 높이에 의존하지 않는다.
+- Water Distribution은 Column마다 `Terrain Target`과 `Water Surface`를 독립적으로 가진다. 연결된 WaterBody는 같은 수면을 전달하고, River처럼 경사가 필요한 구조는 Column마다 다른 수면을 전달할 수 있다.
+- 현재 Sea는 설정된 기본 Sea 수면을 사용한다. 이후 Lake/Pond는 각 Body의 수면을, River는 경로의 수면을 같은 계약으로 전달한다.
+- 육지 쪽 해안은 물을 만들지 않고도 Terrain Target만으로 바다 지형에 연결할 수 있다.
+- River는 연속 Field의 실제 거리와 폭 Field를 사용하며 1·3·5 폭 단계는 사용하지 않는다.
+- Lake와 Pond는 같은 불규칙 Basin Field를 사용하고 크기로 구분하며, 크기가 클수록 중심부 최대 깊이가 커진다.
+- 수역이 겹치는 위치는 Geometry Modifier를 합성한 후 하나의 최종 WaterType을 확정하며 수역별 순차 덮어쓰기를 사용하지 않는다.
+- 급한 높이 변화 구간은 Dynamic, 완만한 구간은 Source를 마지막 실행 정책으로 사용한다.
+- Source와 Dynamic 모두 생성된 정확한 Water Amount를 보존하며 Source를 Full로 보정하지 않는다.
 - Chunk 샘플은 이웃 절대 좌표를 직접 조회하며 생성 순서나 활성 Chunk에 의존하지 않는다.
 - Biome은 Feature 후보가 아니라 모든 검증과 롤백 이후의 최종 Terrain·Water 결과로 확정한다.
 
@@ -528,21 +536,60 @@ Dirty Chunk Unload
 - 이웃 Chunk 활성화 전후 물이 Unloaded 영역을 Empty나 벽으로 오판하지 않는다.
 - 빈 Cell을 Source로 보정하는 경로가 존재하지 않는다.
 
-### 9. 절대 좌표 Field 생성 적용
+### 9. 3D Density 기반 절대 좌표 생성 교체
 
-적용:
+교체 목표:
 
 - `WorldType(Finite/Infinite)`과 홀수 `InitialChunkCountXZ` 적용
 - Chunk `(0,0)`을 중심으로 초기 N×N 범위 생성
-- Terrain Noise 입력을 절대 X/Z로 교체
+- 절대 XYZ 기반 Preliminary Terrain Density와 Preliminary Surface 적용
 - `EdgeLowering`, 전체 월드 경계, 유한 외곽 Sea Flood Fill 의존 제거
-- Continental Field 기반 Sea 적용
-- 크기·깊이가 연결된 Lake/Pond Basin Field 적용
-- 연속 River Channel Field와 공통 경로·폭·깊이 적용
-- River 경로와 분리된 Source/Dynamic 실행 정책 적용
+- Continental Field 기반 해저·해안 Density 적용
+- 불규칙 경계와 크기별 깊이를 갖는 Lake/Pond Basin Field 적용
+- 실제 Field 거리와 연속 폭을 사용하는 River Field 적용
+- Sea·River·Lake/Pond의 통합 Water Distribution과 Density Modifier 적용
+- 동굴 없는 연결 지형을 기존 Filled 0~5로 변환
+- 정확한 Water Amount와 Source/Dynamic 실행 정책 적용
 - 최종 생성 결과에 대해 CellBiome 확정
 - 필요한 Y Section만 조립
 - Infinite에서 스트리밍 요청 Chunk를 같은 Field 경로로 추가 생성
+
+현재 교체 상태:
+
+- 전체 월드 배열을 소유하던 `WorldBuildData`를 제거했다.
+- 초기 생성과 스트리밍 생성은 동일한 `WorldChunkBuildInput`을 사용한다.
+- 생성 중간 데이터는 `GenerationWorkingData`가 소유하고 완료 시 최종 Column 소유권을 `WorldChunkBuildData`로 한 번만 이전한다.
+- `WorldDataBuilder.ApplyChunk`만 최종 Column을 `CellData`와 필요한 `ChunkSection`으로 조립한다.
+- 생성 교체 1단계를 완료했다. 이 중간 상태에서는 Water를 생성하지 않는다.
+- 기존 `SeaWaterDistributionStage`, `SeaDensityField`, `WaterTerrainDensityStage`, `WaterColumnDistribution`을 제거했다.
+- 모든 지형 Noise는 공통 `TerrainNoiseRouter`만 샘플링한다. 절대 Cell XZ와 Seed로 PatternRegion, Continentalness, Erosion, Weirdness, PeaksValleys, Roughness, Detail을 만든다.
+- `PatternRegion`은 패턴 영역과 전이 가중치만 결정한다. `TerrainPatternResolver`는 이 값을 사용해 Smooth, Rugged, Mountain의 영역 영향을 계산하고, Canyon은 영역 영향과 방향성 중심축 거리를 함께 사용한다.
+- `TerrainBaseDensitySettings`가 대륙·침식에 따른 공통 표면과 수직 Density를 한 번 계산한다. 패턴은 공통 기준 높이를 다시 만들지 않고 상대적인 표면·세부 기여만 반환한다.
+- Smooth는 Weirdness 기반 완만한 높이 변화, Rugged는 PeaksValleys와 Roughness 기반 양·음 굴곡을 만든다.
+- Mountain은 패턴 경계 혼합과 `CenterProximityByRegion`을 분리한다. 저주파 Erosion은 중심 접근도의 진행 속도만 바꾸며, 단조 3차 보간을 사용하는 `HeightByCenterProximity` Curve가 최종 거시 높이를 만든다. 높이에 직접 더하는 Ridge Noise나 Curve 구간마다 기울기를 0으로 만드는 보간은 사용하지 않는다.
+- Canyon은 `Continentalness - Erosion = 0`인 저주파 연속 등위선을 중심축으로 사용한다. 같은 Field의 국소 기울기로 축까지의 Cell 거리를 계산한다.
+- Canyon 깊이는 양 끝의 기울기가 0인 `SmootherStep(중심 접근도)` 함수로 계산한다. 경계에서는 완만하게 시작하고 중간에서 가장 가파르며 중심에서 다시 완만해진다. 고주파 Roughness와 PeaksValleys는 Canyon 폭·깊이·바닥에 사용하지 않는다.
+- 영역 가중치 정규화는 패턴 경계의 연속 혼합에만 사용한다. Mountain 중심 접근도와 Canyon 축 접근도는 별도 형상 값이며 임의 최소 높이·깊이 보정이나 패턴 우선순위를 사용하지 않는다.
+- `PreliminaryTerrainDensityField`는 공통 Base Density와 패턴별 상대 기여를 합친 `TerrainDensityProfile`만 사용해 최종 XYZ Density를 계산한다.
+- 패턴 디버거는 실제 생성과 동일한 `TerrainNoiseRouter`와 `TerrainPatternResolver` 결과를 표시한다. 전체 미리보기에서 선택한 Pixel은 실제 샘플 Cell과 1:1로 대응하고 Scene 표시는 `WorldOrigin` 변환을 적용한다.
+- Noise 입력은 `double`, Lattice와 Hash 좌표는 `long`을 사용하여 먼 절대 좌표에서 Chunk 경계 정밀도가 먼저 손실되지 않게 했다.
+- Chunk는 1 Cell Halo를 포함해 이웃과 같은 절대 좌표 Field를 다시 계산하며, Loaded 이웃이나 생성 순서를 참조하지 않는다.
+- Preliminary/Final Surface는 생성 중 `float`로 유지하고 `WorldColumnBuildData`를 만들 때만 Filled 0~5 단위로 한 번 양자화한다.
+- 지하 Cave는 만들지 않으며 최종 Surface 아래를 연결된 고체로 조립한다.
+
+생성 교체 하위 로드맵:
+
+1. 연속 Landform/Terrain 기반 교체: 완료
+2. 새 Sea 위치·수면·해저 Density 계획을 처음부터 연결: 미진행
+3. Terrain/Sea 결과 기반 최종 Biome, Mesh 경계 확인, 이전 생성 잔여 설정 제거: 미진행
+
+연속성 계약:
+
+- Field 입력은 Chunk Local 좌표가 아니라 절대 World 좌표다.
+- 이웃 Chunk 존재 여부와 생성 요청 순서는 Field 결과에 영향을 주지 않는다.
+- 지형 패턴 전이는 단일 패턴 선택이 아니라 공통 Field 가중치 Curve와 정규화 혼합 결과다.
+- 경계 Halo는 이웃 결과 복사가 아니라 같은 절대 좌표 재계산이다.
+- 수직 Filled 양자화는 최종 출력 직전에만 수행한다.
 
 완료 기준:
 

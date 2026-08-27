@@ -1,6 +1,5 @@
 using System;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Generation
 {
@@ -13,33 +12,20 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(input));
             }
 
-            var build = new WorldBuildData(input);
-            TerrainStage.Build(build);
-            BuildWaterFeatures(build);
-            BiomeStage.Build(build);
-            return BuildWorldData(build);
-        }
-
-        internal static void BuildWaterFeatures(WorldBuildData build)
-        {
-            if (build == null)
+            var world = WorldDataBuilder.CreateWorld(input);
+            var settings = input.Settings;
+            for (var z = settings.MinimumChunkCoordinate;
+                 z <= settings.MaximumChunkCoordinate;
+                 z++)
+            for (var x = settings.MinimumChunkCoordinate;
+                 x <= settings.MaximumChunkCoordinate;
+                 x++)
             {
-                throw new ArgumentNullException(nameof(build));
+                var chunk = WorldChunkGenerator.Build(
+                    input.CreateChunkInput(new ChunkCoordinate(x, z)));
+                WorldDataBuilder.ApplyChunk(world, chunk);
             }
 
-            WaterFeatureStage.Build(build);
-        }
-
-        internal static WorldData BuildWorldData(WorldBuildData build)
-        {
-            if (build == null)
-            {
-                throw new ArgumentNullException(nameof(build));
-            }
-
-            var world = WorldDataBuilder.Build(build);
-            WaterTypeResolver.RefreshAll(world);
-            WaterFlowSolver.PrepareGeneratedWorld(world);
             return world;
         }
     }
