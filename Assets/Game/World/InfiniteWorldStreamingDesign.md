@@ -560,28 +560,37 @@ Dirty Chunk Unload
 - 초기 생성과 스트리밍 생성은 동일한 `WorldChunkBuildInput`을 사용한다.
 - 생성 중간 데이터는 `GenerationWorkingData`가 소유하고 완료 시 최종 Column 소유권을 `WorldChunkBuildData`로 한 번만 이전한다.
 - `WorldDataBuilder.ApplyChunk`만 최종 Column을 `CellData`와 필요한 `ChunkSection`으로 조립한다.
-- 생성 교체 1단계를 완료했다. 이 중간 상태에서는 Water를 생성하지 않는다.
 - 기존 `SeaWaterDistributionStage`, `SeaDensityField`, `WaterTerrainDensityStage`, `WaterColumnDistribution`을 제거했다.
-- 모든 지형 Noise는 공통 `TerrainNoiseRouter`만 샘플링한다. 절대 Cell XZ와 Seed로 PatternRegion, Continentalness, Erosion, Weirdness, PeaksValleys, Roughness, Detail을 만든다.
-- `PatternRegion`은 패턴 영역과 전이 가중치만 결정한다. `TerrainPatternResolver`는 이 값을 사용해 Smooth, Rugged, Mountain의 영역 영향을 계산하고, Canyon은 영역 영향과 방향성 중심축 거리를 함께 사용한다.
+- Landform과 Water가 함께 사용하는 외부 계약을 `WorldNoiseRouter`, `WorldFieldSample`, `WorldPatternResolver`, `WorldShapeProfile`로 통일했다.
+- `WorldNoiseRouter`는 절대 Cell XZ와 Seed로 PatternRegion, Continentalness, Erosion, Weirdness, PeaksValleys, Roughness, Detail, SeaRegion, SeaDetail을 만든다.
+- `PatternRegion`은 Landform 영역과 전이 가중치만 결정한다. `WorldPatternResolver`는 이를 사용해 Smooth, Rugged, Mountain의 영역 영향을 계산하고, Canyon은 영역 영향과 방향성 중심축 거리를 함께 사용한다. Sea는 독립적인 Water Pattern 채널을 사용한다.
 - `TerrainBaseDensitySettings`가 대륙·침식에 따른 공통 표면과 수직 Density를 한 번 계산한다. 패턴은 공통 기준 높이를 다시 만들지 않고 상대적인 표면·세부 기여만 반환한다.
 - Smooth는 Weirdness 기반 완만한 높이 변화, Rugged는 PeaksValleys와 Roughness 기반 양·음 굴곡을 만든다.
 - Mountain은 패턴 경계 혼합과 `CenterProximityByRegion`을 분리한다. 저주파 Erosion은 중심 접근도의 진행 속도만 바꾸며, 단조 3차 보간을 사용하는 `HeightByCenterProximity` Curve가 최종 거시 높이를 만든다. 높이에 직접 더하는 Ridge Noise나 Curve 구간마다 기울기를 0으로 만드는 보간은 사용하지 않는다.
 - Canyon은 `Continentalness - Erosion = 0`인 저주파 연속 등위선을 중심축으로 사용한다. 같은 Field의 국소 기울기로 축까지의 Cell 거리를 계산한다.
 - Canyon 깊이는 양 끝의 기울기가 0인 `SmootherStep(중심 접근도)` 함수로 계산한다. 경계에서는 완만하게 시작하고 중간에서 가장 가파르며 중심에서 다시 완만해진다. 고주파 Roughness와 PeaksValleys는 Canyon 폭·깊이·바닥에 사용하지 않는다.
 - 영역 가중치 정규화는 패턴 경계의 연속 혼합에만 사용한다. Mountain 중심 접근도와 Canyon 축 접근도는 별도 형상 값이며 임의 최소 높이·깊이 보정이나 패턴 우선순위를 사용하지 않는다.
-- `PreliminaryTerrainDensityField`는 공통 Base Density와 패턴별 상대 기여를 합친 `TerrainDensityProfile`만 사용해 최종 XYZ Density를 계산한다.
-- 패턴 디버거는 실제 생성과 동일한 `TerrainNoiseRouter`와 `TerrainPatternResolver` 결과를 표시한다. 전체 미리보기에서 선택한 Pixel은 실제 샘플 Cell과 1:1로 대응하고 Scene 표시는 `WorldOrigin` 변환을 적용한다.
+- `SeaPatternGenerator`는 SeaRegion을 Sea 경계에서 중심까지의 연속적인 접근도로 변환한다. 수심은 단일 단조 S자 Curve를 따라 경계에서 완만하게 시작하고, 중간에서 가팔라지며, 최대 수심에 도달하면 평탄한 심해저 구간을 유지한다. 넓은 Sea일수록 중심 접근도 1인 영역이 넓어져 깊은 해저도 넓어진다.
+- Sea의 목표 해저는 `WaterSurfaceUnits - DepthUnits + SeabedDetailUnits`로 산출한다. SeaDetail은 영역이나 중심 접근도를 흔들지 않고 해저 높이에만 작은 굴곡을 추가한다.
+- Water Pattern은 `TargetBedSurfaceUnits`, `DepthUnits`, `WaterTopUnits`, `WaterType`, `WaterRegionKey`, `InteriorProximity`를 공통 출력한다. 여러 Water Pattern이 겹치면 상대 하강량을 합산하지 않고 더 낮은 목표 바닥을 선택한다.
+- `WorldShapeComposer`는 Sea 경계에서 Landform과 목표 해저를 연속적으로 섞고, 중심 접근도 1에서는 Sea가 최종 표면을 완전히 소유한다. Landform의 고주파 세부 굴곡도 Sea 중심에 가까워질수록 제거하고 SeaDetail로 교체한다.
+- `WorldDensityField`는 합성된 `WorldShapeProfile`로 최종 XYZ Density를 한 번만 계산한다. Preliminary Density를 Final Density로 복사하던 중간 단계는 제거했다.
+- 최종 Surface를 한 번 추출한 뒤 Filled 0~5로 한 번만 양자화한다. Water는 각 Column의 Water Pattern 수면과 최종 지형 높이를 비교해 정확한 남은 공간만 기록한다.
+- 높이 단차 사이를 연결하는 Water Cell, 생성 단계 Falling, Dynamic River Pattern은 만들지 않는다. 생성된 Water의 낙하와 넘침은 기존 Water Runtime이 처리한다.
+- 패턴 디버거는 실제 생성과 동일한 `WorldNoiseRouter`와 `WorldPatternResolver` 결과를 표시한다. Sea 영역, S자 수심, 최종 Water 존재 예측을 분리해 Landform 표시와 혼동하지 않는다. 전체 미리보기에서 선택한 Pixel은 실제 샘플 Cell과 1:1로 대응하고 Scene 표시는 `WorldOrigin` 변환을 적용한다.
 - Noise 입력은 `double`, Lattice와 Hash 좌표는 `long`을 사용하여 먼 절대 좌표에서 Chunk 경계 정밀도가 먼저 손실되지 않게 했다.
 - Chunk는 1 Cell Halo를 포함해 이웃과 같은 절대 좌표 Field를 다시 계산하며, Loaded 이웃이나 생성 순서를 참조하지 않는다.
-- Preliminary/Final Surface는 생성 중 `float`로 유지하고 `WorldColumnBuildData`를 만들 때만 Filled 0~5 단위로 한 번 양자화한다.
+- Final Surface는 생성 중 `float`로 유지하고 `WorldColumnBuildData`를 만들 때만 Filled 0~5 단위로 한 번 양자화한다.
 - 지하 Cave는 만들지 않으며 최종 Surface 아래를 연결된 고체로 조립한다.
 
 생성 교체 하위 로드맵:
 
 1. 연속 Landform/Terrain 기반 교체: 완료
-2. 새 Sea 위치·수면·해저 Density 계획을 처음부터 연결: 미진행
-3. Terrain/Sea 결과 기반 최종 Biome, Mesh 경계 확인, 이전 생성 잔여 설정 제거: 미진행
+2. World Pattern 공통 계약과 Sea 위치·수면·해저 Density 연결: 완료
+3. River Pattern 공통 출력 연결: 미진행
+4. Lake/Pond Pattern 공통 출력 연결: 미진행
+5. Water Pattern 결합부와 Runtime 낙하 확인: 미진행
+6. Landform/Water 결과 기반 최종 Biome 확정과 이전 River/Lake 생성 설정 제거: 미진행
 
 연속성 계약:
 

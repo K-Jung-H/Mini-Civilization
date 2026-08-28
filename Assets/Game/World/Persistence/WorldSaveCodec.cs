@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D;
         private const uint WaterFlowScheduleMarker = 0x31534657;
         private const uint EntitiesMarker = 0x31544E45;
-        private const ushort CurrentVersion = 19;
+        private const ushort CurrentVersion = 21;
         private const int CellByteSize = 18;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -651,7 +651,7 @@ namespace MiniCivilization.World.Persistence
 
         private static void WriteNoiseField(
             BinaryWriter writer,
-            in TerrainNoiseFieldSettingsData field)
+            in WorldNoiseFieldSettingsData field)
         {
             writer.Write((byte)field.Mode);
             writer.Write(field.Scale);
@@ -660,9 +660,9 @@ namespace MiniCivilization.World.Persistence
             writer.Write(field.Persistence);
         }
 
-        private static TerrainNoiseFieldSettingsData ReadNoiseField(
+        private static WorldNoiseFieldSettingsData ReadNoiseField(
             BinaryReader reader) => new(
-            (TerrainNoiseMode)reader.ReadByte(),
+            (WorldNoiseMode)reader.ReadByte(),
             reader.ReadSingle(),
             reader.ReadInt32(),
             reader.ReadSingle(),
@@ -670,7 +670,7 @@ namespace MiniCivilization.World.Persistence
 
         private static void WriteCurve(
             BinaryWriter writer,
-            in TerrainCurveSettingsData curve)
+            in WorldCurveSettingsData curve)
         {
             writer.Write(curve.AtZero);
             writer.Write(curve.AtQuarter);
@@ -679,7 +679,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(curve.AtOne);
         }
 
-        private static TerrainCurveSettingsData ReadCurve(
+        private static WorldCurveSettingsData ReadCurve(
             BinaryReader reader) => new(
             reader.ReadSingle(),
             reader.ReadSingle(),
@@ -687,9 +687,9 @@ namespace MiniCivilization.World.Persistence
             reader.ReadSingle(),
             reader.ReadSingle());
 
-        private static void WriteTerrainPatterns(
+        private static void WriteWorldPatterns(
             BinaryWriter writer,
-            in TerrainPatternSettingsData patterns)
+            in WorldPatternSettingsData patterns)
         {
             WriteCurve(writer, patterns.BaseDensity.SurfaceByContinentalness);
             WriteCurve(writer, patterns.BaseDensity.SurfaceByErosion);
@@ -709,9 +709,14 @@ namespace MiniCivilization.World.Persistence
             WriteCurve(writer, patterns.Canyon.InfluenceByRegion);
             WriteCurve(writer, patterns.Canyon.WidthByVariation);
             WriteCurve(writer, patterns.Canyon.MaximumDepthByVariation);
+            WriteCurve(writer, patterns.Sea.InteriorByRegion);
+            WriteCurve(writer, patterns.Sea.DepthByInterior);
+            writer.Write(patterns.Sea.MaximumDepthCells);
+            writer.Write(patterns.Sea.SurfaceUnits);
+            writer.Write(patterns.Sea.ShapeDetailStrength);
         }
 
-        private static TerrainPatternSettingsData ReadTerrainPatterns(
+        private static WorldPatternSettingsData ReadWorldPatterns(
             BinaryReader reader) => new(
             new TerrainBaseDensitySettingsData(
                 ReadCurve(reader),
@@ -735,7 +740,13 @@ namespace MiniCivilization.World.Persistence
             new CanyonTerrainSettingsData(
                 ReadCurve(reader),
                 ReadCurve(reader),
-                ReadCurve(reader)));
+                ReadCurve(reader)),
+            new SeaPatternSettingsData(
+                ReadCurve(reader),
+                ReadCurve(reader),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadSingle()));
 
         private static void WriteSettings(
             BinaryWriter writer,
@@ -750,7 +761,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.ChunkSectionCountY);
             writer.Write(settings.RenderChunksPerPatch);
             writer.Write(settings.RoadMaxHeightSteps);
-            var router = settings.TerrainNoiseRouter;
+            var router = settings.WorldNoiseRouter;
             WriteNoiseField(writer, router.PatternRegion);
             WriteNoiseField(writer, router.Continentalness);
             WriteNoiseField(writer, router.Erosion);
@@ -758,16 +769,11 @@ namespace MiniCivilization.World.Persistence
             WriteNoiseField(writer, router.PeaksValleys);
             WriteNoiseField(writer, router.Roughness);
             WriteNoiseField(writer, router.Detail);
-            WriteTerrainPatterns(writer, settings.TerrainPatterns);
+            WriteNoiseField(writer, router.SeaRegion);
+            WriteNoiseField(writer, router.SeaDetail);
+            WriteWorldPatterns(writer, settings.WorldPatterns);
             writer.Write(settings.TemperatureScale);
             writer.Write(settings.TerrainBaseHeightUnits);
-            writer.Write(settings.DefaultSeaSurfaceUnits);
-            writer.Write(settings.MaximumSeaDepthUnits);
-            writer.Write(settings.LandThreshold);
-            writer.Write(settings.DeepSeaThreshold);
-            writer.Write(settings.SeaDepthSteepness);
-            writer.Write(settings.SeaDepthNoiseScale);
-            writer.Write(settings.SeaDepthNoiseStrength);
             writer.Write(settings.RiverScale);
             writer.Write(settings.RiverDensity);
             writer.Write(settings.RiverDepthCells);
@@ -817,7 +823,9 @@ namespace MiniCivilization.World.Persistence
                 chunkSectionCountY: chunkSectionCountY,
                 renderChunksPerPatch: renderChunksPerPatch,
                 roadMaxHeightSteps: reader.ReadInt32(),
-                terrainNoiseRouter: new TerrainNoiseRouterSettingsData(
+                worldNoiseRouter: new WorldNoiseRouterSettingsData(
+                    ReadNoiseField(reader),
+                    ReadNoiseField(reader),
                     ReadNoiseField(reader),
                     ReadNoiseField(reader),
                     ReadNoiseField(reader),
@@ -825,16 +833,9 @@ namespace MiniCivilization.World.Persistence
                     ReadNoiseField(reader),
                     ReadNoiseField(reader),
                     ReadNoiseField(reader)),
-                terrainPatterns: ReadTerrainPatterns(reader),
+                worldPatterns: ReadWorldPatterns(reader),
                 temperatureScale: reader.ReadSingle(),
                 terrainBaseHeightUnits: reader.ReadInt32(),
-                defaultSeaSurfaceUnits: reader.ReadInt32(),
-                maximumSeaDepthUnits: reader.ReadInt32(),
-                landThreshold: reader.ReadSingle(),
-                deepSeaThreshold: reader.ReadSingle(),
-                seaDepthSteepness: reader.ReadSingle(),
-                seaDepthNoiseScale: reader.ReadSingle(),
-                seaDepthNoiseStrength: reader.ReadSingle(),
                 riverScale: reader.ReadSingle(),
                 riverDensity: reader.ReadSingle(),
                 riverDepthCells: reader.ReadInt32(),

@@ -98,16 +98,18 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal readonly struct TerrainFieldSample
+    internal readonly struct WorldFieldSample
     {
-        public TerrainFieldSample(
+        public WorldFieldSample(
             float patternRegion,
             float continentalness,
             float erosion,
             float weirdness,
             float peaksValleys,
             float roughness,
-            float detail)
+            float detail,
+            float seaRegion,
+            float seaDetail)
         {
             PatternRegion = patternRegion;
             Continentalness = continentalness;
@@ -116,6 +118,8 @@ namespace MiniCivilization.World.Generation
             PeaksValleys = peaksValleys;
             Roughness = roughness;
             Detail = detail;
+            SeaRegion = seaRegion;
+            SeaDetail = seaDetail;
         }
 
         public float PatternRegion { get; }
@@ -125,28 +129,86 @@ namespace MiniCivilization.World.Generation
         public float PeaksValleys { get; }
         public float Roughness { get; }
         public float Detail { get; }
+        public float SeaRegion { get; }
+        public float SeaDetail { get; }
     }
 
-    internal readonly struct TerrainDensityProfile
+    internal readonly struct WaterPatternContribution
     {
-        public TerrainDensityProfile(
+        public WaterPatternContribution(
+            float targetBedSurfaceUnits,
+            float depthUnits,
+            float depthProgress,
+            float seabedDetailUnits,
+            int waterTopUnits,
+            WaterType waterType,
+            int waterRegionKey,
+            float interiorProximity)
+        {
+            TargetBedSurfaceUnits = targetBedSurfaceUnits;
+            DepthUnits = depthUnits;
+            DepthProgress = depthProgress;
+            SeabedDetailUnits = seabedDetailUnits;
+            WaterTopUnits = waterTopUnits;
+            WaterType = waterType;
+            WaterRegionKey = waterRegionKey;
+            InteriorProximity = interiorProximity;
+        }
+
+        public float TargetBedSurfaceUnits { get; }
+        public float DepthUnits { get; }
+        public float DepthProgress { get; }
+        public float SeabedDetailUnits { get; }
+        public int WaterTopUnits { get; }
+        public WaterType WaterType { get; }
+        public int WaterRegionKey { get; }
+        public float InteriorProximity { get; }
+        public bool HasWaterPattern => WaterType != WaterType.None;
+
+        public static WaterPatternContribution SelectLowerBed(
+            in WaterPatternContribution left,
+            in WaterPatternContribution right)
+        {
+            if (!left.HasWaterPattern)
+            {
+                return right;
+            }
+
+            if (!right.HasWaterPattern)
+            {
+                return left;
+            }
+
+            return right.TargetBedSurfaceUnits
+                    < left.TargetBedSurfaceUnits
+                ? right
+                : left;
+        }
+    }
+
+    internal readonly struct WorldShapeProfile
+    {
+        public WorldShapeProfile(
             float surfaceOffsetUnits,
             float verticalFactor,
-            float detailUnits)
+            float detailUnits,
+            in WaterPatternContribution water)
         {
             SurfaceOffsetUnits = surfaceOffsetUnits;
             VerticalFactor = verticalFactor;
             DetailUnits = detailUnits;
+            Water = water;
         }
 
         public float SurfaceOffsetUnits { get; }
         public float VerticalFactor { get; }
         public float DetailUnits { get; }
+        public WaterPatternContribution Water { get; }
     }
 
-    internal readonly struct TerrainPatternContribution
+    internal readonly struct LandformPatternContribution
     {
-        public TerrainPatternContribution(
+        public LandformPatternContribution(
             float surfaceOffsetUnits,
             float detailUnits)
         {
@@ -158,9 +220,9 @@ namespace MiniCivilization.World.Generation
         public float DetailUnits { get; }
     }
 
-    internal readonly struct TerrainPatternWeights
+    internal readonly struct LandformPatternWeights
     {
-        public TerrainPatternWeights(
+        public LandformPatternWeights(
             float smooth,
             float rugged,
             float mountain,
@@ -178,9 +240,9 @@ namespace MiniCivilization.World.Generation
         public float Canyon { get; }
     }
 
-    internal readonly struct TerrainDensityContributions
+    internal readonly struct WorldDensityContributions
     {
-        public TerrainDensityContributions(
+        public WorldDensityContributions(
             float verticalGradient,
             float surfaceOffset,
             float surfaceDetail,
@@ -204,11 +266,9 @@ namespace MiniCivilization.World.Generation
 
     internal sealed class GenerationWorkingData
     {
-        private TerrainFieldSample[] terrainFieldSamples;
-        private TerrainDensityProfile[] terrainDensityProfiles;
-        private float[] preliminaryDensity;
-        private float[] preliminarySurfaceUnits;
-        private float[] finalDensity;
+        private WorldFieldSample[] worldFieldSamples;
+        private WorldShapeProfile[] worldShapeProfiles;
+        private float[] worldDensity;
         private float[] finalSurfaceUnits;
         private WorldColumnBuildData[] finalColumns;
         private bool[] finalColumnWritten;
@@ -227,17 +287,15 @@ namespace MiniCivilization.World.Generation
             SampleOriginX = checked(input.OriginX - haloCellCount);
             SampleOriginZ = checked(input.OriginZ - haloCellCount);
             SampleSizeXZ = checked(input.ChunkSizeXZ + haloCellCount * 2);
-            terrainFieldSamples = new TerrainFieldSample[checked(
+            worldFieldSamples = new WorldFieldSample[checked(
                 SampleSizeXZ * SampleSizeXZ)];
-            terrainDensityProfiles = new TerrainDensityProfile[
-                terrainFieldSamples.Length];
-            preliminaryDensity = new float[checked(
+            worldShapeProfiles = new WorldShapeProfile[
+                worldFieldSamples.Length];
+            worldDensity = new float[checked(
                 SampleSizeXZ
                 * SampleSizeXZ
                 * DensityHeightUnitCount)];
-            preliminarySurfaceUnits = new float[terrainFieldSamples.Length];
-            finalDensity = new float[preliminaryDensity.Length];
-            finalSurfaceUnits = new float[preliminarySurfaceUnits.Length];
+            finalSurfaceUnits = new float[worldFieldSamples.Length];
             finalColumns = new WorldColumnBuildData[
                 checked(input.ChunkSizeXZ * input.ChunkSizeXZ)];
             finalColumnWritten = new bool[finalColumns.Length];
@@ -249,134 +307,132 @@ namespace MiniCivilization.World.Generation
         public int SampleOriginZ { get; }
         public int SampleSizeXZ { get; }
         public int DensityHeightUnitCount => checked(Input.HeightUnitCount + 1);
-        public bool HasTerrainField { get; private set; }
-        public bool HasTerrainDensityProfile { get; private set; }
-        public bool HasPreliminaryDensity { get; private set; }
-        public bool HasPreliminarySurface { get; private set; }
-        public bool HasFinalDensity { get; private set; }
+        public bool HasWorldField { get; private set; }
+        public bool HasWorldShapeProfile { get; private set; }
+        public bool HasWorldDensity { get; private set; }
         public bool HasFinalSurface { get; private set; }
         public bool IsCompleted => finalColumns == null;
 
-        public void SetTerrainField(
+        public void SetWorldField(
             int sampleLocalX,
             int sampleLocalZ,
-            in TerrainFieldSample value)
+            in WorldFieldSample value)
         {
             EnsureNotCompleted();
-            if (HasTerrainField)
+            if (HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field has already been finalized.");
+                    "World Field has already been finalized.");
             }
 
-            terrainFieldSamples[ToSurfaceIndex(
+            worldFieldSamples[ToSurfaceIndex(
                 sampleLocalX,
                 sampleLocalZ)] =
                 value;
         }
 
-        public void CompleteTerrainField()
+        public void CompleteWorldField()
         {
             EnsureNotCompleted();
-            if (HasTerrainField)
+            if (HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field has already been finalized.");
+                    "World Field has already been finalized.");
             }
 
-            HasTerrainField = true;
+            HasWorldField = true;
         }
 
-        public TerrainFieldSample GetTerrainField(
+        public WorldFieldSample GetWorldField(
             int sampleLocalX,
             int sampleLocalZ)
         {
             EnsureNotCompleted();
-            if (!HasTerrainField)
+            if (!HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field is not ready.");
+                    "World Field is not ready.");
             }
 
-            return terrainFieldSamples[ToSurfaceIndex(
+            return worldFieldSamples[ToSurfaceIndex(
                 sampleLocalX,
                 sampleLocalZ)];
         }
 
-        public void SetTerrainDensityProfile(
+        public void SetWorldShapeProfile(
             int sampleLocalX,
             int sampleLocalZ,
-            in TerrainDensityProfile value)
+            in WorldShapeProfile value)
         {
             EnsureNotCompleted();
-            if (!HasTerrainField)
+            if (!HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field must be ready before its Density Profile is built.");
+                    "World Field must be ready before its Shape Profile is built.");
             }
 
-            if (HasTerrainDensityProfile)
+            if (HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile has already been finalized.");
+                    "World Shape Profile has already been finalized.");
             }
 
-            terrainDensityProfiles[ToSurfaceIndex(
+            worldShapeProfiles[ToSurfaceIndex(
                 sampleLocalX,
                 sampleLocalZ)] = value;
         }
 
-        public void CompleteTerrainDensityProfile()
+        public void CompleteWorldShapeProfile()
         {
             EnsureNotCompleted();
-            if (!HasTerrainField)
+            if (!HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field must be ready before its Density Profile is finalized.");
+                    "World Field must be ready before its Shape Profile is finalized.");
             }
 
-            if (HasTerrainDensityProfile)
+            if (HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile has already been finalized.");
+                    "World Shape Profile has already been finalized.");
             }
 
-            HasTerrainDensityProfile = true;
+            HasWorldShapeProfile = true;
         }
 
-        public TerrainDensityProfile GetTerrainDensityProfile(
+        public WorldShapeProfile GetWorldShapeProfile(
             int sampleLocalX,
             int sampleLocalZ)
         {
             EnsureNotCompleted();
-            if (!HasTerrainDensityProfile)
+            if (!HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile is not ready.");
+                    "World Shape Profile is not ready.");
             }
 
-            return terrainDensityProfiles[ToSurfaceIndex(
+            return worldShapeProfiles[ToSurfaceIndex(
                 sampleLocalX,
                 sampleLocalZ)];
         }
 
-        public void SetPreliminaryDensity(
+        public void SetWorldDensity(
             int sampleLocalX,
             int heightUnit,
             int sampleLocalZ,
             float density)
         {
             EnsureNotCompleted();
-            if (!HasTerrainDensityProfile)
+            if (!HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile must be ready before Preliminary Density is built.");
+                    "World Shape Profile must be ready before World Density is built.");
             }
 
-            if (HasPreliminaryDensity)
+            if (HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Preliminary Density has already been finalized.");
+                    "World Density has already been finalized.");
             }
 
             if (!float.IsFinite(density))
@@ -384,173 +440,43 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentOutOfRangeException(nameof(density));
             }
 
-            preliminaryDensity[ToDensityIndex(
+            worldDensity[ToDensityIndex(
                 sampleLocalX,
                 heightUnit,
                 sampleLocalZ)] = density;
         }
 
-        public void CompletePreliminaryDensity()
+        public void CompleteWorldDensity()
         {
             EnsureNotCompleted();
-            if (!HasTerrainDensityProfile)
+            if (!HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile must be ready before Preliminary Density is finalized.");
+                    "World Shape Profile must be ready before World Density is finalized.");
             }
 
-            if (HasPreliminaryDensity)
+            if (HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Preliminary Density has already been finalized.");
+                    "World Density has already been finalized.");
             }
 
-            HasPreliminaryDensity = true;
+            HasWorldDensity = true;
         }
 
-        public float GetPreliminaryDensity(
+        public float GetWorldDensity(
             int sampleLocalX,
             int heightUnit,
             int sampleLocalZ)
         {
             EnsureNotCompleted();
-            if (!HasPreliminaryDensity)
+            if (!HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Preliminary Density is not ready.");
+                    "World Density is not ready.");
             }
 
-            return preliminaryDensity[ToDensityIndex(
-                sampleLocalX,
-                heightUnit,
-                sampleLocalZ)];
-        }
-
-        public void SetPreliminarySurfaceUnits(
-            int sampleLocalX,
-            int sampleLocalZ,
-            float surfaceUnits)
-        {
-            EnsureNotCompleted();
-            if (!HasPreliminaryDensity)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Density must be ready before its surface is extracted.");
-            }
-
-            if (HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface has already been finalized.");
-            }
-
-            if (!float.IsFinite(surfaceUnits)
-                || surfaceUnits < 0f
-                || surfaceUnits > Input.HeightUnitCount)
-            {
-                throw new ArgumentOutOfRangeException(nameof(surfaceUnits));
-            }
-
-            preliminarySurfaceUnits[ToSurfaceIndex(
-                sampleLocalX,
-                sampleLocalZ)] = surfaceUnits;
-        }
-
-        public void CompletePreliminarySurface()
-        {
-            EnsureNotCompleted();
-            if (!HasPreliminaryDensity)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Density must be ready before its surface is finalized.");
-            }
-
-            if (HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface has already been finalized.");
-            }
-
-            HasPreliminarySurface = true;
-        }
-
-        public float GetPreliminarySurfaceUnits(
-            int sampleLocalX,
-            int sampleLocalZ)
-        {
-            EnsureNotCompleted();
-            if (!HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface is not ready.");
-            }
-
-            return preliminarySurfaceUnits[ToSurfaceIndex(
-                sampleLocalX,
-                sampleLocalZ)];
-        }
-
-        public void SetFinalDensity(
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ,
-            float density)
-        {
-            EnsureNotCompleted();
-            if (!HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface must be ready before Final Density is built.");
-            }
-
-            if (HasFinalDensity)
-            {
-                throw new InvalidOperationException(
-                    "Final Density has already been finalized.");
-            }
-
-            if (!float.IsFinite(density))
-            {
-                throw new ArgumentOutOfRangeException(nameof(density));
-            }
-
-            finalDensity[ToDensityIndex(
-                sampleLocalX,
-                heightUnit,
-                sampleLocalZ)] = density;
-        }
-
-        public void CompleteFinalDensity()
-        {
-            EnsureNotCompleted();
-            if (!HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface must be ready before Final Density is finalized.");
-            }
-
-            if (HasFinalDensity)
-            {
-                throw new InvalidOperationException(
-                    "Final Density has already been finalized.");
-            }
-
-            HasFinalDensity = true;
-        }
-
-        public float GetFinalDensity(
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ)
-        {
-            EnsureNotCompleted();
-            if (!HasFinalDensity)
-            {
-                throw new InvalidOperationException(
-                    "Final Density is not ready.");
-            }
-
-            return finalDensity[ToDensityIndex(
+            return worldDensity[ToDensityIndex(
                 sampleLocalX,
                 heightUnit,
                 sampleLocalZ)];
@@ -562,10 +488,10 @@ namespace MiniCivilization.World.Generation
             float surfaceUnits)
         {
             EnsureNotCompleted();
-            if (!HasFinalDensity)
+            if (!HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Final Density must be ready before Final Surface is extracted.");
+                    "World Density must be ready before Final Surface is extracted.");
             }
 
             if (HasFinalSurface)
@@ -589,10 +515,10 @@ namespace MiniCivilization.World.Generation
         public void CompleteFinalSurface()
         {
             EnsureNotCompleted();
-            if (!HasFinalDensity)
+            if (!HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Final Density must be ready before Final Surface is finalized.");
+                    "World Density must be ready before Final Surface is finalized.");
             }
 
             if (HasFinalSurface)
@@ -644,24 +570,18 @@ namespace MiniCivilization.World.Generation
         public WorldChunkBuildData Complete()
         {
             EnsureNotCompleted();
-            if (!HasTerrainField
-                || !HasTerrainDensityProfile
-                || !HasPreliminaryDensity)
+            if (!HasWorldField
+                || !HasWorldShapeProfile
+                || !HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field, Terrain Density Profile, and Preliminary Density must be ready before final output is transferred.");
+                    "World Field, World Shape Profile, and World Density must be ready before final output is transferred.");
             }
 
-            if (!HasPreliminarySurface)
+            if (!HasFinalSurface)
             {
                 throw new InvalidOperationException(
-                    "Preliminary Surface must be ready before final output is transferred.");
-            }
-
-            if (!HasFinalDensity || !HasFinalSurface)
-            {
-                throw new InvalidOperationException(
-                    "Final Density and Final Surface must be ready before output is transferred.");
+                    "Final Surface must be ready before output is transferred.");
             }
 
             for (var index = 0; index < finalColumnWritten.Length; index++)
@@ -674,11 +594,9 @@ namespace MiniCivilization.World.Generation
             }
 
             var columns = finalColumns;
-            terrainFieldSamples = null;
-            terrainDensityProfiles = null;
-            preliminaryDensity = null;
-            preliminarySurfaceUnits = null;
-            finalDensity = null;
+            worldFieldSamples = null;
+            worldShapeProfiles = null;
+            worldDensity = null;
             finalSurfaceUnits = null;
             finalColumns = null;
             finalColumnWritten = null;
@@ -736,7 +654,7 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal static class TerrainFieldStage
+    internal static class WorldFieldStage
     {
         public const int RequiredHaloCellCount = 1;
 
@@ -750,7 +668,7 @@ namespace MiniCivilization.World.Generation
             var working = new GenerationWorkingData(
                 input,
                 RequiredHaloCellCount);
-            var router = new TerrainNoiseRouter(input.Settings);
+            var router = new WorldNoiseRouter(input.Settings);
             for (var sampleLocalZ = 0;
                  sampleLocalZ < working.SampleSizeXZ;
                  sampleLocalZ++)
@@ -760,27 +678,27 @@ namespace MiniCivilization.World.Generation
             {
                 var worldX = checked(working.SampleOriginX + sampleLocalX);
                 var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
-                working.SetTerrainField(
+                working.SetWorldField(
                     sampleLocalX,
                     sampleLocalZ,
                     router.Sample(worldX, worldZ));
             }
 
-            working.CompleteTerrainField();
+            working.CompleteWorldField();
             return working;
         }
     }
 
-    internal static class TerrainNoiseFieldSampler
+    internal static class WorldNoiseFieldSampler
     {
         public static float Sample2D(
             long worldX,
             long worldZ,
-            in TerrainNoiseFieldSettingsData field,
+            in WorldNoiseFieldSettingsData field,
             int seed)
         {
-            var sample = field.Mode is TerrainNoiseMode.Ridge
-                or TerrainNoiseMode.SignedRidge
+            var sample = field.Mode is WorldNoiseMode.Ridge
+                or WorldNoiseMode.SignedRidge
                 ? DeterministicNoise.RidgedFractalNoise(
                     worldX * field.Scale,
                     worldZ * field.Scale,
@@ -795,8 +713,8 @@ namespace MiniCivilization.World.Generation
                     field.Layers,
                     field.FrequencySpacing,
                     field.Persistence);
-            return field.Mode is TerrainNoiseMode.Signed
-                or TerrainNoiseMode.SignedRidge
+            return field.Mode is WorldNoiseMode.Signed
+                or WorldNoiseMode.SignedRidge
                 ? sample * 2f - 1f
                 : sample;
         }
@@ -805,11 +723,11 @@ namespace MiniCivilization.World.Generation
             double worldX,
             double worldY,
             double worldZ,
-            in TerrainNoiseFieldSettingsData field,
+            in WorldNoiseFieldSettingsData field,
             int seed)
         {
-            var sample = field.Mode is TerrainNoiseMode.Ridge
-                or TerrainNoiseMode.SignedRidge
+            var sample = field.Mode is WorldNoiseMode.Ridge
+                or WorldNoiseMode.SignedRidge
                 ? DeterministicNoise.RidgedFractalNoise(
                     worldX * field.Scale,
                     worldY * field.Scale,
@@ -826,15 +744,15 @@ namespace MiniCivilization.World.Generation
                     field.Layers,
                     field.FrequencySpacing,
                     field.Persistence);
-            return field.Mode is TerrainNoiseMode.Signed
-                or TerrainNoiseMode.SignedRidge
+            return field.Mode is WorldNoiseMode.Signed
+                or WorldNoiseMode.SignedRidge
                 ? sample * 2f - 1f
                 : sample;
         }
 
     }
 
-    internal readonly struct TerrainNoiseRouter
+    internal readonly struct WorldNoiseRouter
     {
         private readonly int patternRegionSeed;
         private readonly int continentalSeed;
@@ -843,100 +761,90 @@ namespace MiniCivilization.World.Generation
         private readonly int peaksValleysSeed;
         private readonly int roughnessSeed;
         private readonly int detailSeed;
-        private readonly TerrainNoiseRouterSettingsData settings;
+        private readonly int seaRegionSeed;
+        private readonly int seaDetailSeed;
+        private readonly int seaRegionKey;
+        private readonly WorldNoiseRouterSettingsData settings;
 
-        public TerrainNoiseRouter(WorldSettingsData worldSettings)
+        public WorldNoiseRouter(WorldSettingsData worldSettings)
         {
             patternRegionSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-pattern-region");
+                "world-router-pattern-region");
             continentalSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-continentalness");
+                "world-router-continentalness");
             erosionSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-erosion");
+                "world-router-erosion");
             weirdnessSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-weirdness");
+                "world-router-weirdness");
             peaksValleysSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-peaks-valleys");
+                "world-router-peaks-valleys");
             roughnessSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-roughness");
+                "world-router-roughness");
             detailSeed = DeterministicNoise.DeriveSeed(
                 worldSettings.Seed,
-                "terrain-router-detail");
-            settings = worldSettings.TerrainNoiseRouter;
+                "world-router-detail");
+            seaRegionSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "world-router-sea-region");
+            seaDetailSeed = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "world-router-sea-detail");
+            seaRegionKey = DeterministicNoise.DeriveSeed(
+                worldSettings.Seed,
+                "world-pattern-sea-primary-region");
+            settings = worldSettings.WorldNoiseRouter;
         }
 
-        public TerrainFieldSample Sample(int worldX, int worldZ) => new(
-                SamplePatternRegion(worldX, worldZ),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                    settings.Continentalness,
-                    continentalSeed),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                    settings.Erosion,
-                    erosionSeed),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                    settings.Weirdness,
-                    weirdnessSeed),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                    settings.PeaksValleys,
-                    peaksValleysSeed),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                    settings.Roughness,
-                    roughnessSeed),
-                TerrainNoiseFieldSampler.Sample2D(
-                    worldX,
-                    worldZ,
-                settings.Detail,
-                detailSeed));
+        public int SeaRegionKey => seaRegionKey;
+
+        public WorldFieldSample Sample(int worldX, int worldZ) => new(
+            SamplePatternRegion(worldX, worldZ),
+            Sample2D(worldX, worldZ, settings.Continentalness, continentalSeed),
+            Sample2D(worldX, worldZ, settings.Erosion, erosionSeed),
+            Sample2D(worldX, worldZ, settings.Weirdness, weirdnessSeed),
+            Sample2D(worldX, worldZ, settings.PeaksValleys, peaksValleysSeed),
+            Sample2D(worldX, worldZ, settings.Roughness, roughnessSeed),
+            Sample2D(worldX, worldZ, settings.Detail, detailSeed),
+            Sample2D(worldX, worldZ, settings.SeaRegion, seaRegionSeed),
+            Sample2D(worldX, worldZ, settings.SeaDetail, seaDetailSeed));
 
         public float SamplePatternRegion(int worldX, int worldZ) =>
-            TerrainNoiseFieldSampler.Sample2D(
-                worldX,
-                worldZ,
-                settings.PatternRegion,
-                patternRegionSeed);
+            Sample2D(worldX, worldZ, settings.PatternRegion, patternRegionSeed);
 
         public float SampleContinentalness(int worldX, int worldZ) =>
-            TerrainNoiseFieldSampler.Sample2D(
-                worldX,
-                worldZ,
-                settings.Continentalness,
-                continentalSeed);
+            Sample2D(worldX, worldZ, settings.Continentalness, continentalSeed);
 
         public float SampleErosion(int worldX, int worldZ) =>
-            TerrainNoiseFieldSampler.Sample2D(
-                worldX,
-                worldZ,
-                settings.Erosion,
-                erosionSeed);
+            Sample2D(worldX, worldZ, settings.Erosion, erosionSeed);
 
         public float SampleDetail3D(
             double worldX,
             double worldY,
-            double worldZ) => TerrainNoiseFieldSampler.Sample3D(
+            double worldZ) => WorldNoiseFieldSampler.Sample3D(
                 worldX,
                 worldY,
                 worldZ,
                 settings.Detail,
                 detailSeed);
+
+        private static float Sample2D(
+            int worldX,
+            int worldZ,
+            in WorldNoiseFieldSettingsData field,
+            int seed) => WorldNoiseFieldSampler.Sample2D(
+                worldX,
+                worldZ,
+                field,
+                seed);
     }
 
-    internal static class TerrainPatternStage
+    internal static class WorldPatternStage
     {
         public static void Build(GenerationWorkingData working)
         {
@@ -945,14 +853,14 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(working));
             }
 
-            if (!working.HasTerrainField)
+            if (!working.HasWorldField)
             {
                 throw new InvalidOperationException(
-                    "Terrain Field is not ready.");
+                    "World Field is not ready.");
             }
 
             var settings = working.Input.Settings;
-            var router = new TerrainNoiseRouter(settings);
+            var router = new WorldNoiseRouter(settings);
             for (var sampleLocalZ = 0;
                  sampleLocalZ < working.SampleSizeXZ;
                  sampleLocalZ++)
@@ -964,35 +872,41 @@ namespace MiniCivilization.World.Generation
                     working.SampleOriginX + sampleLocalX);
                 var worldZ = checked(
                     working.SampleOriginZ + sampleLocalZ);
-                var field = working.GetTerrainField(
+                var field = working.GetWorldField(
                     sampleLocalX,
                     sampleLocalZ);
-                working.SetTerrainDensityProfile(
+                working.SetWorldShapeProfile(
                     sampleLocalX,
                     sampleLocalZ,
-                    TerrainPatternResolver.Resolve(
+                    WorldPatternResolver.Resolve(
                         router,
                         worldX,
                         worldZ,
                         field,
-                        settings.TerrainPatterns,
+                        settings,
                         out _));
             }
 
-            working.CompleteTerrainDensityProfile();
+            working.CompleteWorldShapeProfile();
         }
     }
 
-    internal static class TerrainPatternResolver
+    internal static class WorldPatternResolver
     {
-        public static TerrainDensityProfile Resolve(
-            in TerrainNoiseRouter router,
+        public static WorldShapeProfile Resolve(
+            in WorldNoiseRouter router,
             int worldX,
             int worldZ,
-            in TerrainFieldSample field,
-            in TerrainPatternSettingsData settings,
-            out TerrainPatternWeights weights)
+            in WorldFieldSample field,
+            WorldSettingsData worldSettings,
+            out LandformPatternWeights weights)
         {
+            if (worldSettings == null)
+            {
+                throw new ArgumentNullException(nameof(worldSettings));
+            }
+
+            var settings = worldSettings.WorldPatterns;
             var smoothWeight = SmoothTerrainGenerator.EvaluateInfluence(
                 field,
                 settings.Smooth);
@@ -1022,7 +936,7 @@ namespace MiniCivilization.World.Generation
             }
 
             var inverseTotal = 1f / total;
-            weights = new TerrainPatternWeights(
+            weights = new LandformPatternWeights(
                 smoothWeight * inverseTotal,
                 ruggedWeight * inverseTotal,
                 mountainWeight * inverseTotal,
@@ -1056,22 +970,107 @@ namespace MiniCivilization.World.Generation
                 + rugged.DetailUnits * weights.Rugged
                 + mountain.DetailUnits * weights.Mountain
                 + canyon.DetailUnits * weights.Canyon;
-            return new TerrainDensityProfile(
+            var water = WaterPatternContribution.SelectLowerBed(
+                default,
+                SeaPatternGenerator.Generate(
+                    router,
+                    field,
+                    settings.Sea));
+            return WorldShapeComposer.Compose(
                 surfaceOffset,
+                worldSettings.TerrainBaseHeightUnits,
                 baseDensity.VerticalFactorByErosion.Evaluate(field.Erosion),
-                detailUnits);
+                detailUnits,
+                water);
+        }
+    }
+
+    internal static class WorldShapeComposer
+    {
+        public static WorldShapeProfile Compose(
+            float landformSurfaceOffsetUnits,
+            int terrainBaseHeightUnits,
+            float verticalFactor,
+            float detailUnits,
+            in WaterPatternContribution water)
+        {
+            if (!water.HasWaterPattern)
+            {
+                return new WorldShapeProfile(
+                    landformSurfaceOffsetUnits,
+                    verticalFactor,
+                    detailUnits,
+                    water);
+            }
+
+            var blend = Math.Clamp(water.InteriorProximity, 0f, 1f);
+            var landformSurfaceUnits = terrainBaseHeightUnits
+                + landformSurfaceOffsetUnits;
+            var finalSurfaceUnits = Lerp(
+                landformSurfaceUnits,
+                water.TargetBedSurfaceUnits,
+                blend);
+            return new WorldShapeProfile(
+                finalSurfaceUnits - terrainBaseHeightUnits,
+                verticalFactor,
+                Lerp(detailUnits, 0f, blend),
+                water);
+        }
+
+        private static float Lerp(float from, float to, float amount) =>
+            from + (to - from) * amount;
+    }
+
+    internal static class SeaPatternGenerator
+    {
+        public static WaterPatternContribution Generate(
+            in WorldNoiseRouter router,
+            in WorldFieldSample field,
+            in SeaPatternSettingsData settings)
+        {
+            var interior = Math.Clamp(
+                settings.InteriorByRegion.Evaluate(field.SeaRegion),
+                0f,
+                1f);
+            if (interior <= 0f)
+            {
+                return default;
+            }
+
+            var depthProgress = Math.Clamp(
+                settings.DepthByInterior.EvaluateMonotonic(interior),
+                0f,
+                1f);
+            var maximumDepthUnits = settings.MaximumDepthCells
+                * WorldGrid.HeightStepsPerCell;
+            var depthUnits = depthProgress * maximumDepthUnits;
+            var seabedDetailUnits = (field.SeaDetail * 0.5f + 0.5f)
+                * settings.ShapeDetailStrength
+                * depthUnits;
+            var targetBedSurfaceUnits = settings.SurfaceUnits
+                - depthUnits
+                + seabedDetailUnits;
+            return new WaterPatternContribution(
+                targetBedSurfaceUnits,
+                depthUnits,
+                depthProgress,
+                seabedDetailUnits,
+                settings.SurfaceUnits,
+                WaterType.Sea,
+                router.SeaRegionKey,
+                interior);
         }
     }
 
     internal static class SmoothTerrainGenerator
     {
         public static float EvaluateInfluence(
-            in TerrainFieldSample field,
+            in WorldFieldSample field,
             in SmoothTerrainSettingsData settings) =>
             settings.InfluenceByRegion.Evaluate(field.PatternRegion);
 
-        public static TerrainPatternContribution Generate(
-            in TerrainFieldSample field,
+        public static LandformPatternContribution Generate(
+            in WorldFieldSample field,
             in SmoothTerrainSettingsData settings) => new(
                 settings.UndulationByWeirdness.Evaluate(field.Weirdness),
                 settings.DetailByRoughness.Evaluate(field.Roughness));
@@ -1080,12 +1079,12 @@ namespace MiniCivilization.World.Generation
     internal static class RuggedTerrainGenerator
     {
         public static float EvaluateInfluence(
-            in TerrainFieldSample field,
+            in WorldFieldSample field,
             in RuggedTerrainSettingsData settings) =>
             settings.InfluenceByRegion.Evaluate(field.PatternRegion);
 
-        public static TerrainPatternContribution Generate(
-            in TerrainFieldSample field,
+        public static LandformPatternContribution Generate(
+            in WorldFieldSample field,
             in RuggedTerrainSettingsData settings) => new(
                 settings.ReliefByPeaksValleys.Evaluate(field.PeaksValleys)
                 * settings.ReliefScaleByRoughness.Evaluate(field.Roughness),
@@ -1095,12 +1094,12 @@ namespace MiniCivilization.World.Generation
     internal static class MountainTerrainGenerator
     {
         public static float EvaluateInfluence(
-            in TerrainFieldSample field,
+            in WorldFieldSample field,
             in MountainTerrainSettingsData settings) =>
             settings.InfluenceByRegion.Evaluate(field.PatternRegion);
 
-        public static TerrainPatternContribution Generate(
-            in TerrainFieldSample field,
+        public static LandformPatternContribution Generate(
+            in WorldFieldSample field,
             in MountainTerrainSettingsData settings)
         {
             var centerProximity = Math.Clamp(
@@ -1115,7 +1114,7 @@ namespace MiniCivilization.World.Generation
                 progressExponent);
             var height = settings.HeightByCenterProximity.EvaluateMonotonic(
                 warpedProgress);
-            return new TerrainPatternContribution(
+            return new LandformPatternContribution(
                 height,
                 0f);
         }
@@ -1134,15 +1133,15 @@ namespace MiniCivilization.World.Generation
         }
 
         public static float EvaluateInfluence(
-            in TerrainFieldSample field,
+            in WorldFieldSample field,
             in CanyonTerrainSettingsData settings) =>
             settings.InfluenceByRegion.Evaluate(field.PatternRegion);
 
         public static ShapeSample SampleShape(
-            in TerrainNoiseRouter router,
+            in WorldNoiseRouter router,
             int worldX,
             int worldZ,
-            in TerrainFieldSample field,
+            in WorldFieldSample field,
             in CanyonTerrainSettingsData settings)
         {
             var axisValue = field.Continentalness - field.Erosion;
@@ -1168,15 +1167,15 @@ namespace MiniCivilization.World.Generation
             return new ShapeSample(axisProximity);
         }
 
-        public static TerrainPatternContribution Generate(
-            in TerrainFieldSample field,
+        public static LandformPatternContribution Generate(
+            in WorldFieldSample field,
             in ShapeSample shape,
             in CanyonTerrainSettingsData settings)
         {
             var maximumDepth = settings.MaximumDepthByVariation.Evaluate(
                 field.PatternRegion);
             var depthShape = SmootherStep(shape.AxisProximity);
-            return new TerrainPatternContribution(
+            return new LandformPatternContribution(
                 -maximumDepth * depthShape,
                 0f);
         }
@@ -1189,7 +1188,7 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal static class PreliminaryTerrainDensityStage
+    internal static class WorldDensityStage
     {
         public static void Build(GenerationWorkingData working)
         {
@@ -1198,13 +1197,13 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(working));
             }
 
-            if (!working.HasTerrainDensityProfile)
+            if (!working.HasWorldShapeProfile)
             {
                 throw new InvalidOperationException(
-                    "Terrain Density Profile is not ready.");
+                    "World Shape Profile is not ready.");
             }
 
-            var field = new PreliminaryTerrainDensityField(
+            var field = new WorldDensityField(
                 working.Input.Settings);
             for (var sampleLocalZ = 0;
                  sampleLocalZ < working.SampleSizeXZ;
@@ -1215,17 +1214,17 @@ namespace MiniCivilization.World.Generation
             {
                 var worldX = checked(working.SampleOriginX + sampleLocalX);
                 var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
-                var fieldSample = working.GetTerrainField(
+                var fieldSample = working.GetWorldField(
                     sampleLocalX,
                     sampleLocalZ);
-                var profile = working.GetTerrainDensityProfile(
+                var profile = working.GetWorldShapeProfile(
                     sampleLocalX,
                     sampleLocalZ);
                 for (var heightUnit = 0;
                      heightUnit < working.DensityHeightUnitCount;
                      heightUnit++)
                 {
-                    working.SetPreliminaryDensity(
+                    working.SetWorldDensity(
                         sampleLocalX,
                         heightUnit,
                         sampleLocalZ,
@@ -1238,19 +1237,19 @@ namespace MiniCivilization.World.Generation
                 }
             }
 
-            working.CompletePreliminaryDensity();
+            working.CompleteWorldDensity();
         }
     }
 
-    internal readonly struct PreliminaryTerrainDensityField
+    internal readonly struct WorldDensityField
     {
-        private readonly TerrainNoiseRouter noiseRouter;
+        private readonly WorldNoiseRouter noiseRouter;
         private readonly int terrainBaseHeightUnits;
         private readonly int maximumHeightUnit;
 
-        public PreliminaryTerrainDensityField(WorldSettingsData settings)
+        public WorldDensityField(WorldSettingsData settings)
         {
-            noiseRouter = new TerrainNoiseRouter(settings);
+            noiseRouter = new WorldNoiseRouter(settings);
             terrainBaseHeightUnits = settings.TerrainBaseHeightUnits;
             maximumHeightUnit = checked(
                 settings.WorldHeight * WorldGrid.HeightStepsPerCell);
@@ -1260,8 +1259,8 @@ namespace MiniCivilization.World.Generation
             int worldX,
             int heightUnit,
             int worldZ,
-            in TerrainFieldSample field,
-            in TerrainDensityProfile profile) =>
+            in WorldFieldSample field,
+            in WorldShapeProfile profile) =>
             Sample(
                 worldX,
                 heightUnit,
@@ -1274,9 +1273,9 @@ namespace MiniCivilization.World.Generation
             int worldX,
             int heightUnit,
             int worldZ,
-            in TerrainFieldSample field,
-            in TerrainDensityProfile profile,
-            out TerrainDensityContributions contributions)
+            in WorldFieldSample field,
+            in WorldShapeProfile profile,
+            out WorldDensityContributions contributions)
         {
             if ((uint)heightUnit > maximumHeightUnit)
             {
@@ -1299,7 +1298,7 @@ namespace MiniCivilization.World.Generation
                 * profile.VerticalFactor;
             var densityDetailContribution = detail3D
                 * profile.DetailUnits;
-            contributions = new TerrainDensityContributions(
+            contributions = new WorldDensityContributions(
                 verticalContribution,
                 surfaceOffsetContribution,
                 surfaceDetailContribution,
@@ -1312,44 +1311,14 @@ namespace MiniCivilization.World.Generation
 
     internal static class DensitySurfaceStage
     {
-        public static void BuildPreliminarySurface(
-            GenerationWorkingData working)
-        {
-            ValidateWorkingData(working);
-            if (!working.HasPreliminaryDensity)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Density is not ready.");
-            }
-
-            for (var sampleLocalZ = 0;
-                 sampleLocalZ < working.SampleSizeXZ;
-                 sampleLocalZ++)
-            for (var sampleLocalX = 0;
-                 sampleLocalX < working.SampleSizeXZ;
-                 sampleLocalX++)
-            {
-                working.SetPreliminarySurfaceUnits(
-                    sampleLocalX,
-                    sampleLocalZ,
-                    FindSurfaceUnits(
-                        working,
-                        sampleLocalX,
-                        sampleLocalZ,
-                        useFinalDensity: false));
-            }
-
-            working.CompletePreliminarySurface();
-        }
-
         public static void BuildFinalSurface(
             GenerationWorkingData working)
         {
             ValidateWorkingData(working);
-            if (!working.HasFinalDensity)
+            if (!working.HasWorldDensity)
             {
                 throw new InvalidOperationException(
-                    "Final Density is not ready.");
+                    "World Density is not ready.");
             }
 
             for (var sampleLocalZ = 0;
@@ -1365,8 +1334,7 @@ namespace MiniCivilization.World.Generation
                     FindSurfaceUnits(
                         working,
                         sampleLocalX,
-                        sampleLocalZ,
-                        useFinalDensity: true));
+                        sampleLocalZ));
             }
 
             working.CompleteFinalSurface();
@@ -1375,26 +1343,21 @@ namespace MiniCivilization.World.Generation
         private static float FindSurfaceUnits(
             GenerationWorkingData working,
             int sampleLocalX,
-            int sampleLocalZ,
-            bool useFinalDensity)
+            int sampleLocalZ)
         {
             var topUnit = working.Input.HeightUnitCount;
-            if (GetDensity(
-                    working,
+            if (working.GetWorldDensity(
                     sampleLocalX,
                     topUnit,
-                    sampleLocalZ,
-                    useFinalDensity) >= 0f)
+                    sampleLocalZ) >= 0f)
             {
                 return topUnit;
             }
 
-            if (GetDensity(
-                    working,
+            if (working.GetWorldDensity(
                     sampleLocalX,
                     0,
-                    sampleLocalZ,
-                    useFinalDensity) < 0f)
+                    sampleLocalZ) < 0f)
             {
                 return 0;
             }
@@ -1403,18 +1366,14 @@ namespace MiniCivilization.World.Generation
                  lowerUnit >= 0;
                  lowerUnit--)
             {
-                var lowerDensity = GetDensity(
-                    working,
+                var lowerDensity = working.GetWorldDensity(
                     sampleLocalX,
                     lowerUnit,
-                    sampleLocalZ,
-                    useFinalDensity);
-                var upperDensity = GetDensity(
-                    working,
+                    sampleLocalZ);
+                var upperDensity = working.GetWorldDensity(
                     sampleLocalX,
                     lowerUnit + 1,
-                    sampleLocalZ,
-                    useFinalDensity);
+                    sampleLocalZ);
                 if (lowerDensity < 0f || upperDensity >= 0f)
                 {
                     continue;
@@ -1436,22 +1395,6 @@ namespace MiniCivilization.World.Generation
                 "Terrain Density does not contain a solid-to-air surface.");
         }
 
-        private static float GetDensity(
-            GenerationWorkingData working,
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ,
-            bool useFinalDensity) =>
-            useFinalDensity
-                ? working.GetFinalDensity(
-                    sampleLocalX,
-                    heightUnit,
-                    sampleLocalZ)
-                : working.GetPreliminaryDensity(
-                    sampleLocalX,
-                    heightUnit,
-                    sampleLocalZ);
-
         private static void ValidateWorkingData(
             GenerationWorkingData working)
         {
@@ -1459,47 +1402,6 @@ namespace MiniCivilization.World.Generation
             {
                 throw new ArgumentNullException(nameof(working));
             }
-        }
-    }
-
-    internal static class TerrainDensityFinalizationStage
-    {
-        public static void Build(GenerationWorkingData working)
-        {
-            if (working == null)
-            {
-                throw new ArgumentNullException(nameof(working));
-            }
-
-            if (!working.HasPreliminarySurface)
-            {
-                throw new InvalidOperationException(
-                    "Preliminary Surface is not ready.");
-            }
-
-            for (var sampleLocalZ = 0;
-                 sampleLocalZ < working.SampleSizeXZ;
-                 sampleLocalZ++)
-            for (var sampleLocalX = 0;
-                 sampleLocalX < working.SampleSizeXZ;
-                 sampleLocalX++)
-            {
-                for (var heightUnit = 0;
-                     heightUnit < working.DensityHeightUnitCount;
-                     heightUnit++)
-                {
-                    working.SetFinalDensity(
-                        sampleLocalX,
-                        heightUnit,
-                        sampleLocalZ,
-                        working.GetPreliminaryDensity(
-                            sampleLocalX,
-                            heightUnit,
-                            sampleLocalZ));
-                }
-            }
-
-            working.CompleteFinalDensity();
         }
     }
 
@@ -1537,17 +1439,30 @@ namespace MiniCivilization.World.Generation
                         MidpointRounding.AwayFromZero),
                     0,
                     working.Input.HeightUnitCount);
+                var water = working.GetWorldShapeProfile(
+                    sampleLocalX,
+                    sampleLocalZ).Water;
+                var waterSurfaceUnits = water.HasWaterPattern
+                    && water.WaterTopUnits > solidHeightUnits
+                        ? Math.Clamp(
+                            water.WaterTopUnits,
+                            0,
+                            working.Input.HeightUnitCount)
+                        : 0;
+                var hasWater = waterSurfaceUnits > solidHeightUnits;
                 working.SetFinalColumn(
                     localX,
                     localZ,
                     new WorldColumnBuildData(
                         solidHeightUnits,
-                        0,
-                        WaterRole.None,
-                        WaterType.None,
-                        SurfaceType.None,
+                        waterSurfaceUnits,
+                        hasWater ? WaterRole.Source : WaterRole.None,
+                        hasWater ? water.WaterType : WaterType.None,
+                        hasWater ? SurfaceType.Seabed : SurfaceType.None,
                         solidHeightUnits > 0
-                            ? SurfaceType.Ground
+                            ? hasWater
+                                ? SurfaceType.Seabed
+                                : SurfaceType.Ground
                             : SurfaceType.None,
                         emptyBiome));
             }
@@ -1830,11 +1745,9 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(input));
             }
 
-            var working = TerrainFieldStage.Build(input);
-            TerrainPatternStage.Build(working);
-            PreliminaryTerrainDensityStage.Build(working);
-            DensitySurfaceStage.BuildPreliminarySurface(working);
-            TerrainDensityFinalizationStage.Build(working);
+            var working = WorldFieldStage.Build(input);
+            WorldPatternStage.Build(working);
+            WorldDensityStage.Build(working);
             DensitySurfaceStage.BuildFinalSurface(working);
             DensityToFilledStage.Build(working);
             return working.Complete();

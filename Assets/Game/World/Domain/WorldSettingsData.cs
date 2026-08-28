@@ -8,7 +8,7 @@ namespace MiniCivilization.World.Domain
         Infinite
     }
 
-    public enum TerrainNoiseMode : byte
+    public enum WorldNoiseMode : byte
     {
         Value,
         Signed,
@@ -16,16 +16,16 @@ namespace MiniCivilization.World.Domain
         SignedRidge
     }
 
-    public readonly struct TerrainNoiseFieldSettingsData
+    public readonly struct WorldNoiseFieldSettingsData
     {
-        public TerrainNoiseFieldSettingsData(
-            TerrainNoiseMode mode,
+        public WorldNoiseFieldSettingsData(
+            WorldNoiseMode mode,
             float scale,
             int layers,
             float frequencySpacing,
             float persistence)
         {
-            if (!Enum.IsDefined(typeof(TerrainNoiseMode), mode)
+            if (!Enum.IsDefined(typeof(WorldNoiseMode), mode)
                 || !float.IsFinite(scale)
                 || scale <= 0f
                 || layers <= 0
@@ -47,16 +47,16 @@ namespace MiniCivilization.World.Domain
             Persistence = persistence;
         }
 
-        public TerrainNoiseMode Mode { get; }
+        public WorldNoiseMode Mode { get; }
         public float Scale { get; }
         public int Layers { get; }
         public float FrequencySpacing { get; }
         public float Persistence { get; }
     }
 
-    public readonly struct TerrainCurveSettingsData
+    public readonly struct WorldCurveSettingsData
     {
-        public TerrainCurveSettingsData(
+        public WorldCurveSettingsData(
             float atZero,
             float atQuarter,
             float atHalf,
@@ -147,16 +147,18 @@ namespace MiniCivilization.World.Domain
             from + (to - from) * amount;
     }
 
-    public readonly struct TerrainNoiseRouterSettingsData
+    public readonly struct WorldNoiseRouterSettingsData
     {
-        public TerrainNoiseRouterSettingsData(
-            TerrainNoiseFieldSettingsData patternRegion,
-            TerrainNoiseFieldSettingsData continentalness,
-            TerrainNoiseFieldSettingsData erosion,
-            TerrainNoiseFieldSettingsData weirdness,
-            TerrainNoiseFieldSettingsData peaksValleys,
-            TerrainNoiseFieldSettingsData roughness,
-            TerrainNoiseFieldSettingsData detail)
+        public WorldNoiseRouterSettingsData(
+            WorldNoiseFieldSettingsData patternRegion,
+            WorldNoiseFieldSettingsData continentalness,
+            WorldNoiseFieldSettingsData erosion,
+            WorldNoiseFieldSettingsData weirdness,
+            WorldNoiseFieldSettingsData peaksValleys,
+            WorldNoiseFieldSettingsData roughness,
+            WorldNoiseFieldSettingsData detail,
+            WorldNoiseFieldSettingsData seaRegion,
+            WorldNoiseFieldSettingsData seaDetail)
         {
             PatternRegion = patternRegion;
             Continentalness = continentalness;
@@ -165,24 +167,28 @@ namespace MiniCivilization.World.Domain
             PeaksValleys = peaksValleys;
             Roughness = roughness;
             Detail = detail;
+            SeaRegion = seaRegion;
+            SeaDetail = seaDetail;
         }
 
-        public TerrainNoiseFieldSettingsData PatternRegion { get; }
-        public TerrainNoiseFieldSettingsData Continentalness { get; }
-        public TerrainNoiseFieldSettingsData Erosion { get; }
-        public TerrainNoiseFieldSettingsData Weirdness { get; }
-        public TerrainNoiseFieldSettingsData PeaksValleys { get; }
-        public TerrainNoiseFieldSettingsData Roughness { get; }
-        public TerrainNoiseFieldSettingsData Detail { get; }
+        public WorldNoiseFieldSettingsData PatternRegion { get; }
+        public WorldNoiseFieldSettingsData Continentalness { get; }
+        public WorldNoiseFieldSettingsData Erosion { get; }
+        public WorldNoiseFieldSettingsData Weirdness { get; }
+        public WorldNoiseFieldSettingsData PeaksValleys { get; }
+        public WorldNoiseFieldSettingsData Roughness { get; }
+        public WorldNoiseFieldSettingsData Detail { get; }
+        public WorldNoiseFieldSettingsData SeaRegion { get; }
+        public WorldNoiseFieldSettingsData SeaDetail { get; }
     }
 
     public readonly struct TerrainBaseDensitySettingsData
     {
         public TerrainBaseDensitySettingsData(
-            TerrainCurveSettingsData surfaceByContinentalness,
-            TerrainCurveSettingsData surfaceByErosion,
-            TerrainCurveSettingsData verticalFactorByErosion,
-            TerrainCurveSettingsData detailByRoughness)
+            WorldCurveSettingsData surfaceByContinentalness,
+            WorldCurveSettingsData surfaceByErosion,
+            WorldCurveSettingsData verticalFactorByErosion,
+            WorldCurveSettingsData detailByRoughness)
         {
             SurfaceByContinentalness = surfaceByContinentalness;
             SurfaceByErosion = surfaceByErosion;
@@ -190,36 +196,36 @@ namespace MiniCivilization.World.Domain
             DetailByRoughness = detailByRoughness;
         }
 
-        public TerrainCurveSettingsData SurfaceByContinentalness { get; }
-        public TerrainCurveSettingsData SurfaceByErosion { get; }
-        public TerrainCurveSettingsData VerticalFactorByErosion { get; }
-        public TerrainCurveSettingsData DetailByRoughness { get; }
+        public WorldCurveSettingsData SurfaceByContinentalness { get; }
+        public WorldCurveSettingsData SurfaceByErosion { get; }
+        public WorldCurveSettingsData VerticalFactorByErosion { get; }
+        public WorldCurveSettingsData DetailByRoughness { get; }
     }
 
     public readonly struct SmoothTerrainSettingsData
     {
         public SmoothTerrainSettingsData(
-            TerrainCurveSettingsData influenceByRegion,
-            TerrainCurveSettingsData undulationByWeirdness,
-            TerrainCurveSettingsData detailByRoughness)
+            WorldCurveSettingsData influenceByRegion,
+            WorldCurveSettingsData undulationByWeirdness,
+            WorldCurveSettingsData detailByRoughness)
         {
             InfluenceByRegion = influenceByRegion;
             UndulationByWeirdness = undulationByWeirdness;
             DetailByRoughness = detailByRoughness;
         }
 
-        public TerrainCurveSettingsData InfluenceByRegion { get; }
-        public TerrainCurveSettingsData UndulationByWeirdness { get; }
-        public TerrainCurveSettingsData DetailByRoughness { get; }
+        public WorldCurveSettingsData InfluenceByRegion { get; }
+        public WorldCurveSettingsData UndulationByWeirdness { get; }
+        public WorldCurveSettingsData DetailByRoughness { get; }
     }
 
     public readonly struct RuggedTerrainSettingsData
     {
         public RuggedTerrainSettingsData(
-            TerrainCurveSettingsData influenceByRegion,
-            TerrainCurveSettingsData reliefByPeaksValleys,
-            TerrainCurveSettingsData reliefScaleByRoughness,
-            TerrainCurveSettingsData detailByRoughness)
+            WorldCurveSettingsData influenceByRegion,
+            WorldCurveSettingsData reliefByPeaksValleys,
+            WorldCurveSettingsData reliefScaleByRoughness,
+            WorldCurveSettingsData detailByRoughness)
         {
             InfluenceByRegion = influenceByRegion;
             ReliefByPeaksValleys = reliefByPeaksValleys;
@@ -227,19 +233,19 @@ namespace MiniCivilization.World.Domain
             DetailByRoughness = detailByRoughness;
         }
 
-        public TerrainCurveSettingsData InfluenceByRegion { get; }
-        public TerrainCurveSettingsData ReliefByPeaksValleys { get; }
-        public TerrainCurveSettingsData ReliefScaleByRoughness { get; }
-        public TerrainCurveSettingsData DetailByRoughness { get; }
+        public WorldCurveSettingsData InfluenceByRegion { get; }
+        public WorldCurveSettingsData ReliefByPeaksValleys { get; }
+        public WorldCurveSettingsData ReliefScaleByRoughness { get; }
+        public WorldCurveSettingsData DetailByRoughness { get; }
     }
 
     public readonly struct MountainTerrainSettingsData
     {
         public MountainTerrainSettingsData(
-            TerrainCurveSettingsData influenceByRegion,
-            TerrainCurveSettingsData centerProximityByRegion,
-            TerrainCurveSettingsData heightByCenterProximity,
-            TerrainCurveSettingsData progressExponentByErosion)
+            WorldCurveSettingsData influenceByRegion,
+            WorldCurveSettingsData centerProximityByRegion,
+            WorldCurveSettingsData heightByCenterProximity,
+            WorldCurveSettingsData progressExponentByErosion)
         {
             InfluenceByRegion = influenceByRegion;
             CenterProximityByRegion = centerProximityByRegion;
@@ -247,43 +253,87 @@ namespace MiniCivilization.World.Domain
             ProgressExponentByErosion = progressExponentByErosion;
         }
 
-        public TerrainCurveSettingsData InfluenceByRegion { get; }
-        public TerrainCurveSettingsData CenterProximityByRegion { get; }
-        public TerrainCurveSettingsData HeightByCenterProximity { get; }
-        public TerrainCurveSettingsData ProgressExponentByErosion { get; }
+        public WorldCurveSettingsData InfluenceByRegion { get; }
+        public WorldCurveSettingsData CenterProximityByRegion { get; }
+        public WorldCurveSettingsData HeightByCenterProximity { get; }
+        public WorldCurveSettingsData ProgressExponentByErosion { get; }
     }
 
     public readonly struct CanyonTerrainSettingsData
     {
         public CanyonTerrainSettingsData(
-            TerrainCurveSettingsData influenceByRegion,
-            TerrainCurveSettingsData widthByVariation,
-            TerrainCurveSettingsData maximumDepthByVariation)
+            WorldCurveSettingsData influenceByRegion,
+            WorldCurveSettingsData widthByVariation,
+            WorldCurveSettingsData maximumDepthByVariation)
         {
             InfluenceByRegion = influenceByRegion;
             WidthByVariation = widthByVariation;
             MaximumDepthByVariation = maximumDepthByVariation;
         }
 
-        public TerrainCurveSettingsData InfluenceByRegion { get; }
-        public TerrainCurveSettingsData WidthByVariation { get; }
-        public TerrainCurveSettingsData MaximumDepthByVariation { get; }
+        public WorldCurveSettingsData InfluenceByRegion { get; }
+        public WorldCurveSettingsData WidthByVariation { get; }
+        public WorldCurveSettingsData MaximumDepthByVariation { get; }
     }
 
-    public readonly struct TerrainPatternSettingsData
+    public readonly struct SeaPatternSettingsData
     {
-        public TerrainPatternSettingsData(
+        public SeaPatternSettingsData(
+            WorldCurveSettingsData interiorByRegion,
+            WorldCurveSettingsData depthByInterior,
+            int maximumDepthCells,
+            int surfaceUnits,
+            float shapeDetailStrength)
+        {
+            if (maximumDepthCells <= 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumDepthCells));
+            }
+
+            if (surfaceUnits <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(surfaceUnits));
+            }
+
+            if (!float.IsFinite(shapeDetailStrength)
+                || shapeDetailStrength < 0f
+                || shapeDetailStrength > 0.5f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(shapeDetailStrength));
+            }
+
+            InteriorByRegion = interiorByRegion;
+            DepthByInterior = depthByInterior;
+            MaximumDepthCells = maximumDepthCells;
+            SurfaceUnits = surfaceUnits;
+            ShapeDetailStrength = shapeDetailStrength;
+        }
+
+        public WorldCurveSettingsData InteriorByRegion { get; }
+        public WorldCurveSettingsData DepthByInterior { get; }
+        public int MaximumDepthCells { get; }
+        public int SurfaceUnits { get; }
+        public float ShapeDetailStrength { get; }
+    }
+
+    public readonly struct WorldPatternSettingsData
+    {
+        public WorldPatternSettingsData(
             TerrainBaseDensitySettingsData baseDensity,
             SmoothTerrainSettingsData smooth,
             RuggedTerrainSettingsData rugged,
             MountainTerrainSettingsData mountain,
-            CanyonTerrainSettingsData canyon)
+            CanyonTerrainSettingsData canyon,
+            SeaPatternSettingsData sea)
         {
             BaseDensity = baseDensity;
             Smooth = smooth;
             Rugged = rugged;
             Mountain = mountain;
             Canyon = canyon;
+            Sea = sea;
         }
 
         public TerrainBaseDensitySettingsData BaseDensity { get; }
@@ -291,6 +341,7 @@ namespace MiniCivilization.World.Domain
         public RuggedTerrainSettingsData Rugged { get; }
         public MountainTerrainSettingsData Mountain { get; }
         public CanyonTerrainSettingsData Canyon { get; }
+        public SeaPatternSettingsData Sea { get; }
     }
 
     public sealed class WorldSettingsData
@@ -305,17 +356,10 @@ namespace MiniCivilization.World.Domain
             int chunkSectionCountY,
             int renderChunksPerPatch,
             int roadMaxHeightSteps,
-            TerrainNoiseRouterSettingsData terrainNoiseRouter,
-            TerrainPatternSettingsData terrainPatterns,
+            WorldNoiseRouterSettingsData worldNoiseRouter,
+            WorldPatternSettingsData worldPatterns,
             float temperatureScale,
             int terrainBaseHeightUnits,
-            int defaultSeaSurfaceUnits,
-            int maximumSeaDepthUnits,
-            float landThreshold,
-            float deepSeaThreshold,
-            float seaDepthSteepness,
-            float seaDepthNoiseScale,
-            float seaDepthNoiseStrength,
             float riverScale,
             float riverDensity,
             int riverDepthCells,
@@ -371,17 +415,10 @@ namespace MiniCivilization.World.Domain
             ChunkSectionCountY = chunkSectionCountY;
             RenderChunksPerPatch = renderChunksPerPatch;
             RoadMaxHeightSteps = roadMaxHeightSteps;
-            TerrainNoiseRouter = terrainNoiseRouter;
-            TerrainPatterns = terrainPatterns;
+            WorldNoiseRouter = worldNoiseRouter;
+            WorldPatterns = worldPatterns;
             TemperatureScale = temperatureScale;
             TerrainBaseHeightUnits = terrainBaseHeightUnits;
-            DefaultSeaSurfaceUnits = defaultSeaSurfaceUnits;
-            MaximumSeaDepthUnits = maximumSeaDepthUnits;
-            LandThreshold = landThreshold;
-            DeepSeaThreshold = deepSeaThreshold;
-            SeaDepthSteepness = seaDepthSteepness;
-            SeaDepthNoiseScale = seaDepthNoiseScale;
-            SeaDepthNoiseStrength = seaDepthNoiseStrength;
             RiverScale = riverScale;
             RiverDensity = riverDensity;
             RiverDepthCells = riverDepthCells;
@@ -415,54 +452,12 @@ namespace MiniCivilization.World.Domain
                     "Temperature Field scale must be finite and positive.");
             }
 
-            if (DefaultSeaSurfaceUnits <= 0
-                || DefaultSeaSurfaceUnits
+            if (WorldPatterns.Sea.SurfaceUnits
                 >= WorldHeight * WorldGrid.HeightStepsPerCell)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(defaultSeaSurfaceUnits),
-                    "The default Sea surface must be inside the vertical world range.");
-            }
-
-            if (MaximumSeaDepthUnits <= 0
-                || MaximumSeaDepthUnits >= DefaultSeaSurfaceUnits)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(maximumSeaDepthUnits),
-                    "Maximum Sea depth must be positive and fit below the default Sea surface.");
-            }
-
-            if (!float.IsFinite(DeepSeaThreshold)
-                || DeepSeaThreshold < 0f
-                || DeepSeaThreshold >= LandThreshold)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(deepSeaThreshold),
-                    "Deep sea threshold must be non-negative and lower than the land threshold.");
-            }
-
-            if (!float.IsFinite(SeaDepthSteepness)
-                || SeaDepthSteepness < 1f)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(seaDepthSteepness),
-                    "Sea depth steepness must be finite and at least one.");
-            }
-
-            if (!float.IsFinite(SeaDepthNoiseScale)
-                || SeaDepthNoiseScale <= 0f)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(seaDepthNoiseScale),
-                    "Sea depth Noise scale must be finite and positive.");
-            }
-
-            if (!float.IsFinite(SeaDepthNoiseStrength)
-                || SeaDepthNoiseStrength < 0f)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(seaDepthNoiseStrength),
-                    "Sea depth Noise strength must be finite and non-negative.");
+                    nameof(worldPatterns),
+                    "The Sea surface must be inside the vertical world range.");
             }
         }
 
@@ -486,17 +481,10 @@ namespace MiniCivilization.World.Domain
         public int WorldHeight => checked(ChunkSectionCellCountY * ChunkSectionCountY);
         public int RenderPatchSizeXZ => checked(ChunkCellCountXZ * RenderChunksPerPatch);
 
-        public TerrainNoiseRouterSettingsData TerrainNoiseRouter { get; }
-        public TerrainPatternSettingsData TerrainPatterns { get; }
+        public WorldNoiseRouterSettingsData WorldNoiseRouter { get; }
+        public WorldPatternSettingsData WorldPatterns { get; }
         public float TemperatureScale { get; }
         public int TerrainBaseHeightUnits { get; }
-        public int DefaultSeaSurfaceUnits { get; }
-        public int MaximumSeaDepthUnits { get; }
-        public float LandThreshold { get; }
-        public float DeepSeaThreshold { get; }
-        public float SeaDepthSteepness { get; }
-        public float SeaDepthNoiseScale { get; }
-        public float SeaDepthNoiseStrength { get; }
         public float RiverScale { get; }
         public float RiverDensity { get; }
         public int RiverDepthCells { get; }

@@ -17,21 +17,42 @@ namespace MiniCivilization.World.Editor
             Smooth,
             Rugged,
             Mountain,
-            Canyon
+            Canyon,
+            SeaArea,
+            SeaDepth,
+            SeaWater
+        }
+
+        private readonly struct PatternDebugSample
+        {
+            public PatternDebugSample(
+                in LandformPatternWeights landform,
+                in WaterPatternContribution water,
+                float finalSurfaceUnits)
+            {
+                Landform = landform;
+                Water = water;
+                FinalSurfaceUnits = finalSurfaceUnits;
+            }
+
+            public LandformPatternWeights Landform { get; }
+            public WaterPatternContribution Water { get; }
+            public float FinalSurfaceUnits { get; }
         }
 
         private static readonly Color SmoothColor = new(0.25f, 0.8f, 0.3f);
         private static readonly Color RuggedColor = new(0.9f, 0.5f, 0.15f);
         private static readonly Color MountainColor = new(0.9f, 0.9f, 0.9f);
         private static readonly Color CanyonColor = new(0.65f, 0.15f, 0.75f);
+        private static readonly Color SeaColor = new(0.1f, 0.45f, 0.9f);
 
         private Vector2Int previewCenter;
         private int previewAreaCells = 512;
         private int previewResolution = 128;
         private PatternView patternView;
-        private TerrainPatternWeights[] samples;
+        private PatternDebugSample[] samples;
         private Vector2Int[] sampleCells;
-        private TerrainPatternWeights[] detailSamples;
+        private PatternDebugSample[] detailSamples;
         private Texture2D previewTexture;
         private Texture2D detailTexture;
         private string statistics;
@@ -48,8 +69,7 @@ namespace MiniCivilization.World.Editor
             SceneView.duringSceneGui += DrawWorldOverlay;
         }
 
-        public override bool RequiresConstantRepaint() =>
-            Application.isPlaying;
+        public override bool RequiresConstantRepaint() => false;
 
         public override void OnInspectorGUI()
         {
@@ -141,7 +161,7 @@ namespace MiniCivilization.World.Editor
             if (previewTexture != null)
             {
                 EditorGUILayout.HelpBox(
-                    "전체 분포 탐색용입니다. 초록: 완만 / 주황: 거친 / 흰색: 산맥 / 자주: 협곡",
+                    "전체 분포 탐색용입니다. 초록: 완만 / 주황: 거친 / 흰색: 산맥 / 자주: 협곡 / 파랑: 바다",
                     MessageType.None);
                 var width = Mathf.Clamp(
                     EditorGUIUtility.currentViewWidth - 40f,
@@ -220,9 +240,9 @@ namespace MiniCivilization.World.Editor
         private void BuildPreview(WorldGenerationController controller)
         {
             var settings = ResolveSettings(controller);
-            var router = new TerrainNoiseRouter(settings);
+            var router = new WorldNoiseRouter(settings);
             var resolution = previewResolution;
-            samples = new TerrainPatternWeights[resolution * resolution];
+            samples = new PatternDebugSample[resolution * resolution];
             sampleCells = new Vector2Int[resolution * resolution];
             var dominantCounts = new int[4];
             var strongCounts = new int[4];
@@ -242,15 +262,19 @@ namespace MiniCivilization.World.Editor
                 var worldZ = checked((int)Math.Floor(
                     previewCenter.y - halfArea
                     + (z + 0.5) * unitsPerPixel));
-                TerrainPatternResolver.Resolve(
+                var profile = WorldPatternResolver.Resolve(
                     router,
                     worldX,
                     worldZ,
                     router.Sample(worldX, worldZ),
-                    settings.TerrainPatterns,
+                    settings,
                     out var weights);
                 var sampleIndex = x + resolution * z;
-                samples[sampleIndex] = weights;
+                samples[sampleIndex] = new PatternDebugSample(
+                    weights,
+                    profile.Water,
+                    settings.TerrainBaseHeightUnits
+                        + profile.SurfaceOffsetUnits);
                 sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
                 var dominant = 0;
                 for (var index = 0; index < 4; index++)
@@ -368,14 +392,14 @@ namespace MiniCivilization.World.Editor
 
             var cell = selectedCell.Value;
             var settings = ResolveSettings(controller);
-            var router = new TerrainNoiseRouter(settings);
+            var router = new WorldNoiseRouter(settings);
             var field = router.Sample(cell.x, cell.y);
-            var profile = TerrainPatternResolver.Resolve(
+            var profile = WorldPatternResolver.Resolve(
                 router,
                 cell.x,
                 cell.y,
                 field,
-                settings.TerrainPatterns,
+                settings,
                 out var weights);
             var hasActualSurface = TryGetActualSurface(
                 cell.x,
@@ -387,7 +411,7 @@ namespace MiniCivilization.World.Editor
             var contributionText = "현재 미로드";
             if (hasActualSurface)
             {
-                new PreliminaryTerrainDensityField(settings).Sample(
+                new WorldDensityField(settings).Sample(
                     cell.x,
                     heightUnits,
                     cell.y,
@@ -417,6 +441,12 @@ namespace MiniCivilization.World.Editor
                 + $"Density Profile: 표면 {profile.SurfaceOffsetUnits:+0.00;-0.00;0.00} / "
                 + $"수직 {profile.VerticalFactor:0.00} / "
                 + $"세부 굴곡 {profile.DetailUnits:0.00}\n"
+                + $"바다: 중심 접근도 {profile.Water.InteriorProximity:0.000} / "
+                + $"S자 수심 {profile.Water.DepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
+                + $"해저 굴곡 {profile.Water.SeabedDetailUnits / WorldGrid.HeightStepsPerCell:+0.00;-0.00;0.00} Cell\n"
+                + $"목표 해저 {profile.Water.TargetBedSurfaceUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
+                + $"수면 {profile.Water.WaterTopUnits / (float)WorldGrid.HeightStepsPerCell:0.00} Cell / "
+                + $"합성 표면 {(settings.TerrainBaseHeightUnits + profile.SurfaceOffsetUnits) / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
                 + $"실제 지형 표면: {actualHeight}\n"
                 + $"해당 표면 Density 기여: {contributionText}";
         }
@@ -465,9 +495,14 @@ namespace MiniCivilization.World.Editor
 
             var runtime = worldManager.CurrentWorldRuntime;
             var world = runtime.Data;
-            var settings = world.Settings;
-            var router = new TerrainNoiseRouter(settings);
             var center = selectedCell.Value;
+            var resolution = worldOverlayRadius * 2 + 1;
+            if (detailSamples == null
+                || detailSamples.Length != resolution * resolution)
+            {
+                return;
+            }
+
             var cellSize = world.CellSize;
             var verticalOffset = world.HeightStep * 0.04f;
             var corners = new Vector3[4];
@@ -490,14 +525,11 @@ namespace MiniCivilization.World.Editor
                     continue;
                 }
 
-                TerrainPatternResolver.Resolve(
-                    router,
-                    x,
-                    z,
-                    router.Sample(x, z),
-                    settings.TerrainPatterns,
-                    out var weights);
-                var color = GetColor(weights, patternView);
+                var sampleX = x - (center.x - worldOverlayRadius);
+                var sampleZ = z - (center.y - worldOverlayRadius);
+                var color = GetColor(
+                    detailSamples[sampleX + resolution * sampleZ],
+                    patternView);
                 color.a = 0.3f;
                 var y = surface.GroundHeight * world.HeightStep
                     + verticalOffset;
@@ -671,24 +703,28 @@ namespace MiniCivilization.World.Editor
             }
 
             var settings = ResolveSettings(controller);
-            var router = new TerrainNoiseRouter(settings);
+            var router = new WorldNoiseRouter(settings);
             var resolution = worldOverlayRadius * 2 + 1;
-            detailSamples = new TerrainPatternWeights[
+            detailSamples = new PatternDebugSample[
                 resolution * resolution];
             var center = selectedCell.Value;
             for (var z = 0; z < resolution; z++)
             for (var x = 0; x < resolution; x++)
             {
-                TerrainPatternResolver.Resolve(
+                var profile = WorldPatternResolver.Resolve(
                     router,
                     center.x - worldOverlayRadius + x,
                     center.y - worldOverlayRadius + z,
                     router.Sample(
                         center.x - worldOverlayRadius + x,
                         center.y - worldOverlayRadius + z),
-                    settings.TerrainPatterns,
+                    settings,
                     out var weights);
-                detailSamples[x + resolution * z] = weights;
+                detailSamples[x + resolution * z] = new PatternDebugSample(
+                    weights,
+                    profile.Water,
+                    settings.TerrainBaseHeightUnits
+                        + profile.SurfaceOffsetUnits);
             }
 
             RenderDetailPreview();
@@ -730,27 +766,59 @@ namespace MiniCivilization.World.Editor
         }
 
         private static Color GetColor(
-            in TerrainPatternWeights sample,
+            in PatternDebugSample sample,
             PatternView view)
         {
-            if (view == PatternView.Blend)
+            if (view == PatternView.SeaArea)
             {
-                return SmoothColor * sample.Smooth
-                    + RuggedColor * sample.Rugged
-                    + MountainColor * sample.Mountain
-                    + CanyonColor * sample.Canyon;
+                return Color.Lerp(
+                    Color.black,
+                    SeaColor,
+                    sample.Water.InteriorProximity);
             }
 
-            if (view != PatternView.Dominant)
+            if (view == PatternView.SeaDepth)
             {
-                var weight = GetWeight(sample, (int)view - 2);
+                return Color.Lerp(
+                    Color.black,
+                    SeaColor,
+                    sample.Water.DepthProgress);
+            }
+
+            if (view == PatternView.SeaWater)
+            {
+                var waterDepthUnits = Math.Max(
+                    0f,
+                    sample.Water.WaterTopUnits
+                        - sample.FinalSurfaceUnits);
+                var ratio = sample.Water.DepthUnits > 0f
+                    ? Math.Clamp(
+                        waterDepthUnits / sample.Water.DepthUnits,
+                        0f,
+                        1f)
+                    : 0f;
+                return Color.Lerp(Color.black, SeaColor, ratio);
+            }
+
+            var landform = sample.Landform;
+            if (view == PatternView.Blend)
+            {
+                return SmoothColor * landform.Smooth
+                    + RuggedColor * landform.Rugged
+                    + MountainColor * landform.Mountain
+                    + CanyonColor * landform.Canyon;
+            }
+
+            if (view >= PatternView.Smooth && view <= PatternView.Canyon)
+            {
+                var weight = GetWeight(landform, (int)view - 2);
                 return new Color(weight, weight, weight, 1f);
             }
 
             var dominant = 0;
             for (var index = 1; index < 4; index++)
             {
-                if (GetWeight(sample, index) > GetWeight(sample, dominant))
+                if (GetWeight(landform, index) > GetWeight(landform, dominant))
                 {
                     dominant = index;
                 }
@@ -766,11 +834,11 @@ namespace MiniCivilization.World.Editor
             return Color.Lerp(
                 Color.black,
                 color,
-                GetWeight(sample, dominant));
+                GetWeight(landform, dominant));
         }
 
         private static float GetWeight(
-            in TerrainPatternWeights sample,
+            in LandformPatternWeights sample,
             int index) => index switch
             {
                 0 => sample.Smooth,
