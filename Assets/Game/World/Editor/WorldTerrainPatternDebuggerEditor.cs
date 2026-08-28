@@ -18,6 +18,7 @@ namespace MiniCivilization.World.Editor
             Rugged,
             Mountain,
             Canyon,
+            Sea,
             SeaArea,
             SeaDepth,
             SeaWater
@@ -26,17 +27,17 @@ namespace MiniCivilization.World.Editor
         private readonly struct PatternDebugSample
         {
             public PatternDebugSample(
-                in LandformPatternWeights landform,
-                in WaterPatternContribution water,
+                in WorldPatternWeights weights,
+                in WorldPatternResult result,
                 float finalSurfaceUnits)
             {
-                Landform = landform;
-                Water = water;
+                Weights = weights;
+                Result = result;
                 FinalSurfaceUnits = finalSurfaceUnits;
             }
 
-            public LandformPatternWeights Landform { get; }
-            public WaterPatternContribution Water { get; }
+            public WorldPatternWeights Weights { get; }
+            public WorldPatternResult Result { get; }
             public float FinalSurfaceUnits { get; }
         }
 
@@ -244,10 +245,10 @@ namespace MiniCivilization.World.Editor
             var resolution = previewResolution;
             samples = new PatternDebugSample[resolution * resolution];
             sampleCells = new Vector2Int[resolution * resolution];
-            var dominantCounts = new int[4];
-            var strongCounts = new int[4];
-            var maximumWeights = new float[4];
-            var weightSums = new float[4];
+            var dominantCounts = new int[5];
+            var strongCounts = new int[5];
+            var maximumWeights = new float[5];
+            var weightSums = new float[5];
             var halfArea = previewAreaCells * 0.5;
             var unitsPerPixel = previewAreaCells / (double)resolution;
             selectedCell = null;
@@ -272,12 +273,11 @@ namespace MiniCivilization.World.Editor
                 var sampleIndex = x + resolution * z;
                 samples[sampleIndex] = new PatternDebugSample(
                     weights,
-                    profile.Water,
+                    profile,
                     settings.TerrainBaseHeightUnits
                         + profile.SurfaceOffsetUnits);
                 sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
-                var dominant = 0;
-                for (var index = 0; index < 4; index++)
+                for (var index = 0; index < 5; index++)
                 {
                     var weight = GetWeight(weights, index);
                     weightSums[index] += weight;
@@ -289,13 +289,9 @@ namespace MiniCivilization.World.Editor
                         strongCounts[index]++;
                     }
 
-                    if (weight > GetWeight(weights, dominant))
-                    {
-                        dominant = index;
-                    }
                 }
 
-                dominantCounts[dominant]++;
+                dominantCounts[(int)profile.DominantPattern]++;
             }
 
             var count = samples.Length;
@@ -303,19 +299,23 @@ namespace MiniCivilization.World.Editor
                 $"우세 영역: 완만 {Percent(dominantCounts[0], count)} / "
                 + $"거친 {Percent(dominantCounts[1], count)} / "
                 + $"산맥 {Percent(dominantCounts[2], count)} / "
-                + $"협곡 {Percent(dominantCounts[3], count)}\n"
+                + $"협곡 {Percent(dominantCounts[3], count)} / "
+                + $"바다 {Percent(dominantCounts[4], count)}\n"
                 + $"강한 가중치(0.35 이상): 완만 {Percent(strongCounts[0], count)} / "
                 + $"거친 {Percent(strongCounts[1], count)} / "
                 + $"산맥 {Percent(strongCounts[2], count)} / "
-                + $"협곡 {Percent(strongCounts[3], count)}\n"
+                + $"협곡 {Percent(strongCounts[3], count)} / "
+                + $"바다 {Percent(strongCounts[4], count)}\n"
                 + $"평균 가중치: 완만 {weightSums[0] / count:0.000} / "
                 + $"거친 {weightSums[1] / count:0.000} / "
                 + $"산맥 {weightSums[2] / count:0.000} / "
-                + $"협곡 {weightSums[3] / count:0.000}\n"
+                + $"협곡 {weightSums[3] / count:0.000} / "
+                + $"바다 {weightSums[4] / count:0.000}\n"
                 + $"최대 가중치: 완만 {maximumWeights[0]:0.000} / "
                 + $"거친 {maximumWeights[1]:0.000} / "
                 + $"산맥 {maximumWeights[2]:0.000} / "
-                + $"협곡 {maximumWeights[3]:0.000}";
+                + $"협곡 {maximumWeights[3]:0.000} / "
+                + $"바다 {maximumWeights[4]:0.000}";
             RenderPreview();
         }
 
@@ -430,9 +430,11 @@ namespace MiniCivilization.World.Editor
                 + $"가중치: 완만 {weights.Smooth:0.000} / "
                 + $"거친 {weights.Rugged:0.000} / "
                 + $"산맥 {weights.Mountain:0.000} / "
-                + $"협곡 {weights.Canyon:0.000}\n"
-                + $"공통 Field: 패턴 영역 {field.PatternRegion:0.000} / "
-                + $"대륙 {field.Continentalness:0.000} / "
+                + $"협곡 {weights.Canyon:0.000} / "
+                + $"바다 {weights.Sea:0.000}\n"
+                + $"패턴: {profile.DominantPattern} / Region {profile.RegionKey} / "
+                + $"내부 진행 {profile.InteriorProgress:0.000}\n"
+                + $"공통 Field: 대륙 {field.Continentalness:0.000} / "
                 + $"침식 {field.Erosion:0.000} / "
                 + $"변형 {field.Weirdness:0.000}\n"
                 + $"봉우리·계곡 {field.PeaksValleys:0.000} / "
@@ -441,11 +443,10 @@ namespace MiniCivilization.World.Editor
                 + $"Density Profile: 표면 {profile.SurfaceOffsetUnits:+0.00;-0.00;0.00} / "
                 + $"수직 {profile.VerticalFactor:0.00} / "
                 + $"세부 굴곡 {profile.DetailUnits:0.00}\n"
-                + $"바다: 중심 접근도 {profile.Water.InteriorProximity:0.000} / "
-                + $"S자 수심 {profile.Water.DepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
-                + $"해저 굴곡 {profile.Water.SeabedDetailUnits / WorldGrid.HeightStepsPerCell:+0.00;-0.00;0.00} Cell\n"
-                + $"목표 해저 {profile.Water.TargetBedSurfaceUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
-                + $"수면 {profile.Water.WaterTopUnits / (float)WorldGrid.HeightStepsPerCell:0.00} Cell / "
+                + $"패턴 깊이 {profile.PatternDepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
+                + $"깊이 진행 {profile.PatternDepthProgress:0.000} / "
+                + $"패턴 세부 {profile.PatternDetailUnits / WorldGrid.HeightStepsPerCell:+0.00;-0.00;0.00} Cell\n"
+                + $"수면 {profile.WaterTopUnits / (float)WorldGrid.HeightStepsPerCell:0.00} Cell / "
                 + $"합성 표면 {(settings.TerrainBaseHeightUnits + profile.SurfaceOffsetUnits) / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
                 + $"실제 지형 표면: {actualHeight}\n"
                 + $"해당 표면 Density 기여: {contributionText}";
@@ -722,7 +723,7 @@ namespace MiniCivilization.World.Editor
                     out var weights);
                 detailSamples[x + resolution * z] = new PatternDebugSample(
                     weights,
-                    profile.Water,
+                    profile,
                     settings.TerrainBaseHeightUnits
                         + profile.SurfaceOffsetUnits);
             }
@@ -774,7 +775,9 @@ namespace MiniCivilization.World.Editor
                 return Color.Lerp(
                     Color.black,
                     SeaColor,
-                    sample.Water.InteriorProximity);
+                    sample.Result.DominantPattern == WorldPatternType.Sea
+                        ? sample.Result.InteriorProgress
+                        : 0f);
             }
 
             if (view == PatternView.SeaDepth)
@@ -782,69 +785,67 @@ namespace MiniCivilization.World.Editor
                 return Color.Lerp(
                     Color.black,
                     SeaColor,
-                    sample.Water.DepthProgress);
+                    sample.Result.DominantPattern == WorldPatternType.Sea
+                        ? sample.Result.PatternDepthProgress
+                        : 0f);
             }
 
             if (view == PatternView.SeaWater)
             {
                 var waterDepthUnits = Math.Max(
                     0f,
-                    sample.Water.WaterTopUnits
+                    sample.Result.WaterTopUnits
                         - sample.FinalSurfaceUnits);
-                var ratio = sample.Water.DepthUnits > 0f
+                var ratio = sample.Result.PatternDepthUnits > 0f
                     ? Math.Clamp(
-                        waterDepthUnits / sample.Water.DepthUnits,
+                        waterDepthUnits / sample.Result.PatternDepthUnits,
                         0f,
                         1f)
                     : 0f;
                 return Color.Lerp(Color.black, SeaColor, ratio);
             }
 
-            var landform = sample.Landform;
+            var weights = sample.Weights;
             if (view == PatternView.Blend)
             {
-                return SmoothColor * landform.Smooth
-                    + RuggedColor * landform.Rugged
-                    + MountainColor * landform.Mountain
-                    + CanyonColor * landform.Canyon;
+                return SmoothColor * weights.Smooth
+                    + RuggedColor * weights.Rugged
+                    + MountainColor * weights.Mountain
+                    + CanyonColor * weights.Canyon
+                    + SeaColor * weights.Sea;
             }
 
-            if (view >= PatternView.Smooth && view <= PatternView.Canyon)
+            if (view >= PatternView.Smooth && view <= PatternView.Sea)
             {
-                var weight = GetWeight(landform, (int)view - 2);
+                var weight = GetWeight(weights, (int)view - 2);
                 return new Color(weight, weight, weight, 1f);
             }
 
-            var dominant = 0;
-            for (var index = 1; index < 4; index++)
+            var dominant = (int)sample.Result.DominantPattern;
+            var color = sample.Result.DominantPattern switch
             {
-                if (GetWeight(landform, index) > GetWeight(landform, dominant))
-                {
-                    dominant = index;
-                }
-            }
-
-            var color = dominant switch
-            {
-                0 => SmoothColor,
-                1 => RuggedColor,
-                2 => MountainColor,
-                _ => CanyonColor
+                WorldPatternType.Smooth => SmoothColor,
+                WorldPatternType.Rugged => RuggedColor,
+                WorldPatternType.Mountain => MountainColor,
+                WorldPatternType.Canyon => CanyonColor,
+                WorldPatternType.Sea => SeaColor,
+                _ => Color.magenta
             };
             return Color.Lerp(
                 Color.black,
                 color,
-                GetWeight(landform, dominant));
+                GetWeight(weights, dominant));
         }
 
         private static float GetWeight(
-            in LandformPatternWeights sample,
+            in WorldPatternWeights sample,
             int index) => index switch
             {
                 0 => sample.Smooth,
                 1 => sample.Rugged,
                 2 => sample.Mountain,
                 3 => sample.Canyon,
+                4 => sample.Sea,
                 _ => throw new ArgumentOutOfRangeException(nameof(index))
             };
 

@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D;
         private const uint WaterFlowScheduleMarker = 0x31534657;
         private const uint EntitiesMarker = 0x31544E45;
-        private const ushort CurrentVersion = 21;
+        private const ushort CurrentVersion = 24;
         private const int CellByteSize = 18;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -687,29 +687,65 @@ namespace MiniCivilization.World.Persistence
             reader.ReadSingle(),
             reader.ReadSingle());
 
+        private static void WritePatternRegion(
+            BinaryWriter writer,
+            in WorldPatternRegionSettingsData region)
+        {
+            writer.Write(region.SizeCells);
+            writer.Write(region.CenterJitter);
+            writer.Write(region.WarpScale);
+            writer.Write(region.WarpStrengthCells);
+            writer.Write(region.BoundaryBlendCells);
+            writer.Write(region.SmoothShare);
+            writer.Write(region.RuggedShare);
+            writer.Write(region.MountainShare);
+            writer.Write(region.CanyonShare);
+            writer.Write(region.SeaShare);
+        }
+
+        private static WorldPatternRegionSettingsData ReadPatternRegion(
+            BinaryReader reader) => new(
+            reader.ReadInt32(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle(),
+            reader.ReadSingle());
+
         private static void WriteWorldPatterns(
             BinaryWriter writer,
             in WorldPatternSettingsData patterns)
         {
+            WritePatternRegion(writer, patterns.Region);
             WriteCurve(writer, patterns.BaseDensity.SurfaceByContinentalness);
             WriteCurve(writer, patterns.BaseDensity.SurfaceByErosion);
             WriteCurve(writer, patterns.BaseDensity.VerticalFactorByErosion);
             WriteCurve(writer, patterns.BaseDensity.DetailByRoughness);
-            WriteCurve(writer, patterns.Smooth.InfluenceByRegion);
             WriteCurve(writer, patterns.Smooth.UndulationByWeirdness);
             WriteCurve(writer, patterns.Smooth.DetailByRoughness);
-            WriteCurve(writer, patterns.Rugged.InfluenceByRegion);
             WriteCurve(writer, patterns.Rugged.ReliefByPeaksValleys);
             WriteCurve(writer, patterns.Rugged.ReliefScaleByRoughness);
             WriteCurve(writer, patterns.Rugged.DetailByRoughness);
-            WriteCurve(writer, patterns.Mountain.InfluenceByRegion);
-            WriteCurve(writer, patterns.Mountain.CenterProximityByRegion);
-            WriteCurve(writer, patterns.Mountain.HeightByCenterProximity);
-            WriteCurve(writer, patterns.Mountain.ProgressExponentByErosion);
-            WriteCurve(writer, patterns.Canyon.InfluenceByRegion);
-            WriteCurve(writer, patterns.Canyon.WidthByVariation);
-            WriteCurve(writer, patterns.Canyon.MaximumDepthByVariation);
-            WriteCurve(writer, patterns.Sea.InteriorByRegion);
+            writer.Write(patterns.Mountain.MinimumHeightUnits);
+            writer.Write(patterns.Mountain.MaximumHeightUnits);
+            writer.Write(patterns.Mountain.HeightBias);
+            writer.Write(patterns.Mountain.SlopeVariation);
+            writer.Write(patterns.Mountain.RidgeStrengthUnits);
+            writer.Write(patterns.Canyon.MinimumWidthCells);
+            writer.Write(patterns.Canyon.MaximumWidthCells);
+            writer.Write(patterns.Canyon.MinimumDepthUnits);
+            writer.Write(patterns.Canyon.MaximumDepthUnits);
+            writer.Write(patterns.Canyon.MinimumRegionDepthRatio);
+            writer.Write(patterns.Canyon.MaximumRegionDepthRatio);
+            writer.Write(patterns.Canyon.MinimumValleyCount);
+            writer.Write(patterns.Canyon.MaximumValleyCount);
+            writer.Write(patterns.Canyon.MaximumValleyOffsetRatio);
+            writer.Write(patterns.Canyon.AxisWarpCells);
+            writer.Write(patterns.Canyon.DetailStrength);
             WriteCurve(writer, patterns.Sea.DepthByInterior);
             writer.Write(patterns.Sea.MaximumDepthCells);
             writer.Write(patterns.Sea.SurfaceUnits);
@@ -718,6 +754,7 @@ namespace MiniCivilization.World.Persistence
 
         private static WorldPatternSettingsData ReadWorldPatterns(
             BinaryReader reader) => new(
+            ReadPatternRegion(reader),
             new TerrainBaseDensitySettingsData(
                 ReadCurve(reader),
                 ReadCurve(reader),
@@ -725,24 +762,30 @@ namespace MiniCivilization.World.Persistence
                 ReadCurve(reader)),
             new SmoothTerrainSettingsData(
                 ReadCurve(reader),
-                ReadCurve(reader),
                 ReadCurve(reader)),
             new RuggedTerrainSettingsData(
                 ReadCurve(reader),
                 ReadCurve(reader),
-                ReadCurve(reader),
                 ReadCurve(reader)),
             new MountainTerrainSettingsData(
-                ReadCurve(reader),
-                ReadCurve(reader),
-                ReadCurve(reader),
-                ReadCurve(reader)),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle()),
             new CanyonTerrainSettingsData(
-                ReadCurve(reader),
-                ReadCurve(reader),
-                ReadCurve(reader)),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
+                reader.ReadSingle(),
+                reader.ReadSingle(),
+                reader.ReadSingle()),
             new SeaPatternSettingsData(
-                ReadCurve(reader),
                 ReadCurve(reader),
                 reader.ReadInt32(),
                 reader.ReadInt32(),
@@ -762,14 +805,12 @@ namespace MiniCivilization.World.Persistence
             writer.Write(settings.RenderChunksPerPatch);
             writer.Write(settings.RoadMaxHeightSteps);
             var router = settings.WorldNoiseRouter;
-            WriteNoiseField(writer, router.PatternRegion);
             WriteNoiseField(writer, router.Continentalness);
             WriteNoiseField(writer, router.Erosion);
             WriteNoiseField(writer, router.Weirdness);
             WriteNoiseField(writer, router.PeaksValleys);
             WriteNoiseField(writer, router.Roughness);
             WriteNoiseField(writer, router.Detail);
-            WriteNoiseField(writer, router.SeaRegion);
             WriteNoiseField(writer, router.SeaDetail);
             WriteWorldPatterns(writer, settings.WorldPatterns);
             writer.Write(settings.TemperatureScale);
@@ -824,8 +865,6 @@ namespace MiniCivilization.World.Persistence
                 renderChunksPerPatch: renderChunksPerPatch,
                 roadMaxHeightSteps: reader.ReadInt32(),
                 worldNoiseRouter: new WorldNoiseRouterSettingsData(
-                    ReadNoiseField(reader),
-                    ReadNoiseField(reader),
                     ReadNoiseField(reader),
                     ReadNoiseField(reader),
                     ReadNoiseField(reader),
