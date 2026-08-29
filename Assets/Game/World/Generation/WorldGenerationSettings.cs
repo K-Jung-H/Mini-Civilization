@@ -75,6 +75,101 @@ namespace MiniCivilization.World.Generation
     }
 
     [Serializable]
+    public struct WorldSeededRangeSettings
+    {
+        [InspectorName("최소")]
+        [SerializeField] private float minimum;
+        [InspectorName("최대")]
+        [SerializeField] private float maximum;
+
+        public static WorldSeededRangeSettings Create(
+            float minimum,
+            float maximum) => new()
+        {
+            minimum = minimum,
+            maximum = maximum
+        };
+
+        public WorldSeededRangeSettingsData CreateData(float scale = 1f) =>
+            new(minimum * scale, maximum * scale);
+
+        public bool TryValidate(
+            float minimumAllowed,
+            float maximumAllowed,
+            out string error)
+        {
+            if (!float.IsFinite(minimum)
+                || !float.IsFinite(maximum)
+                || minimum < minimumAllowed
+                || maximum < minimum
+                || maximum > maximumAllowed)
+            {
+                error = "Seeded range settings are invalid.";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        public void Normalize(float minimumAllowed, float maximumAllowed)
+        {
+            minimum = float.IsFinite(minimum)
+                ? Math.Clamp(minimum, minimumAllowed, maximumAllowed)
+                : minimumAllowed;
+            maximum = float.IsFinite(maximum)
+                ? Math.Clamp(maximum, minimum, maximumAllowed)
+                : minimum;
+        }
+    }
+
+    [Serializable]
+    public struct TerrainDomainWarpSettings
+    {
+        [InspectorName("Warp Field")]
+        [SerializeField] private WorldNoiseFieldSettings field;
+        [InspectorName("Warp 강도 Cell")]
+        [SerializeField, Min(0f)] private float strengthCells;
+
+        public static TerrainDomainWarpSettings Create(
+            WorldNoiseFieldSettings field,
+            float strengthCells) => new()
+        {
+            field = field,
+            strengthCells = strengthCells
+        };
+
+        public TerrainDomainWarpSettingsData CreateData() => new(
+            field.CreateData(),
+            strengthCells);
+
+        public bool TryValidate(out string error)
+        {
+            if (!field.TryValidate(out error))
+            {
+                return false;
+            }
+
+            if (!float.IsFinite(strengthCells) || strengthCells < 0f)
+            {
+                error = "Terrain Domain Warp settings are invalid.";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        public void Normalize()
+        {
+            field.Normalize();
+            strengthCells = float.IsFinite(strengthCells)
+                ? Math.Max(0f, strengthCells)
+                : 0f;
+        }
+    }
+
+    [Serializable]
     public struct WorldCurveSettings
     {
         [SerializeField] private float atZero;
@@ -271,6 +366,8 @@ namespace MiniCivilization.World.Generation
         [SerializeField, Min(0f)] private float warpStrengthCells;
         [InspectorName("Region 경계 혼합 Cell")]
         [SerializeField, Min(0.1f)] private float boundaryBlendCells;
+        [InspectorName("Region 내부 도달 비율")]
+        [SerializeField, Range(0.1f, 1f)] private float interiorReachRatio;
         [InspectorName("완만 분포")]
         [SerializeField, Min(0f)] private float smoothShare;
         [InspectorName("거친 분포")]
@@ -289,6 +386,7 @@ namespace MiniCivilization.World.Generation
             warpScale = 0.0025f,
             warpStrengthCells = 24f,
             boundaryBlendCells = 10f,
+            interiorReachRatio = 0.35f,
             smoothShare = 0.24f,
             ruggedShare = 0.24f,
             mountainShare = 0.20f,
@@ -302,6 +400,7 @@ namespace MiniCivilization.World.Generation
             warpScale,
             warpStrengthCells,
             boundaryBlendCells,
+            interiorReachRatio,
             smoothShare,
             ruggedShare,
             mountainShare,
@@ -321,6 +420,9 @@ namespace MiniCivilization.World.Generation
                 || warpStrengthCells < 0f
                 || !float.IsFinite(boundaryBlendCells)
                 || boundaryBlendCells <= 0f
+                || !float.IsFinite(interiorReachRatio)
+                || interiorReachRatio < 0.1f
+                || interiorReachRatio > 1f
                 || !float.IsFinite(data.TotalShare)
                 || data.TotalShare <= 0f)
             {
@@ -347,6 +449,9 @@ namespace MiniCivilization.World.Generation
             boundaryBlendCells = float.IsFinite(boundaryBlendCells)
                 ? Math.Max(0.1f, boundaryBlendCells)
                 : 1f;
+            interiorReachRatio = float.IsFinite(interiorReachRatio)
+                ? Math.Clamp(interiorReachRatio, 0.1f, 1f)
+                : 0.35f;
             smoothShare = NormalizeShare(smoothShare);
             ruggedShare = NormalizeShare(ruggedShare);
             mountainShare = NormalizeShare(mountainShare);
@@ -430,38 +535,71 @@ namespace MiniCivilization.World.Generation
     [Serializable]
     public struct SmoothTerrainSettings
     {
-        [InspectorName("완만한 높이 변화")]
-        [SerializeField] private WorldCurveSettings undulationByWeirdness;
-        [InspectorName("세부 굴곡")]
-        [SerializeField] private WorldCurveSettings detailByRoughness;
+        [SerializeField, HideInInspector] private bool initialized;
+        [InspectorName("좌표 굴곡")]
+        [SerializeField] private TerrainDomainWarpSettings domainWarp;
+        [InspectorName("높이 Field")]
+        [SerializeField] private WorldNoiseFieldSettings heightField;
+        [InspectorName("높이 Field 응답")]
+        [SerializeField] private WorldCurveSettings heightResponse;
+        [InspectorName("높이 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings heightAmplitudeCells;
+        [InspectorName("세부 Field")]
+        [SerializeField] private WorldNoiseFieldSettings detailField;
+        [InspectorName("세부 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings detailAmplitudeCells;
 
-        public static SmoothTerrainSettings Create(
-            WorldCurveSettings undulationByWeirdness,
-            WorldCurveSettings detailByRoughness) => new()
+        public static SmoothTerrainSettings Default => new()
         {
-            undulationByWeirdness = undulationByWeirdness,
-            detailByRoughness = detailByRoughness
+            initialized = true,
+            domainWarp = TerrainDomainWarpSettings.Create(
+                WorldNoiseFieldSettings.Create(
+                    WorldNoiseMode.Signed,
+                    0.006f,
+                    3,
+                    2f,
+                    0.45f),
+                10f),
+            heightField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.012f,
+                4,
+                2f,
+                0.45f),
+            heightResponse = WorldCurveSettings.Create(-1f, -0.45f, 0f, 0.45f, 1f),
+            heightAmplitudeCells = WorldSeededRangeSettings.Create(1.5f, 4f),
+            detailField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Signed,
+                0.055f,
+                3,
+                2f,
+                0.4f),
+            detailAmplitudeCells = WorldSeededRangeSettings.Create(0.1f, 0.5f)
         };
 
-        public SmoothTerrainSettingsData CreateData()
-        {
-            const float heightScale = WorldGrid.HeightStepsPerCell;
-            return new SmoothTerrainSettingsData(
-                undulationByWeirdness.CreateData(heightScale),
-                detailByRoughness.CreateData(heightScale));
-        }
+        public SmoothTerrainSettingsData CreateData() => new(
+            domainWarp.CreateData(),
+            heightField.CreateData(),
+            heightResponse.CreateData(),
+            heightAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell),
+            detailField.CreateData(),
+            detailAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
 
         public bool TryValidate(out string error)
         {
-            if (!undulationByWeirdness.TryValidate(out error)
-                || !detailByRoughness.TryValidate(out error))
+            if (!domainWarp.TryValidate(out error)
+                || !heightField.TryValidate(out error)
+                || !heightResponse.TryValidate(out error)
+                || !heightAmplitudeCells.TryValidate(0f, 64f, out error)
+                || !detailField.TryValidate(out error)
+                || !detailAmplitudeCells.TryValidate(0f, 16f, out error))
             {
                 return false;
             }
 
-            if (!detailByRoughness.IsInside(0f, 64f))
+            if (!heightResponse.IsInside(-1f, 1f))
             {
-                error = "Smooth Terrain curves are invalid.";
+                error = "Smooth Terrain response is invalid.";
                 return false;
             }
 
@@ -471,53 +609,89 @@ namespace MiniCivilization.World.Generation
 
         public void Normalize()
         {
-            undulationByWeirdness.Clamp(-64f, 64f);
-            detailByRoughness.Clamp(0f, 64f);
+            if (!initialized)
+            {
+                this = Default;
+                return;
+            }
+
+            domainWarp.Normalize();
+            heightField.Normalize();
+            heightResponse.Clamp(-1f, 1f);
+            heightAmplitudeCells.Normalize(0f, 64f);
+            detailField.Normalize();
+            detailAmplitudeCells.Normalize(0f, 16f);
         }
     }
 
     [Serializable]
     public struct RuggedTerrainSettings
     {
-        [InspectorName("봉우리·계곡 굴곡")]
-        [SerializeField] private WorldCurveSettings reliefByPeaksValleys;
-        [InspectorName("거칠기 배율")]
-        [SerializeField] private WorldCurveSettings reliefScaleByRoughness;
-        [InspectorName("세부 굴곡")]
-        [SerializeField] private WorldCurveSettings detailByRoughness;
+        [SerializeField, HideInInspector] private bool initialized;
+        [InspectorName("좌표 굴곡")]
+        [SerializeField] private TerrainDomainWarpSettings domainWarp;
+        [InspectorName("기복 Field")]
+        [SerializeField] private WorldNoiseFieldSettings reliefField;
+        [InspectorName("기복 Field 응답")]
+        [SerializeField] private WorldCurveSettings reliefResponse;
+        [InspectorName("기복 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings reliefAmplitudeCells;
+        [InspectorName("세부 Field")]
+        [SerializeField] private WorldNoiseFieldSettings detailField;
+        [InspectorName("세부 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings detailAmplitudeCells;
 
-        public static RuggedTerrainSettings Create(
-            WorldCurveSettings reliefByPeaksValleys,
-            WorldCurveSettings reliefScaleByRoughness,
-            WorldCurveSettings detailByRoughness) => new()
+        public static RuggedTerrainSettings Default => new()
         {
-            reliefByPeaksValleys = reliefByPeaksValleys,
-            reliefScaleByRoughness = reliefScaleByRoughness,
-            detailByRoughness = detailByRoughness
+            initialized = true,
+            domainWarp = TerrainDomainWarpSettings.Create(
+                WorldNoiseFieldSettings.Create(
+                    WorldNoiseMode.Signed,
+                    0.007f,
+                    3,
+                    2f,
+                    0.45f),
+                14f),
+            reliefField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Ridge,
+                0.018f,
+                5,
+                2f,
+                0.48f),
+            reliefResponse = WorldCurveSettings.Create(-1f, -0.5f, 0f, 0.5f, 1f),
+            reliefAmplitudeCells = WorldSeededRangeSettings.Create(4f, 10f),
+            detailField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.SignedRidge,
+                0.075f,
+                4,
+                2f,
+                0.42f),
+            detailAmplitudeCells = WorldSeededRangeSettings.Create(0.4f, 1.5f)
         };
 
-        public RuggedTerrainSettingsData CreateData()
-        {
-            const float heightScale = WorldGrid.HeightStepsPerCell;
-            return new RuggedTerrainSettingsData(
-                reliefByPeaksValleys.CreateData(heightScale),
-                reliefScaleByRoughness.CreateData(),
-                detailByRoughness.CreateData(heightScale));
-        }
+        public RuggedTerrainSettingsData CreateData() => new(
+            domainWarp.CreateData(),
+            reliefField.CreateData(),
+            reliefResponse.CreateData(),
+            reliefAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell),
+            detailField.CreateData(),
+            detailAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
 
         public bool TryValidate(out string error)
         {
-            if (!reliefByPeaksValleys.TryValidate(out error)
-                || !reliefScaleByRoughness.TryValidate(out error)
-                || !detailByRoughness.TryValidate(out error))
+            if (!domainWarp.TryValidate(out error)
+                || !reliefField.TryValidate(out error)
+                || !reliefResponse.TryValidate(out error)
+                || !reliefAmplitudeCells.TryValidate(0f, 64f, out error)
+                || !detailField.TryValidate(out error)
+                || !detailAmplitudeCells.TryValidate(0f, 16f, out error))
             {
                 return false;
             }
 
-            if (!reliefScaleByRoughness.IsInside(0f, 8f)
-                || !detailByRoughness.IsInside(0f, 64f))
+            if (!reliefResponse.IsInside(-1f, 1f))
             {
-                error = "Rugged Terrain curves are invalid.";
+                error = "Rugged Terrain response is invalid.";
                 return false;
             }
 
@@ -527,62 +701,106 @@ namespace MiniCivilization.World.Generation
 
         public void Normalize()
         {
-            reliefByPeaksValleys.Clamp(-64f, 64f);
-            reliefScaleByRoughness.Clamp(0f, 8f);
-            detailByRoughness.Clamp(0f, 64f);
+            if (!initialized)
+            {
+                this = Default;
+                return;
+            }
+
+            domainWarp.Normalize();
+            reliefField.Normalize();
+            reliefResponse.Clamp(-1f, 1f);
+            reliefAmplitudeCells.Normalize(0f, 64f);
+            detailField.Normalize();
+            detailAmplitudeCells.Normalize(0f, 16f);
         }
     }
 
     [Serializable]
     public struct MountainTerrainSettings
     {
-        [InspectorName("최소 높이 Cell")]
-        [SerializeField, Min(0f)] private float minimumHeightCells;
-        [InspectorName("최대 높이 Cell")]
-        [SerializeField, Min(0f)] private float maximumHeightCells;
-        [InspectorName("높이 분포")]
-        [SerializeField, Min(0.1f)] private float heightBias;
-        [InspectorName("기울기 변화")]
-        [SerializeField, Range(0f, 3f)] private float slopeVariation;
+        [SerializeField, HideInInspector] private bool initialized;
+        [InspectorName("좌표 굴곡")]
+        [SerializeField] private TerrainDomainWarpSettings domainWarp;
+        [InspectorName("산체 Field")]
+        [SerializeField] private WorldNoiseFieldSettings massField;
+        [InspectorName("산체 Field 응답")]
+        [SerializeField] private WorldCurveSettings massResponse;
+        [InspectorName("산체 높이 Cell")]
+        [SerializeField] private WorldSeededRangeSettings heightCells;
+        [InspectorName("능선망 Field")]
+        [SerializeField] private WorldNoiseFieldSettings ridgeField;
+        [InspectorName("능선망 Field 응답")]
+        [SerializeField] private WorldCurveSettings ridgeResponse;
         [InspectorName("능선 높이 Cell")]
-        [SerializeField, Min(0f)] private float ridgeStrengthCells;
+        [SerializeField] private WorldSeededRangeSettings ridgeStrengthCells;
+        [InspectorName("표면 세부 Field")]
+        [SerializeField] private WorldNoiseFieldSettings detailField;
+        [InspectorName("표면 세부 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings detailAmplitudeCells;
 
-        public static MountainTerrainSettings Create(
-            float minimumHeightCells,
-            float maximumHeightCells,
-            float heightBias,
-            float slopeVariation,
-            float ridgeStrengthCells) => new()
+        public static MountainTerrainSettings Default => new()
         {
-            minimumHeightCells = minimumHeightCells,
-            maximumHeightCells = maximumHeightCells,
-            heightBias = heightBias,
-            slopeVariation = slopeVariation,
-            ridgeStrengthCells = ridgeStrengthCells
+            initialized = true,
+            domainWarp = TerrainDomainWarpSettings.Create(
+                WorldNoiseFieldSettings.Create(
+                    WorldNoiseMode.Signed,
+                    0.0045f,
+                    4,
+                    2f,
+                    0.48f),
+                24f),
+            massField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.006f,
+                4,
+                2f,
+                0.5f),
+            massResponse = WorldCurveSettings.Create(0.12f, 0.28f, 0.55f, 0.82f, 1f),
+            heightCells = WorldSeededRangeSettings.Create(22f, 46f),
+            ridgeField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Ridge,
+                0.018f,
+                5,
+                2f,
+                0.48f),
+            ridgeResponse = WorldCurveSettings.Create(0f, 0.12f, 0.42f, 0.78f, 1f),
+            ridgeStrengthCells = WorldSeededRangeSettings.Create(6f, 18f),
+            detailField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Signed,
+                0.06f,
+                3,
+                2f,
+                0.42f),
+            detailAmplitudeCells = WorldSeededRangeSettings.Create(0.5f, 2.5f)
         };
 
         public MountainTerrainSettingsData CreateData() => new(
-            minimumHeightCells * WorldGrid.HeightStepsPerCell,
-            maximumHeightCells * WorldGrid.HeightStepsPerCell,
-            heightBias,
-            slopeVariation,
-            ridgeStrengthCells * WorldGrid.HeightStepsPerCell);
+            domainWarp.CreateData(),
+            massField.CreateData(),
+            massResponse.CreateData(),
+            heightCells.CreateData(WorldGrid.HeightStepsPerCell),
+            ridgeField.CreateData(),
+            ridgeResponse.CreateData(),
+            ridgeStrengthCells.CreateData(WorldGrid.HeightStepsPerCell),
+            detailField.CreateData(),
+            detailAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
 
         public bool TryValidate(out string error)
         {
-            if (!float.IsFinite(minimumHeightCells)
-                || minimumHeightCells < 0f
-                || !float.IsFinite(maximumHeightCells)
-                || maximumHeightCells < minimumHeightCells
-                || !float.IsFinite(heightBias)
-                || heightBias < 0.1f
-                || !float.IsFinite(slopeVariation)
-                || slopeVariation < 0f
-                || slopeVariation > 3f
-                || !float.IsFinite(ridgeStrengthCells)
-                || ridgeStrengthCells < 0f)
+            if (!domainWarp.TryValidate(out error)
+                || !massField.TryValidate(out error)
+                || !massResponse.TryValidate(out error)
+                || !heightCells.TryValidate(0f, 128f, out error)
+                || !ridgeField.TryValidate(out error)
+                || !ridgeResponse.TryValidate(out error)
+                || !ridgeStrengthCells.TryValidate(0f, 64f, out error)
+                || !detailField.TryValidate(out error)
+                || !detailAmplitudeCells.TryValidate(0f, 16f, out error)
+                || !massResponse.IsInside(0f, 1f)
+                || !ridgeResponse.IsInside(0f, 1f))
             {
-                error = "Mountain Terrain curves are invalid.";
+                error = "Mountain Terrain fields are invalid.";
                 return false;
             }
 
@@ -592,116 +810,114 @@ namespace MiniCivilization.World.Generation
 
         public void Normalize()
         {
-            minimumHeightCells = NormalizeNonNegative(minimumHeightCells);
-            maximumHeightCells = Math.Max(
-                minimumHeightCells,
-                NormalizeNonNegative(maximumHeightCells));
-            heightBias = float.IsFinite(heightBias)
-                ? Math.Max(0.1f, heightBias)
-                : 1f;
-            slopeVariation = float.IsFinite(slopeVariation)
-                ? Math.Clamp(slopeVariation, 0f, 3f)
-                : 0f;
-            ridgeStrengthCells = NormalizeNonNegative(ridgeStrengthCells);
-        }
+            if (!initialized)
+            {
+                this = Default;
+                return;
+            }
 
-        private static float NormalizeNonNegative(float value) =>
-            float.IsFinite(value) ? Math.Max(0f, value) : 0f;
+            domainWarp.Normalize();
+            massField.Normalize();
+            massResponse.Clamp(0f, 1f);
+            heightCells.Normalize(0f, 128f);
+            ridgeField.Normalize();
+            ridgeResponse.Clamp(0f, 1f);
+            ridgeStrengthCells.Normalize(0f, 64f);
+            detailField.Normalize();
+            detailAmplitudeCells.Normalize(0f, 16f);
+        }
     }
 
     [Serializable]
     public struct CanyonTerrainSettings
     {
-        [InspectorName("최소 폭 Cell")]
-        [SerializeField, Min(0.5f)] private float minimumWidthCells;
-        [InspectorName("최대 폭 Cell")]
-        [SerializeField, Min(0.5f)] private float maximumWidthCells;
-        [InspectorName("최소 깊이 Cell")]
-        [SerializeField, Min(0f)] private float minimumDepthCells;
-        [InspectorName("최대 깊이 Cell")]
-        [SerializeField, Min(0f)] private float maximumDepthCells;
-        [InspectorName("Region 최소 분지 깊이 비율")]
-        [SerializeField, Range(0f, 1f)] private float minimumRegionDepthRatio;
-        [InspectorName("Region 최대 분지 깊이 비율")]
-        [SerializeField, Range(0f, 1f)] private float maximumRegionDepthRatio;
-        [InspectorName("최소 골짜기 수")]
-        [SerializeField, Min(1)] private int minimumValleyCount;
-        [InspectorName("최대 골짜기 수")]
-        [SerializeField, Min(1)] private int maximumValleyCount;
-        [InspectorName("최대 골짜기 중심 Offset 비율")]
-        [SerializeField, Range(0f, 0.5f)] private float maximumValleyOffsetRatio;
-        [InspectorName("축 굴곡 Cell")]
-        [SerializeField, Min(0f)] private float axisWarpCells;
-        [InspectorName("벽면 세부 강도")]
-        [SerializeField, Range(0f, 1f)] private float detailStrength;
+        [SerializeField, HideInInspector] private bool initialized;
+        [InspectorName("좌표 굴곡")]
+        [SerializeField] private TerrainDomainWarpSettings domainWarp;
+        [InspectorName("분지 Field")]
+        [SerializeField] private WorldNoiseFieldSettings basinField;
+        [InspectorName("분지 Field 응답")]
+        [SerializeField] private WorldCurveSettings basinResponse;
+        [InspectorName("분지 깊이 비율")]
+        [SerializeField] private WorldSeededRangeSettings basinDepthRatio;
+        [InspectorName("골짜기망 Field")]
+        [SerializeField] private WorldNoiseFieldSettings valleyField;
+        [InspectorName("골짜기망 Field 응답")]
+        [SerializeField] private WorldCurveSettings valleyResponse;
+        [InspectorName("골짜기 깊이 비율")]
+        [SerializeField] private WorldSeededRangeSettings valleyDepthRatio;
+        [InspectorName("전체 깊이 Cell")]
+        [SerializeField] private WorldSeededRangeSettings depthCells;
+        [InspectorName("벽면 세부 Field")]
+        [SerializeField] private WorldNoiseFieldSettings detailField;
+        [InspectorName("벽면 세부 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings detailAmplitudeCells;
 
-        public static CanyonTerrainSettings Create(
-            float minimumWidthCells,
-            float maximumWidthCells,
-            float minimumDepthCells,
-            float maximumDepthCells,
-            float minimumRegionDepthRatio,
-            float maximumRegionDepthRatio,
-            int minimumValleyCount,
-            int maximumValleyCount,
-            float maximumValleyOffsetRatio,
-            float axisWarpCells,
-            float detailStrength) => new()
+        public static CanyonTerrainSettings Default => new()
         {
-            minimumWidthCells = minimumWidthCells,
-            maximumWidthCells = maximumWidthCells,
-            minimumDepthCells = minimumDepthCells,
-            maximumDepthCells = maximumDepthCells,
-            minimumRegionDepthRatio = minimumRegionDepthRatio,
-            maximumRegionDepthRatio = maximumRegionDepthRatio,
-            minimumValleyCount = minimumValleyCount,
-            maximumValleyCount = maximumValleyCount,
-            maximumValleyOffsetRatio = maximumValleyOffsetRatio,
-            axisWarpCells = axisWarpCells,
-            detailStrength = detailStrength
+            initialized = true,
+            domainWarp = TerrainDomainWarpSettings.Create(
+                WorldNoiseFieldSettings.Create(
+                    WorldNoiseMode.Signed,
+                    0.006f,
+                    4,
+                    2f,
+                    0.48f),
+                28f),
+            basinField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.006f,
+                4,
+                2f,
+                0.5f),
+            basinResponse = WorldCurveSettings.Create(0.25f, 0.38f, 0.55f, 0.72f, 0.88f),
+            basinDepthRatio = WorldSeededRangeSettings.Create(0.35f, 0.65f),
+            valleyField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Ridge,
+                0.025f,
+                5,
+                2f,
+                0.5f),
+            valleyResponse = WorldCurveSettings.Create(0f, 0.05f, 0.32f, 0.72f, 1f),
+            valleyDepthRatio = WorldSeededRangeSettings.Create(0.75f, 1f),
+            depthCells = WorldSeededRangeSettings.Create(16f, 32f),
+            detailField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Signed,
+                0.065f,
+                3,
+                2f,
+                0.4f),
+            detailAmplitudeCells = WorldSeededRangeSettings.Create(0.1f, 0.6f)
         };
 
         public CanyonTerrainSettingsData CreateData() => new(
-            minimumWidthCells,
-            maximumWidthCells,
-            minimumDepthCells * WorldGrid.HeightStepsPerCell,
-            maximumDepthCells * WorldGrid.HeightStepsPerCell,
-            minimumRegionDepthRatio,
-            maximumRegionDepthRatio,
-            minimumValleyCount,
-            maximumValleyCount,
-            maximumValleyOffsetRatio,
-            axisWarpCells,
-            detailStrength);
+            domainWarp.CreateData(),
+            basinField.CreateData(),
+            basinResponse.CreateData(),
+            basinDepthRatio.CreateData(),
+            valleyField.CreateData(),
+            valleyResponse.CreateData(),
+            valleyDepthRatio.CreateData(),
+            depthCells.CreateData(WorldGrid.HeightStepsPerCell),
+            detailField.CreateData(),
+            detailAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
 
         public bool TryValidate(out string error)
         {
-            if (!float.IsFinite(minimumWidthCells)
-                || minimumWidthCells < 0.5f
-                || !float.IsFinite(maximumWidthCells)
-                || maximumWidthCells < minimumWidthCells
-                || !float.IsFinite(minimumDepthCells)
-                || minimumDepthCells < 0f
-                || !float.IsFinite(maximumDepthCells)
-                || maximumDepthCells < minimumDepthCells
-                || !float.IsFinite(minimumRegionDepthRatio)
-                || minimumRegionDepthRatio < 0f
-                || minimumRegionDepthRatio > 1f
-                || !float.IsFinite(maximumRegionDepthRatio)
-                || maximumRegionDepthRatio < minimumRegionDepthRatio
-                || maximumRegionDepthRatio > 1f
-                || minimumValleyCount < 1
-                || maximumValleyCount < minimumValleyCount
-                || !float.IsFinite(maximumValleyOffsetRatio)
-                || maximumValleyOffsetRatio < 0f
-                || maximumValleyOffsetRatio > 0.5f
-                || !float.IsFinite(axisWarpCells)
-                || axisWarpCells < 0f
-                || !float.IsFinite(detailStrength)
-                || detailStrength < 0f
-                || detailStrength > 1f)
+            if (!domainWarp.TryValidate(out error)
+                || !basinField.TryValidate(out error)
+                || !basinResponse.TryValidate(out error)
+                || !basinDepthRatio.TryValidate(0f, 1f, out error)
+                || !valleyField.TryValidate(out error)
+                || !valleyResponse.TryValidate(out error)
+                || !valleyDepthRatio.TryValidate(0f, 1f, out error)
+                || !depthCells.TryValidate(0f, 128f, out error)
+                || !detailField.TryValidate(out error)
+                || !detailAmplitudeCells.TryValidate(0f, 16f, out error)
+                || !basinResponse.IsInside(0f, 1f)
+                || !valleyResponse.IsInside(0f, 1f))
             {
-                error = "Canyon Terrain curves are invalid.";
+                error = "Canyon Terrain fields are invalid.";
                 return false;
             }
 
@@ -711,87 +927,115 @@ namespace MiniCivilization.World.Generation
 
         public void Normalize()
         {
-            minimumWidthCells = NormalizeAtLeast(minimumWidthCells, 0.5f);
-            maximumWidthCells = Math.Max(
-                minimumWidthCells,
-                NormalizeAtLeast(maximumWidthCells, 0.5f));
-            minimumDepthCells = NormalizeAtLeast(minimumDepthCells, 0f);
-            maximumDepthCells = Math.Max(
-                minimumDepthCells,
-                NormalizeAtLeast(maximumDepthCells, 0f));
-            minimumRegionDepthRatio = NormalizeUnit(minimumRegionDepthRatio);
-            maximumRegionDepthRatio = Math.Max(
-                minimumRegionDepthRatio,
-                NormalizeUnit(maximumRegionDepthRatio));
-            minimumValleyCount = Math.Max(1, minimumValleyCount);
-            maximumValleyCount = Math.Max(minimumValleyCount, maximumValleyCount);
-            maximumValleyOffsetRatio = float.IsFinite(maximumValleyOffsetRatio)
-                ? Math.Clamp(maximumValleyOffsetRatio, 0f, 0.5f)
-                : 0f;
-            axisWarpCells = NormalizeAtLeast(axisWarpCells, 0f);
-            detailStrength = NormalizeUnit(detailStrength);
+            if (!initialized)
+            {
+                this = Default;
+                return;
+            }
+
+            domainWarp.Normalize();
+            basinField.Normalize();
+            basinResponse.Clamp(0f, 1f);
+            basinDepthRatio.Normalize(0f, 1f);
+            valleyField.Normalize();
+            valleyResponse.Clamp(0f, 1f);
+            valleyDepthRatio.Normalize(0f, 1f);
+            depthCells.Normalize(0f, 128f);
+            detailField.Normalize();
+            detailAmplitudeCells.Normalize(0f, 16f);
         }
-
-        private static float NormalizeAtLeast(float value, float minimum) =>
-            float.IsFinite(value) ? Math.Max(minimum, value) : minimum;
-
-        private static float NormalizeUnit(float value) =>
-            float.IsFinite(value) ? Math.Clamp(value, 0f, 1f) : 0f;
     }
 
     [Serializable]
     public struct SeaPatternSettings
     {
         [SerializeField, HideInInspector] private bool initialized;
-        [InspectorName("중심 접근도별 수심")]
-        [SerializeField] private WorldCurveSettings depthByInterior;
+        [InspectorName("좌표 굴곡")]
+        [SerializeField] private TerrainDomainWarpSettings domainWarp;
+        [InspectorName("분지 Field")]
+        [SerializeField] private WorldNoiseFieldSettings basinField;
+        [InspectorName("분지 Field 영향")]
+        [SerializeField, Range(0f, 1f)] private float basinVariation;
+        [InspectorName("분지 진행도별 수심")]
+        [SerializeField] private WorldCurveSettings depthByBasin;
         [InspectorName("최대 깊이 Cell")]
-        [SerializeField, Min(1)] private int maximumDepthCells;
+        [SerializeField] private WorldSeededRangeSettings maximumDepthCells;
+        [InspectorName("해저 Field")]
+        [SerializeField] private WorldNoiseFieldSettings seabedField;
+        [InspectorName("해저 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings seabedAmplitudeCells;
         [InspectorName("수면 Cell")]
         [SerializeField, Min(0)] private int surfaceCell;
         [InspectorName("수면 세부 높이")]
         [SerializeField, Range(0, WorldGrid.HeightStepsPerCell - 1)]
         private int surfaceStep;
-        [InspectorName("해저 굴곡 강도")]
-        [SerializeField, Range(0f, 0.5f)] private float shapeDetailStrength;
 
         public static SeaPatternSettings Default => new()
         {
             initialized = true,
-            depthByInterior = WorldCurveSettings.Create(
+            domainWarp = TerrainDomainWarpSettings.Create(
+                WorldNoiseFieldSettings.Create(
+                    WorldNoiseMode.Signed,
+                    0.0045f,
+                    3,
+                    2f,
+                    0.45f),
+                18f),
+            basinField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.005f,
+                4,
+                2f,
+                0.48f),
+            basinVariation = 0.15f,
+            depthByBasin = WorldCurveSettings.Create(
                 0f,
                 0.05f,
                 0.55f,
                 1f,
                 1f),
-            maximumDepthCells = 10,
+            maximumDepthCells = WorldSeededRangeSettings.Create(10f, 10f),
+            seabedField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Signed,
+                0.035f,
+                4,
+                2f,
+                0.42f),
+            seabedAmplitudeCells = WorldSeededRangeSettings.Create(0.25f, 0.8f),
             surfaceCell = 12,
-            surfaceStep = 0,
-            shapeDetailStrength = 0.08f
+            surfaceStep = 0
         };
 
         public SeaPatternSettingsData CreateData() => new(
-            depthByInterior.CreateData(),
-            maximumDepthCells,
-            checked(surfaceCell * WorldGrid.HeightStepsPerCell + surfaceStep),
-            shapeDetailStrength);
+            domainWarp.CreateData(),
+            basinField.CreateData(),
+            basinVariation,
+            depthByBasin.CreateData(),
+            maximumDepthCells.CreateData(WorldGrid.HeightStepsPerCell),
+            seabedField.CreateData(),
+            seabedAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell),
+            checked(surfaceCell * WorldGrid.HeightStepsPerCell + surfaceStep));
 
         public bool TryValidate(out string error)
         {
-            if (!depthByInterior.TryValidate(out error))
+            if (!domainWarp.TryValidate(out error)
+                || !basinField.TryValidate(out error)
+                || !depthByBasin.TryValidate(out error)
+                || !maximumDepthCells.TryValidate(1f, 128f, out error)
+                || !seabedField.TryValidate(out error)
+                || !seabedAmplitudeCells.TryValidate(0f, 16f, out error))
             {
                 return false;
             }
 
-            if (!depthByInterior.IsInside(0f, 1f)
-                || !depthByInterior.IsNonDecreasing()
-                || maximumDepthCells <= 0
+            if (!float.IsFinite(basinVariation)
+                || basinVariation < 0f
+                || basinVariation > 1f
+                || !depthByBasin.IsInside(0f, 1f)
+                || !depthByBasin.IsNonDecreasing()
                 || surfaceCell < 0
                 || surfaceStep < 0
-                || surfaceStep >= WorldGrid.HeightStepsPerCell
-                || !float.IsFinite(shapeDetailStrength)
-                || shapeDetailStrength < 0f
-                || shapeDetailStrength > 0.5f)
+                || surfaceStep >= WorldGrid.HeightStepsPerCell)
             {
                 error = "Sea Pattern settings are invalid.";
                 return false;
@@ -809,17 +1053,231 @@ namespace MiniCivilization.World.Generation
                 return;
             }
 
-            depthByInterior.Clamp(0f, 1f);
-            maximumDepthCells = Math.Max(1, maximumDepthCells);
+            domainWarp.Normalize();
+            basinField.Normalize();
+            basinVariation = float.IsFinite(basinVariation)
+                ? Math.Clamp(basinVariation, 0f, 1f)
+                : 0f;
+            depthByBasin.Clamp(0f, 1f);
+            maximumDepthCells.Normalize(1f, 128f);
+            seabedField.Normalize();
+            seabedAmplitudeCells.Normalize(0f, 16f);
             surfaceCell = Math.Max(0, surfaceCell);
             surfaceStep = Math.Clamp(
                 surfaceStep,
                 0,
                 WorldGrid.HeightStepsPerCell - 1);
-            shapeDetailStrength = float.IsFinite(shapeDetailStrength)
-                ? Math.Clamp(shapeDetailStrength, 0f, 0.5f)
-                : 0f;
         }
+    }
+
+    [Serializable]
+    public struct RiverPatternSettings
+    {
+        [SerializeField, HideInInspector] private bool initialized;
+        [InspectorName("계획 Region 크기 Cell")]
+        [SerializeField, Min(16)] private int planningRegionSizeCells;
+        [InspectorName("경로 Sampling 간격 Cell")]
+        [SerializeField, Range(1, 16)] private int routeSampleSpacingCells;
+        [InspectorName("Region 경계 연결 밀도")]
+        [SerializeField, Range(0f, 1f)] private float networkDensity;
+        [InspectorName("지형 변경 비용")]
+        [SerializeField, Min(0f)] private float terrainChangeCost;
+        [InspectorName("오르막 비용")]
+        [SerializeField, Min(0f)] private float uphillCost;
+        [InspectorName("횡단 경사 비용")]
+        [SerializeField, Min(0f)] private float crossSlopeCost;
+        [InspectorName("Corridor 노출 비용")]
+        [SerializeField, Min(0f)] private float corridorExposureCost;
+        [InspectorName("강둑 검사 여유폭 Cell")]
+        [SerializeField, Min(0f)] private float bankMarginCells;
+        [InspectorName("골짜기 선호")]
+        [SerializeField, Min(0f)] private float valleyPreference;
+        [InspectorName("경로 변형 Field")]
+        [SerializeField] private WorldNoiseFieldSettings routeVariationField;
+        [InspectorName("경로 변형 비용")]
+        [SerializeField, Min(0f)] private float routeVariationCost;
+        [InspectorName("경로 곡선화 반복")]
+        [SerializeField, Range(0, 4)] private int smoothingIterations;
+        [InspectorName("강폭 Field")]
+        [SerializeField] private WorldNoiseFieldSettings widthField;
+        [InspectorName("최대 강폭 Cell")]
+        [SerializeField, Range(1, 10)] private int maximumWidthCells;
+        [InspectorName("단면 진행도")]
+        [SerializeField] private WorldCurveSettings crossSection;
+        [InspectorName("깊이 Cell")]
+        [SerializeField] private WorldSeededRangeSettings depthCells;
+        [InspectorName("수면 하강 Cell")]
+        [SerializeField] private WorldSeededRangeSettings waterInsetCells;
+        [InspectorName("낙차 전이 길이 Cell")]
+        [SerializeField, Min(1)] private int dropTransitionCells;
+        [InspectorName("낙차 전이 진행도")]
+        [SerializeField] private WorldCurveSettings dropTransition;
+        [InspectorName("강바닥 Field")]
+        [SerializeField] private WorldNoiseFieldSettings riverbedField;
+        [InspectorName("강바닥 진폭 Cell")]
+        [SerializeField] private WorldSeededRangeSettings riverbedAmplitudeCells;
+
+        public static RiverPatternSettings Default => new()
+        {
+            initialized = true,
+            planningRegionSizeCells = 128,
+            routeSampleSpacingCells = 4,
+            networkDensity = 0.65f,
+            terrainChangeCost = 0.8f,
+            uphillCost = 1.8f,
+            crossSlopeCost = 0.55f,
+            corridorExposureCost = 4f,
+            bankMarginCells = 1f,
+            valleyPreference = 0.7f,
+            routeVariationField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.018f,
+                3,
+                2f,
+                0.45f),
+            routeVariationCost = 0.45f,
+            smoothingIterations = 2,
+            widthField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Value,
+                0.025f,
+                3,
+                2f,
+                0.45f),
+            maximumWidthCells = 7,
+            crossSection = WorldCurveSettings.Create(
+                0f,
+                0.05f,
+                0.5f,
+                0.95f,
+                1f),
+            depthCells = WorldSeededRangeSettings.Create(1.5f, 4f),
+            waterInsetCells = WorldSeededRangeSettings.Create(0.15f, 0.65f),
+            dropTransitionCells = 12,
+            dropTransition = WorldCurveSettings.Create(
+                0f,
+                0.05f,
+                0.5f,
+                0.95f,
+                1f),
+            riverbedField = WorldNoiseFieldSettings.Create(
+                WorldNoiseMode.Signed,
+                0.08f,
+                3,
+                2f,
+                0.4f),
+            riverbedAmplitudeCells = WorldSeededRangeSettings.Create(0.05f, 0.3f)
+        };
+
+        public RiverPatternSettingsData CreateData() => new(
+            planningRegionSizeCells,
+            routeSampleSpacingCells,
+            networkDensity,
+            terrainChangeCost,
+            uphillCost,
+            crossSlopeCost,
+            corridorExposureCost,
+            bankMarginCells,
+            valleyPreference,
+            routeVariationField.CreateData(),
+            routeVariationCost,
+            smoothingIterations,
+            widthField.CreateData(),
+            maximumWidthCells,
+            crossSection.CreateData(),
+            depthCells.CreateData(WorldGrid.HeightStepsPerCell),
+            waterInsetCells.CreateData(WorldGrid.HeightStepsPerCell),
+            dropTransitionCells,
+            dropTransition.CreateData(),
+            riverbedField.CreateData(),
+            riverbedAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
+
+        public bool TryValidate(out string error)
+        {
+            if (!routeVariationField.TryValidate(out error)
+                || !widthField.TryValidate(out error)
+                || !crossSection.TryValidate(out error)
+                || !depthCells.TryValidate(0.2f, 32f, out error)
+                || !waterInsetCells.TryValidate(0f, 8f, out error)
+                || !dropTransition.TryValidate(out error)
+                || !riverbedField.TryValidate(out error)
+                || !riverbedAmplitudeCells.TryValidate(0f, 4f, out error)
+                || planningRegionSizeCells < 16
+                || routeSampleSpacingCells < 1
+                || planningRegionSizeCells % routeSampleSpacingCells != 0
+                || !float.IsFinite(networkDensity)
+                || networkDensity < 0f
+                || networkDensity > 1f
+                || !IsNonNegative(terrainChangeCost)
+                || !IsNonNegative(uphillCost)
+                || !IsNonNegative(crossSlopeCost)
+                || !IsNonNegative(corridorExposureCost)
+                || !IsNonNegative(bankMarginCells)
+                || !IsNonNegative(valleyPreference)
+                || !IsNonNegative(routeVariationCost)
+                || smoothingIterations < 0
+                || smoothingIterations > 4
+                || maximumWidthCells < 1
+                || maximumWidthCells > 10
+                || dropTransitionCells < 1
+                || !dropTransition.IsInside(0f, 1f)
+                || !dropTransition.IsNonDecreasing()
+                || !crossSection.IsInside(0f, 1f)
+                || !crossSection.IsNonDecreasing())
+            {
+                error = "River Pattern settings are invalid.";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        public void Normalize()
+        {
+            if (!initialized)
+            {
+                this = Default;
+                return;
+            }
+
+            planningRegionSizeCells = Math.Max(16, planningRegionSizeCells);
+            routeSampleSpacingCells = Math.Clamp(
+                routeSampleSpacingCells,
+                1,
+                16);
+            planningRegionSizeCells = checked(
+                (planningRegionSizeCells + routeSampleSpacingCells - 1)
+                / routeSampleSpacingCells
+                * routeSampleSpacingCells);
+            networkDensity = NormalizeNonNegative(networkDensity, 1f);
+            terrainChangeCost = NormalizeNonNegative(terrainChangeCost);
+            uphillCost = NormalizeNonNegative(uphillCost);
+            crossSlopeCost = NormalizeNonNegative(crossSlopeCost);
+            corridorExposureCost = NormalizeNonNegative(corridorExposureCost);
+            bankMarginCells = NormalizeNonNegative(bankMarginCells, 8f);
+            valleyPreference = NormalizeNonNegative(valleyPreference);
+            routeVariationField.Normalize();
+            routeVariationCost = NormalizeNonNegative(routeVariationCost);
+            smoothingIterations = Math.Clamp(smoothingIterations, 0, 4);
+            widthField.Normalize();
+            maximumWidthCells = Math.Clamp(maximumWidthCells, 1, 10);
+            crossSection.Clamp(0f, 1f);
+            depthCells.Normalize(0.2f, 32f);
+            waterInsetCells.Normalize(0f, 8f);
+            dropTransitionCells = Math.Clamp(dropTransitionCells, 1, 128);
+            dropTransition.Clamp(0f, 1f);
+            riverbedField.Normalize();
+            riverbedAmplitudeCells.Normalize(0f, 4f);
+        }
+
+        private static bool IsNonNegative(float value) =>
+            float.IsFinite(value) && value >= 0f;
+
+        private static float NormalizeNonNegative(
+            float value,
+            float maximum = float.MaxValue) => float.IsFinite(value)
+                ? Math.Clamp(value, 0f, maximum)
+                : 0f;
     }
 
     [Serializable]
@@ -840,6 +1298,8 @@ namespace MiniCivilization.World.Generation
         [SerializeField] private CanyonTerrainSettings canyon;
         [InspectorName("바다")]
         [SerializeField] private SeaPatternSettings sea;
+        [InspectorName("강")]
+        [SerializeField] private RiverPatternSettings river;
 
         public static WorldPatternSettings Default => new()
         {
@@ -850,32 +1310,12 @@ namespace MiniCivilization.World.Generation
                 WorldCurveSettings.Create(2f, 1f, 0f, -1f, -2f),
                 WorldCurveSettings.Constant(1f),
                 WorldCurveSettings.Create(0.25f, 0.4f, 0.6f, 0.8f, 1f)),
-            smooth = SmoothTerrainSettings.Create(
-                WorldCurveSettings.Create(-2f, -1f, 0f, 1f, 2f),
-                WorldCurveSettings.Create(0.15f, 0.2f, 0.25f, 0.3f, 0.35f)),
-            rugged = RuggedTerrainSettings.Create(
-                WorldCurveSettings.Create(-4f, -2f, 0f, 4f, 8f),
-                WorldCurveSettings.Create(0.5f, 0.8f, 1f, 1.3f, 1.7f),
-                WorldCurveSettings.Create(0.5f, 0.8f, 1.2f, 1.8f, 2.5f)),
-            mountain = MountainTerrainSettings.Create(
-                14f,
-                38f,
-                0.8f,
-                1.65f,
-                5f),
-            canyon = CanyonTerrainSettings.Create(
-                3f,
-                12f,
-                12f,
-                28f,
-                0.45f,
-                0.75f,
-                3,
-                7,
-                0.28f,
-                10f,
-                0.15f),
-            sea = SeaPatternSettings.Default
+            smooth = SmoothTerrainSettings.Default,
+            rugged = RuggedTerrainSettings.Default,
+            mountain = MountainTerrainSettings.Default,
+            canyon = CanyonTerrainSettings.Default,
+            sea = SeaPatternSettings.Default,
+            river = RiverPatternSettings.Default
         };
 
         public WorldPatternSettingsData CreateData() => new(
@@ -885,7 +1325,8 @@ namespace MiniCivilization.World.Generation
             rugged.CreateData(),
             mountain.CreateData(),
             canyon.CreateData(),
-            sea.CreateData());
+            sea.CreateData(),
+            river.CreateData());
 
         public bool TryValidate(out string error) =>
             region.TryValidate(out error)
@@ -894,7 +1335,8 @@ namespace MiniCivilization.World.Generation
             && rugged.TryValidate(out error)
             && mountain.TryValidate(out error)
             && canyon.TryValidate(out error)
-            && sea.TryValidate(out error);
+            && sea.TryValidate(out error)
+            && river.TryValidate(out error);
 
         public void Normalize()
         {
@@ -911,6 +1353,7 @@ namespace MiniCivilization.World.Generation
             mountain.Normalize();
             canyon.Normalize();
             sea.Normalize();
+            river.Normalize();
         }
     }
 
@@ -962,24 +1405,6 @@ namespace MiniCivilization.World.Generation
         [Tooltip("물 수면과 독립적으로 Preliminary Terrain Density의 기준이 되는 절대 Y Cell 높이입니다.")]
         [InspectorName("지형 기준 높이")]
         [SerializeField, Min(0)] private int terrainBaseHeightCells = 10;
-
-        [Header("강 생성")]
-        [Tooltip("연속된 River Channel Field의 좌표 배율입니다.")]
-        [InspectorName("강 분포 크기")]
-        [SerializeField, Min(0.0001f)] private float riverScale = 0.0125f;
-        [Tooltip("육지에서 River Channel이 나타나는 밀도입니다.")]
-        [InspectorName("강 밀도")]
-        [SerializeField, Range(0f, 1f)] private float riverDensity = 0.2f;
-        [Tooltip("River Field 중심에서 확보할 기본 수심입니다. 단위는 수직 Cell이며 최종 Terrain Density에 반영됩니다.")]
-        [InspectorName("기본 강 깊이")]
-        [SerializeField, Range(1, 3)] private int riverDepthCells = 2;
-        [Tooltip("River Field가 연속적으로 확장할 수 있는 최대 폭입니다. 단위는 X/Z Cell입니다.")]
-        [InspectorName("최대 강폭")]
-        [SerializeField, Range(1, 10)] private int maximumRiverWidthCells = 7;
-        [Tooltip("River Field 중심부의 최대 수심입니다. 단위는 수직 Cell이며 기본 수심보다 작게 설정할 수 없습니다.")]
-        [InspectorName("최대 강 깊이")]
-        [SerializeField, Range(1, WorldGrid.HeightStepsPerCell)]
-        private int maximumRiverDepthCells = 4;
 
         [Header("호수 생성")]
         [Tooltip("육지 분지 후보가 Lake 또는 Pond로 생성되는 밀도입니다.")]
@@ -1048,13 +1473,6 @@ namespace MiniCivilization.World.Generation
         public float TemperatureScale => temperatureScale;
         public int TerrainBaseHeightUnits => checked(
             terrainBaseHeightCells * WorldGrid.HeightStepsPerCell);
-        public float RiverScale => riverScale;
-        public float RiverDensity => riverDensity;
-        public int RiverDepthCells => riverDepthCells;
-        public int MaximumRiverWidthCells => maximumRiverWidthCells;
-        public int MaximumRiverDepthCells => Math.Max(
-            riverDepthCells,
-            maximumRiverDepthCells);
         public float LakeDensity => lakeDensity;
         public int LakeRegionSizeCells => lakeRegionSizeCells;
         public int MaximumLakeRadiusCells => maximumLakeRadiusCells;
@@ -1086,11 +1504,6 @@ namespace MiniCivilization.World.Generation
             WorldPatterns,
             TemperatureScale,
             TerrainBaseHeightUnits,
-            RiverScale,
-            RiverDensity,
-            RiverDepthCells,
-            MaximumRiverWidthCells,
-            MaximumRiverDepthCells,
             LakeDensity,
             LakeRegionSizeCells,
             MaximumLakeRadiusCells,
@@ -1194,8 +1607,6 @@ namespace MiniCivilization.World.Generation
             worldNoiseRouter.Normalize();
             worldPatterns.Normalize();
             temperatureScale = Mathf.Max(0.0001f, temperatureScale);
-            riverScale = Mathf.Max(0.0001f, riverScale);
-            riverDensity = Math.Clamp(riverDensity, 0f, 1f);
             lakeDensity = Math.Clamp(lakeDensity, 0f, 1f);
             lakeRegionSizeCells = Math.Max(4, lakeRegionSizeCells);
             maximumLakeRadiusCells = Math.Max(1, maximumLakeRadiusCells);
@@ -1209,15 +1620,6 @@ namespace MiniCivilization.World.Generation
                 1,
                 WorldGrid.HeightStepsPerCell);
             pondMaximumArea = Math.Max(1, pondMaximumArea);
-            maximumRiverWidthCells = Math.Clamp(
-                maximumRiverWidthCells,
-                1,
-                10);
-
-            maximumRiverDepthCells = Math.Clamp(
-                maximumRiverDepthCells,
-                riverDepthCells,
-                WorldGrid.HeightStepsPerCell);
             spreadAmountLoss = Math.Clamp(
                 spreadAmountLoss,
                 WaterAmount.Unit,

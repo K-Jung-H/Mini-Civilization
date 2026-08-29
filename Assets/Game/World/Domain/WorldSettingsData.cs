@@ -54,6 +54,44 @@ namespace MiniCivilization.World.Domain
         public float Persistence { get; }
     }
 
+    public readonly struct WorldSeededRangeSettingsData
+    {
+        public WorldSeededRangeSettingsData(float minimum, float maximum)
+        {
+            if (!float.IsFinite(minimum)
+                || !float.IsFinite(maximum)
+                || maximum < minimum)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maximum));
+            }
+
+            Minimum = minimum;
+            Maximum = maximum;
+        }
+
+        public float Minimum { get; }
+        public float Maximum { get; }
+    }
+
+    public readonly struct TerrainDomainWarpSettingsData
+    {
+        public TerrainDomainWarpSettingsData(
+            WorldNoiseFieldSettingsData field,
+            float strengthCells)
+        {
+            if (!float.IsFinite(strengthCells) || strengthCells < 0f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(strengthCells));
+            }
+
+            Field = field;
+            StrengthCells = strengthCells;
+        }
+
+        public WorldNoiseFieldSettingsData Field { get; }
+        public float StrengthCells { get; }
+    }
+
     public readonly struct WorldCurveSettingsData
     {
         public WorldCurveSettingsData(
@@ -184,6 +222,7 @@ namespace MiniCivilization.World.Domain
             float warpScale,
             float warpStrengthCells,
             float boundaryBlendCells,
+            float interiorReachRatio,
             float smoothShare,
             float ruggedShare,
             float mountainShare,
@@ -195,6 +234,7 @@ namespace MiniCivilization.World.Domain
             WarpScale = warpScale;
             WarpStrengthCells = warpStrengthCells;
             BoundaryBlendCells = boundaryBlendCells;
+            InteriorReachRatio = interiorReachRatio;
             SmoothShare = smoothShare;
             RuggedShare = ruggedShare;
             MountainShare = mountainShare;
@@ -207,6 +247,7 @@ namespace MiniCivilization.World.Domain
         public float WarpScale { get; }
         public float WarpStrengthCells { get; }
         public float BoundaryBlendCells { get; }
+        public float InteriorReachRatio { get; }
         public float SmoothShare { get; }
         public float RuggedShare { get; }
         public float MountainShare { get; }
@@ -239,135 +280,272 @@ namespace MiniCivilization.World.Domain
     public readonly struct SmoothTerrainSettingsData
     {
         public SmoothTerrainSettingsData(
-            WorldCurveSettingsData undulationByWeirdness,
-            WorldCurveSettingsData detailByRoughness)
+            TerrainDomainWarpSettingsData domainWarp,
+            WorldNoiseFieldSettingsData heightField,
+            WorldCurveSettingsData heightResponse,
+            WorldSeededRangeSettingsData heightAmplitudeUnits,
+            WorldNoiseFieldSettingsData detailField,
+            WorldSeededRangeSettingsData detailAmplitudeUnits)
         {
-            UndulationByWeirdness = undulationByWeirdness;
-            DetailByRoughness = detailByRoughness;
+            DomainWarp = domainWarp;
+            HeightField = heightField;
+            HeightResponse = heightResponse;
+            HeightAmplitudeUnits = heightAmplitudeUnits;
+            DetailField = detailField;
+            DetailAmplitudeUnits = detailAmplitudeUnits;
         }
 
-        public WorldCurveSettingsData UndulationByWeirdness { get; }
-        public WorldCurveSettingsData DetailByRoughness { get; }
+        public TerrainDomainWarpSettingsData DomainWarp { get; }
+        public WorldNoiseFieldSettingsData HeightField { get; }
+        public WorldCurveSettingsData HeightResponse { get; }
+        public WorldSeededRangeSettingsData HeightAmplitudeUnits { get; }
+        public WorldNoiseFieldSettingsData DetailField { get; }
+        public WorldSeededRangeSettingsData DetailAmplitudeUnits { get; }
     }
 
     public readonly struct RuggedTerrainSettingsData
     {
         public RuggedTerrainSettingsData(
-            WorldCurveSettingsData reliefByPeaksValleys,
-            WorldCurveSettingsData reliefScaleByRoughness,
-            WorldCurveSettingsData detailByRoughness)
+            TerrainDomainWarpSettingsData domainWarp,
+            WorldNoiseFieldSettingsData reliefField,
+            WorldCurveSettingsData reliefResponse,
+            WorldSeededRangeSettingsData reliefAmplitudeUnits,
+            WorldNoiseFieldSettingsData detailField,
+            WorldSeededRangeSettingsData detailAmplitudeUnits)
         {
-            ReliefByPeaksValleys = reliefByPeaksValleys;
-            ReliefScaleByRoughness = reliefScaleByRoughness;
-            DetailByRoughness = detailByRoughness;
+            DomainWarp = domainWarp;
+            ReliefField = reliefField;
+            ReliefResponse = reliefResponse;
+            ReliefAmplitudeUnits = reliefAmplitudeUnits;
+            DetailField = detailField;
+            DetailAmplitudeUnits = detailAmplitudeUnits;
         }
 
-        public WorldCurveSettingsData ReliefByPeaksValleys { get; }
-        public WorldCurveSettingsData ReliefScaleByRoughness { get; }
-        public WorldCurveSettingsData DetailByRoughness { get; }
+        public TerrainDomainWarpSettingsData DomainWarp { get; }
+        public WorldNoiseFieldSettingsData ReliefField { get; }
+        public WorldCurveSettingsData ReliefResponse { get; }
+        public WorldSeededRangeSettingsData ReliefAmplitudeUnits { get; }
+        public WorldNoiseFieldSettingsData DetailField { get; }
+        public WorldSeededRangeSettingsData DetailAmplitudeUnits { get; }
     }
 
     public readonly struct MountainTerrainSettingsData
     {
         public MountainTerrainSettingsData(
-            float minimumHeightUnits,
-            float maximumHeightUnits,
-            float heightBias,
-            float slopeVariation,
-            float ridgeStrengthUnits)
+            TerrainDomainWarpSettingsData domainWarp,
+            WorldNoiseFieldSettingsData massField,
+            WorldCurveSettingsData massResponse,
+            WorldSeededRangeSettingsData heightUnits,
+            WorldNoiseFieldSettingsData ridgeField,
+            WorldCurveSettingsData ridgeResponse,
+            WorldSeededRangeSettingsData ridgeStrengthUnits,
+            WorldNoiseFieldSettingsData detailField,
+            WorldSeededRangeSettingsData detailAmplitudeUnits)
         {
-            MinimumHeightUnits = minimumHeightUnits;
-            MaximumHeightUnits = maximumHeightUnits;
-            HeightBias = heightBias;
-            SlopeVariation = slopeVariation;
+            DomainWarp = domainWarp;
+            MassField = massField;
+            MassResponse = massResponse;
+            HeightUnits = heightUnits;
+            RidgeField = ridgeField;
+            RidgeResponse = ridgeResponse;
             RidgeStrengthUnits = ridgeStrengthUnits;
+            DetailField = detailField;
+            DetailAmplitudeUnits = detailAmplitudeUnits;
         }
 
-        public float MinimumHeightUnits { get; }
-        public float MaximumHeightUnits { get; }
-        public float HeightBias { get; }
-        public float SlopeVariation { get; }
-        public float RidgeStrengthUnits { get; }
+        public TerrainDomainWarpSettingsData DomainWarp { get; }
+        public WorldNoiseFieldSettingsData MassField { get; }
+        public WorldCurveSettingsData MassResponse { get; }
+        public WorldSeededRangeSettingsData HeightUnits { get; }
+        public WorldNoiseFieldSettingsData RidgeField { get; }
+        public WorldCurveSettingsData RidgeResponse { get; }
+        public WorldSeededRangeSettingsData RidgeStrengthUnits { get; }
+        public WorldNoiseFieldSettingsData DetailField { get; }
+        public WorldSeededRangeSettingsData DetailAmplitudeUnits { get; }
     }
 
     public readonly struct CanyonTerrainSettingsData
     {
         public CanyonTerrainSettingsData(
-            float minimumWidthCells,
-            float maximumWidthCells,
-            float minimumDepthUnits,
-            float maximumDepthUnits,
-            float minimumRegionDepthRatio,
-            float maximumRegionDepthRatio,
-            int minimumValleyCount,
-            int maximumValleyCount,
-            float maximumValleyOffsetRatio,
-            float axisWarpCells,
-            float detailStrength)
+            TerrainDomainWarpSettingsData domainWarp,
+            WorldNoiseFieldSettingsData basinField,
+            WorldCurveSettingsData basinResponse,
+            WorldSeededRangeSettingsData basinDepthRatio,
+            WorldNoiseFieldSettingsData valleyField,
+            WorldCurveSettingsData valleyResponse,
+            WorldSeededRangeSettingsData valleyDepthRatio,
+            WorldSeededRangeSettingsData depthUnits,
+            WorldNoiseFieldSettingsData detailField,
+            WorldSeededRangeSettingsData detailAmplitudeUnits)
         {
-            MinimumWidthCells = minimumWidthCells;
-            MaximumWidthCells = maximumWidthCells;
-            MinimumDepthUnits = minimumDepthUnits;
-            MaximumDepthUnits = maximumDepthUnits;
-            MinimumRegionDepthRatio = minimumRegionDepthRatio;
-            MaximumRegionDepthRatio = maximumRegionDepthRatio;
-            MinimumValleyCount = minimumValleyCount;
-            MaximumValleyCount = maximumValleyCount;
-            MaximumValleyOffsetRatio = maximumValleyOffsetRatio;
-            AxisWarpCells = axisWarpCells;
-            DetailStrength = detailStrength;
+            DomainWarp = domainWarp;
+            BasinField = basinField;
+            BasinResponse = basinResponse;
+            BasinDepthRatio = basinDepthRatio;
+            ValleyField = valleyField;
+            ValleyResponse = valleyResponse;
+            ValleyDepthRatio = valleyDepthRatio;
+            DepthUnits = depthUnits;
+            DetailField = detailField;
+            DetailAmplitudeUnits = detailAmplitudeUnits;
         }
 
-        public float MinimumWidthCells { get; }
-        public float MaximumWidthCells { get; }
-        public float MinimumDepthUnits { get; }
-        public float MaximumDepthUnits { get; }
-        public float MinimumRegionDepthRatio { get; }
-        public float MaximumRegionDepthRatio { get; }
-        public int MinimumValleyCount { get; }
-        public int MaximumValleyCount { get; }
-        public float MaximumValleyOffsetRatio { get; }
-        public float AxisWarpCells { get; }
-        public float DetailStrength { get; }
+        public TerrainDomainWarpSettingsData DomainWarp { get; }
+        public WorldNoiseFieldSettingsData BasinField { get; }
+        public WorldCurveSettingsData BasinResponse { get; }
+        public WorldSeededRangeSettingsData BasinDepthRatio { get; }
+        public WorldNoiseFieldSettingsData ValleyField { get; }
+        public WorldCurveSettingsData ValleyResponse { get; }
+        public WorldSeededRangeSettingsData ValleyDepthRatio { get; }
+        public WorldSeededRangeSettingsData DepthUnits { get; }
+        public WorldNoiseFieldSettingsData DetailField { get; }
+        public WorldSeededRangeSettingsData DetailAmplitudeUnits { get; }
     }
 
     public readonly struct SeaPatternSettingsData
     {
         public SeaPatternSettingsData(
-            WorldCurveSettingsData depthByInterior,
-            int maximumDepthCells,
-            int surfaceUnits,
-            float shapeDetailStrength)
+            TerrainDomainWarpSettingsData domainWarp,
+            WorldNoiseFieldSettingsData basinField,
+            float basinVariation,
+            WorldCurveSettingsData depthByBasin,
+            WorldSeededRangeSettingsData maximumDepthUnits,
+            WorldNoiseFieldSettingsData seabedField,
+            WorldSeededRangeSettingsData seabedAmplitudeUnits,
+            int surfaceUnits)
         {
-            if (maximumDepthCells <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(maximumDepthCells));
-            }
-
             if (surfaceUnits <= 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(surfaceUnits));
             }
 
-            if (!float.IsFinite(shapeDetailStrength)
-                || shapeDetailStrength < 0f
-                || shapeDetailStrength > 0.5f)
+            if (!float.IsFinite(basinVariation)
+                || basinVariation < 0f
+                || basinVariation > 1f)
             {
-                throw new ArgumentOutOfRangeException(
-                    nameof(shapeDetailStrength));
+                throw new ArgumentOutOfRangeException(nameof(basinVariation));
             }
 
-            DepthByInterior = depthByInterior;
-            MaximumDepthCells = maximumDepthCells;
+            DomainWarp = domainWarp;
+            BasinField = basinField;
+            BasinVariation = basinVariation;
+            DepthByBasin = depthByBasin;
+            MaximumDepthUnits = maximumDepthUnits;
+            SeabedField = seabedField;
+            SeabedAmplitudeUnits = seabedAmplitudeUnits;
             SurfaceUnits = surfaceUnits;
-            ShapeDetailStrength = shapeDetailStrength;
         }
 
-        public WorldCurveSettingsData DepthByInterior { get; }
-        public int MaximumDepthCells { get; }
+        public TerrainDomainWarpSettingsData DomainWarp { get; }
+        public WorldNoiseFieldSettingsData BasinField { get; }
+        public float BasinVariation { get; }
+        public WorldCurveSettingsData DepthByBasin { get; }
+        public WorldSeededRangeSettingsData MaximumDepthUnits { get; }
+        public WorldNoiseFieldSettingsData SeabedField { get; }
+        public WorldSeededRangeSettingsData SeabedAmplitudeUnits { get; }
         public int SurfaceUnits { get; }
-        public float ShapeDetailStrength { get; }
+    }
+
+    public readonly struct RiverPatternSettingsData
+    {
+        public RiverPatternSettingsData(
+            int planningRegionSizeCells,
+            int routeSampleSpacingCells,
+            float networkDensity,
+            float terrainChangeCost,
+            float uphillCost,
+            float crossSlopeCost,
+            float corridorExposureCost,
+            float bankMarginCells,
+            float valleyPreference,
+            WorldNoiseFieldSettingsData routeVariationField,
+            float routeVariationCost,
+            int smoothingIterations,
+            WorldNoiseFieldSettingsData widthField,
+            int maximumWidthCells,
+            WorldCurveSettingsData crossSection,
+            WorldSeededRangeSettingsData depthUnits,
+            WorldSeededRangeSettingsData waterInsetUnits,
+            int dropTransitionCells,
+            WorldCurveSettingsData dropTransition,
+            WorldNoiseFieldSettingsData riverbedField,
+            WorldSeededRangeSettingsData riverbedAmplitudeUnits)
+        {
+            if (planningRegionSizeCells < 16
+                || routeSampleSpacingCells < 1
+                || planningRegionSizeCells % routeSampleSpacingCells != 0
+                || !float.IsFinite(networkDensity)
+                || networkDensity < 0f
+                || networkDensity > 1f
+                || !float.IsFinite(terrainChangeCost)
+                || terrainChangeCost < 0f
+                || !float.IsFinite(uphillCost)
+                || uphillCost < 0f
+                || !float.IsFinite(crossSlopeCost)
+                || crossSlopeCost < 0f
+                || !float.IsFinite(corridorExposureCost)
+                || corridorExposureCost < 0f
+                || !float.IsFinite(bankMarginCells)
+                || bankMarginCells < 0f
+                || !float.IsFinite(valleyPreference)
+                || valleyPreference < 0f
+                || !float.IsFinite(routeVariationCost)
+                || routeVariationCost < 0f
+                || smoothingIterations < 0
+                || smoothingIterations > 4
+                || maximumWidthCells < 1
+                || maximumWidthCells > 10
+                || dropTransitionCells < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(planningRegionSizeCells),
+                    "River Pattern settings are invalid.");
+            }
+
+            PlanningRegionSizeCells = planningRegionSizeCells;
+            RouteSampleSpacingCells = routeSampleSpacingCells;
+            NetworkDensity = networkDensity;
+            TerrainChangeCost = terrainChangeCost;
+            UphillCost = uphillCost;
+            CrossSlopeCost = crossSlopeCost;
+            CorridorExposureCost = corridorExposureCost;
+            BankMarginCells = bankMarginCells;
+            ValleyPreference = valleyPreference;
+            RouteVariationField = routeVariationField;
+            RouteVariationCost = routeVariationCost;
+            SmoothingIterations = smoothingIterations;
+            WidthField = widthField;
+            MaximumWidthCells = maximumWidthCells;
+            CrossSection = crossSection;
+            DepthUnits = depthUnits;
+            WaterInsetUnits = waterInsetUnits;
+            DropTransitionCells = dropTransitionCells;
+            DropTransition = dropTransition;
+            RiverbedField = riverbedField;
+            RiverbedAmplitudeUnits = riverbedAmplitudeUnits;
+        }
+
+        public int PlanningRegionSizeCells { get; }
+        public int RouteSampleSpacingCells { get; }
+        public float NetworkDensity { get; }
+        public float TerrainChangeCost { get; }
+        public float UphillCost { get; }
+        public float CrossSlopeCost { get; }
+        public float CorridorExposureCost { get; }
+        public float BankMarginCells { get; }
+        public float ValleyPreference { get; }
+        public WorldNoiseFieldSettingsData RouteVariationField { get; }
+        public float RouteVariationCost { get; }
+        public int SmoothingIterations { get; }
+        public WorldNoiseFieldSettingsData WidthField { get; }
+        public int MaximumWidthCells { get; }
+        public WorldCurveSettingsData CrossSection { get; }
+        public WorldSeededRangeSettingsData DepthUnits { get; }
+        public WorldSeededRangeSettingsData WaterInsetUnits { get; }
+        public int DropTransitionCells { get; }
+        public WorldCurveSettingsData DropTransition { get; }
+        public WorldNoiseFieldSettingsData RiverbedField { get; }
+        public WorldSeededRangeSettingsData RiverbedAmplitudeUnits { get; }
     }
 
     public readonly struct WorldPatternSettingsData
@@ -379,7 +557,8 @@ namespace MiniCivilization.World.Domain
             RuggedTerrainSettingsData rugged,
             MountainTerrainSettingsData mountain,
             CanyonTerrainSettingsData canyon,
-            SeaPatternSettingsData sea)
+            SeaPatternSettingsData sea,
+            RiverPatternSettingsData river)
         {
             Region = region;
             BaseDensity = baseDensity;
@@ -388,6 +567,7 @@ namespace MiniCivilization.World.Domain
             Mountain = mountain;
             Canyon = canyon;
             Sea = sea;
+            River = river;
         }
 
         public WorldPatternRegionSettingsData Region { get; }
@@ -397,6 +577,7 @@ namespace MiniCivilization.World.Domain
         public MountainTerrainSettingsData Mountain { get; }
         public CanyonTerrainSettingsData Canyon { get; }
         public SeaPatternSettingsData Sea { get; }
+        public RiverPatternSettingsData River { get; }
     }
 
     public sealed class WorldSettingsData
@@ -415,11 +596,6 @@ namespace MiniCivilization.World.Domain
             WorldPatternSettingsData worldPatterns,
             float temperatureScale,
             int terrainBaseHeightUnits,
-            float riverScale,
-            float riverDensity,
-            int riverDepthCells,
-            int maximumRiverWidthCells,
-            int maximumRiverDepthCells,
             float lakeDensity,
             int lakeRegionSizeCells,
             int maximumLakeRadiusCells,
@@ -474,11 +650,6 @@ namespace MiniCivilization.World.Domain
             WorldPatterns = worldPatterns;
             TemperatureScale = temperatureScale;
             TerrainBaseHeightUnits = terrainBaseHeightUnits;
-            RiverScale = riverScale;
-            RiverDensity = riverDensity;
-            RiverDepthCells = riverDepthCells;
-            MaximumRiverWidthCells = maximumRiverWidthCells;
-            MaximumRiverDepthCells = maximumRiverDepthCells;
             LakeDensity = lakeDensity;
             LakeRegionSizeCells = lakeRegionSizeCells;
             MaximumLakeRadiusCells = maximumLakeRadiusCells;
@@ -540,11 +711,6 @@ namespace MiniCivilization.World.Domain
         public WorldPatternSettingsData WorldPatterns { get; }
         public float TemperatureScale { get; }
         public int TerrainBaseHeightUnits { get; }
-        public float RiverScale { get; }
-        public float RiverDensity { get; }
-        public int RiverDepthCells { get; }
-        public int MaximumRiverWidthCells { get; }
-        public int MaximumRiverDepthCells { get; }
         public float LakeDensity { get; }
         public int LakeRegionSizeCells { get; }
         public int MaximumLakeRadiusCells { get; }

@@ -21,7 +21,10 @@ namespace MiniCivilization.World.Editor
             Sea,
             SeaArea,
             SeaDepth,
-            SeaWater
+            SeaWater,
+            RiverArea,
+            RiverDepth,
+            RiverWater
         }
 
         private readonly struct PatternDebugSample
@@ -29,16 +32,19 @@ namespace MiniCivilization.World.Editor
             public PatternDebugSample(
                 in WorldPatternWeights weights,
                 in WorldPatternResult result,
-                float finalSurfaceUnits)
+                float finalSurfaceUnits,
+                float riverMaximumDepthUnits)
             {
                 Weights = weights;
                 Result = result;
                 FinalSurfaceUnits = finalSurfaceUnits;
+                RiverMaximumDepthUnits = riverMaximumDepthUnits;
             }
 
             public WorldPatternWeights Weights { get; }
             public WorldPatternResult Result { get; }
             public float FinalSurfaceUnits { get; }
+            public float RiverMaximumDepthUnits { get; }
         }
 
         private static readonly Color SmoothColor = new(0.25f, 0.8f, 0.3f);
@@ -46,6 +52,7 @@ namespace MiniCivilization.World.Editor
         private static readonly Color MountainColor = new(0.9f, 0.9f, 0.9f);
         private static readonly Color CanyonColor = new(0.65f, 0.15f, 0.75f);
         private static readonly Color SeaColor = new(0.1f, 0.45f, 0.9f);
+        private static readonly Color RiverColor = new(0.1f, 0.85f, 0.95f);
 
         private Vector2Int previewCenter;
         private int previewAreaCells = 512;
@@ -162,7 +169,7 @@ namespace MiniCivilization.World.Editor
             if (previewTexture != null)
             {
                 EditorGUILayout.HelpBox(
-                    "전체 분포 탐색용입니다. 초록: 완만 / 주황: 거친 / 흰색: 산맥 / 자주: 협곡 / 파랑: 바다",
+                    "전체 분포 탐색용입니다. 초록: 완만 / 주황: 거친 / 흰색: 산맥 / 자주: 협곡 / 파랑: 바다 / 청록: 강",
                     MessageType.None);
                 var width = Mathf.Clamp(
                     EditorGUIUtility.currentViewWidth - 40f,
@@ -249,6 +256,8 @@ namespace MiniCivilization.World.Editor
             var strongCounts = new int[5];
             var maximumWeights = new float[5];
             var weightSums = new float[5];
+            var riverCount = 0;
+            var riverInfluenceSum = 0f;
             var halfArea = previewAreaCells * 0.5;
             var unitsPerPixel = previewAreaCells / (double)resolution;
             selectedCell = null;
@@ -263,7 +272,7 @@ namespace MiniCivilization.World.Editor
                 var worldZ = checked((int)Math.Floor(
                     previewCenter.y - halfArea
                     + (z + 0.5) * unitsPerPixel));
-                var profile = WorldPatternResolver.Resolve(
+                var profile = RiverPatternResolver.Resolve(
                     router,
                     worldX,
                     worldZ,
@@ -275,7 +284,8 @@ namespace MiniCivilization.World.Editor
                     weights,
                     profile,
                     settings.TerrainBaseHeightUnits
-                        + profile.SurfaceOffsetUnits);
+                        + profile.SurfaceOffsetUnits,
+                    settings.WorldPatterns.River.DepthUnits.Maximum);
                 sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
                 for (var index = 0; index < 5; index++)
                 {
@@ -292,6 +302,11 @@ namespace MiniCivilization.World.Editor
                 }
 
                 dominantCounts[(int)profile.DominantPattern]++;
+                if (profile.RiverInfluence > 0f)
+                {
+                    riverCount++;
+                    riverInfluenceSum += profile.RiverInfluence;
+                }
             }
 
             var count = samples.Length;
@@ -315,7 +330,9 @@ namespace MiniCivilization.World.Editor
                 + $"거친 {maximumWeights[1]:0.000} / "
                 + $"산맥 {maximumWeights[2]:0.000} / "
                 + $"협곡 {maximumWeights[3]:0.000} / "
-                + $"바다 {maximumWeights[4]:0.000}";
+                + $"바다 {maximumWeights[4]:0.000}\n"
+                + $"강 영역 {Percent(riverCount, count)} / "
+                + $"평균 강 단면 진행 {(riverCount > 0 ? riverInfluenceSum / riverCount : 0f):0.000}";
             RenderPreview();
         }
 
@@ -394,7 +411,7 @@ namespace MiniCivilization.World.Editor
             var settings = ResolveSettings(controller);
             var router = new WorldNoiseRouter(settings);
             var field = router.Sample(cell.x, cell.y);
-            var profile = WorldPatternResolver.Resolve(
+            var profile = RiverPatternResolver.Resolve(
                 router,
                 cell.x,
                 cell.y,
@@ -446,6 +463,8 @@ namespace MiniCivilization.World.Editor
                 + $"패턴 깊이 {profile.PatternDepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell / "
                 + $"깊이 진행 {profile.PatternDepthProgress:0.000} / "
                 + $"패턴 세부 {profile.PatternDetailUnits / WorldGrid.HeightStepsPerCell:+0.00;-0.00;0.00} Cell\n"
+                + $"강 단면 진행 {profile.RiverInfluence:0.000} / "
+                + $"강 수심 {profile.RiverDepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
                 + $"수면 {profile.WaterTopUnits / (float)WorldGrid.HeightStepsPerCell:0.00} Cell / "
                 + $"합성 표면 {(settings.TerrainBaseHeightUnits + profile.SurfaceOffsetUnits) / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
                 + $"실제 지형 표면: {actualHeight}\n"
@@ -712,7 +731,7 @@ namespace MiniCivilization.World.Editor
             for (var z = 0; z < resolution; z++)
             for (var x = 0; x < resolution; x++)
             {
-                var profile = WorldPatternResolver.Resolve(
+                var profile = RiverPatternResolver.Resolve(
                     router,
                     center.x - worldOverlayRadius + x,
                     center.y - worldOverlayRadius + z,
@@ -725,7 +744,8 @@ namespace MiniCivilization.World.Editor
                     weights,
                     profile,
                     settings.TerrainBaseHeightUnits
-                        + profile.SurfaceOffsetUnits);
+                        + profile.SurfaceOffsetUnits,
+                    settings.WorldPatterns.River.DepthUnits.Maximum);
             }
 
             RenderDetailPreview();
@@ -803,6 +823,43 @@ namespace MiniCivilization.World.Editor
                         1f)
                     : 0f;
                 return Color.Lerp(Color.black, SeaColor, ratio);
+            }
+
+            if (view == PatternView.RiverArea)
+            {
+                return Color.Lerp(
+                    Color.black,
+                    RiverColor,
+                    sample.Result.RiverInfluence);
+            }
+
+            if (view == PatternView.RiverDepth)
+            {
+                var ratio = sample.RiverMaximumDepthUnits > 0f
+                    ? Math.Clamp(
+                        sample.Result.RiverDepthUnits
+                            / sample.RiverMaximumDepthUnits,
+                        0f,
+                        1f)
+                    : 0f;
+                return Color.Lerp(Color.black, RiverColor, ratio);
+            }
+
+            if (view == PatternView.RiverWater)
+            {
+                var waterDepthUnits = sample.Result.WaterType == WaterType.River
+                    ? Math.Max(
+                        0f,
+                        sample.Result.WaterTopUnits
+                            - sample.FinalSurfaceUnits)
+                    : 0f;
+                var ratio = sample.RiverMaximumDepthUnits > 0f
+                    ? Math.Clamp(
+                        waterDepthUnits / sample.RiverMaximumDepthUnits,
+                        0f,
+                        1f)
+                    : 0f;
+                return Color.Lerp(Color.black, RiverColor, ratio);
             }
 
             var weights = sample.Weights;

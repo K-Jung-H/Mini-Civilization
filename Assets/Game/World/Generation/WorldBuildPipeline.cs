@@ -142,27 +142,18 @@ namespace MiniCivilization.World.Generation
             int regionKey,
             WorldPatternType patternType,
             float influence,
-            float interiorProgress,
-            double localX,
-            double localZ,
-            int sizeCells)
+            float interiorProgress)
         {
             RegionKey = regionKey;
             PatternType = patternType;
             Influence = influence;
             InteriorProgress = interiorProgress;
-            LocalX = localX;
-            LocalZ = localZ;
-            SizeCells = sizeCells;
         }
 
         public int RegionKey { get; }
         public WorldPatternType PatternType { get; }
         public float Influence { get; }
         public float InteriorProgress { get; }
-        public double LocalX { get; }
-        public double LocalZ { get; }
-        public int SizeCells { get; }
     }
 
     internal readonly struct WorldPatternRegionSample
@@ -192,7 +183,9 @@ namespace MiniCivilization.World.Generation
             float patternDepthProgress,
             float patternDetailUnits,
             int waterTopUnits,
-            WaterType waterType)
+            WaterType waterType,
+            float riverInfluence = 0f,
+            float riverDepthUnits = 0f)
         {
             SurfaceOffsetUnits = surfaceOffsetUnits;
             VerticalFactor = verticalFactor;
@@ -205,6 +198,8 @@ namespace MiniCivilization.World.Generation
             PatternDetailUnits = patternDetailUnits;
             WaterTopUnits = waterTopUnits;
             WaterType = waterType;
+            RiverInfluence = riverInfluence;
+            RiverDepthUnits = riverDepthUnits;
         }
 
         public float SurfaceOffsetUnits { get; }
@@ -218,6 +213,8 @@ namespace MiniCivilization.World.Generation
         public float PatternDetailUnits { get; }
         public int WaterTopUnits { get; }
         public WaterType WaterType { get; }
+        public float RiverInfluence { get; }
+        public float RiverDepthUnits { get; }
         public bool HasWaterPattern => WaterType != WaterType.None;
     }
 
@@ -262,6 +259,38 @@ namespace MiniCivilization.World.Generation
 
         public float SurfaceOffsetUnits { get; }
         public float DetailUnits { get; }
+    }
+
+    internal readonly struct TerrainPatternFieldContext
+    {
+        public TerrainPatternFieldContext(
+            int worldSeed,
+            int worldX,
+            int worldZ,
+            in WorldPatternRegionCandidate region)
+        {
+            WorldSeed = worldSeed;
+            WorldX = worldX;
+            WorldZ = worldZ;
+            Region = region;
+        }
+
+        public int WorldSeed { get; }
+        public int WorldX { get; }
+        public int WorldZ { get; }
+        public WorldPatternRegionCandidate Region { get; }
+    }
+
+    internal readonly struct TerrainPatternFieldCoordinates
+    {
+        public TerrainPatternFieldCoordinates(double x, double z)
+        {
+            X = x;
+            Z = z;
+        }
+
+        public double X { get; }
+        public double Z { get; }
     }
 
     internal readonly struct WorldPatternWeights
@@ -739,8 +768,8 @@ namespace MiniCivilization.World.Generation
     internal static class WorldNoiseFieldSampler
     {
         public static float Sample2D(
-            long worldX,
-            long worldZ,
+            double worldX,
+            double worldZ,
             in WorldNoiseFieldSettingsData field,
             int seed)
         {
@@ -797,6 +826,80 @@ namespace MiniCivilization.World.Generation
                 : sample;
         }
 
+    }
+
+    internal static class TerrainPatternFieldSampler
+    {
+        public static TerrainPatternFieldCoordinates Warp(
+            in TerrainPatternFieldContext context,
+            in TerrainDomainWarpSettingsData settings,
+            int channel)
+        {
+            var origin = new TerrainPatternFieldCoordinates(
+                context.WorldX,
+                context.WorldZ);
+            var warpX = SampleSigned(
+                context,
+                origin,
+                settings.Field,
+                channel);
+            var warpZ = SampleSigned(
+                context,
+                origin,
+                settings.Field,
+                channel + 1);
+            return new TerrainPatternFieldCoordinates(
+                context.WorldX + warpX * settings.StrengthCells,
+                context.WorldZ + warpZ * settings.StrengthCells);
+        }
+
+        public static float Sample01(
+            in TerrainPatternFieldContext context,
+            in TerrainPatternFieldCoordinates coordinates,
+            in WorldNoiseFieldSettingsData field,
+            int channel)
+        {
+            var sample = WorldNoiseFieldSampler.Sample2D(
+                coordinates.X,
+                coordinates.Z,
+                field,
+                Seed(context, channel));
+            return field.Mode is WorldNoiseMode.Signed
+                or WorldNoiseMode.SignedRidge
+                ? Math.Clamp((sample + 1f) * 0.5f, 0f, 1f)
+                : Math.Clamp(sample, 0f, 1f);
+        }
+
+        public static float SampleSigned(
+            in TerrainPatternFieldContext context,
+            in TerrainPatternFieldCoordinates coordinates,
+            in WorldNoiseFieldSettingsData field,
+            int channel) => Sample01(
+                context,
+                coordinates,
+                field,
+                channel) * 2f - 1f;
+
+        public static float Resolve(
+            in TerrainPatternFieldContext context,
+            in WorldSeededRangeSettingsData range,
+            int channel)
+        {
+            var selector = (DeterministicNoise.Hash(
+                    context.Region.RegionKey,
+                    channel,
+                    context.WorldSeed) & 0x00FFFFFFu)
+                / 16777215f;
+            return range.Minimum
+                + (range.Maximum - range.Minimum) * selector;
+        }
+
+        private static int Seed(
+            in TerrainPatternFieldContext context,
+            int channel) => unchecked((int)DeterministicNoise.Hash(
+            context.Region.RegionKey,
+            channel,
+            context.WorldSeed));
     }
 
     internal readonly struct WorldNoiseRouter
@@ -977,22 +1080,19 @@ namespace MiniCivilization.World.Generation
                 1.0));
             var primaryInfluence = 0.5f + boundaryProgress * 0.5f;
             var interiorProgress = SmootherStep((float)Math.Clamp(
-                boundaryDistance / (settings.SizeCells * 0.35),
+                boundaryDistance
+                    / (settings.SizeCells * settings.InteriorReachRatio),
                 0.0,
                 1.0));
             return new WorldPatternRegionSample(
                 CreateCandidate(
                     nearest,
-                    sampleX,
-                    sampleZ,
                     primaryInfluence,
                     interiorProgress,
                     regionSeed,
                     settings),
                 CreateCandidate(
                     second,
-                    sampleX,
-                    sampleZ,
                     1f - primaryInfluence,
                     0f,
                     regionSeed,
@@ -1001,8 +1101,6 @@ namespace MiniCivilization.World.Generation
 
         private static WorldPatternRegionCandidate CreateCandidate(
             in RawRegion region,
-            double sampleX,
-            double sampleZ,
             float influence,
             float interiorProgress,
             int seed,
@@ -1017,10 +1115,7 @@ namespace MiniCivilization.World.Generation
                 key,
                 type,
                 influence,
-                interiorProgress,
-                sampleX - region.CenterX,
-                sampleZ - region.CenterZ,
-                settings.SizeCells);
+                interiorProgress);
         }
 
         private static WorldPatternType SelectType(
@@ -1086,7 +1181,7 @@ namespace MiniCivilization.World.Generation
                 working.SetWorldPatternResult(
                     sampleLocalX,
                     sampleLocalZ,
-                    WorldPatternResolver.Resolve(
+                    RiverPatternResolver.Resolve(
                         router,
                         worldX,
                         worldZ,
@@ -1121,20 +1216,20 @@ namespace MiniCivilization.World.Generation
                 + settings.BaseDensity.SurfaceByContinentalness.Evaluate(
                     field.Continentalness)
                 + settings.BaseDensity.SurfaceByErosion.Evaluate(field.Erosion);
-            var baseDetailUnits = settings.BaseDensity.DetailByRoughness.Evaluate(
-                field.Roughness);
             var primary = GenerateCandidate(
                 region.Primary,
-                field,
+                worldSettings.Seed,
+                worldX,
+                worldZ,
                 settings,
-                baseSurfaceUnits,
-                baseDetailUnits);
+                baseSurfaceUnits);
             var secondary = GenerateCandidate(
                 region.Secondary,
-                field,
+                worldSettings.Seed,
+                worldX,
+                worldZ,
                 settings,
-                baseSurfaceUnits,
-                baseDetailUnits);
+                baseSurfaceUnits);
             var surfaceUnits = Lerp(
                 secondary.SurfaceUnits,
                 primary.SurfaceUnits,
@@ -1161,21 +1256,27 @@ namespace MiniCivilization.World.Generation
 
         private static WorldPatternCandidateResult GenerateCandidate(
             in WorldPatternRegionCandidate region,
-            in WorldFieldSample field,
+            int worldSeed,
+            int worldX,
+            int worldZ,
             in WorldPatternSettingsData settings,
-            float baseSurfaceUnits,
-            float baseDetailUnits)
+            float baseSurfaceUnits)
         {
+            var context = new TerrainPatternFieldContext(
+                worldSeed,
+                worldX,
+                worldZ,
+                region);
             switch (region.PatternType)
             {
                 case WorldPatternType.Smooth:
                 {
                     var result = SmoothTerrainGenerator.Generate(
-                        field,
+                        context,
                         settings.Smooth);
                     return new WorldPatternCandidateResult(
                         baseSurfaceUnits + result.SurfaceOffsetUnits,
-                        baseDetailUnits + result.DetailUnits,
+                        result.DetailUnits,
                         0f,
                         0f,
                         0f,
@@ -1185,11 +1286,11 @@ namespace MiniCivilization.World.Generation
                 case WorldPatternType.Rugged:
                 {
                     var result = RuggedTerrainGenerator.Generate(
-                        field,
+                        context,
                         settings.Rugged);
                     return new WorldPatternCandidateResult(
                         baseSurfaceUnits + result.SurfaceOffsetUnits,
-                        baseDetailUnits + result.DetailUnits,
+                        result.DetailUnits,
                         0f,
                         0f,
                         0f,
@@ -1199,12 +1300,11 @@ namespace MiniCivilization.World.Generation
                 case WorldPatternType.Mountain:
                 {
                     var result = MountainTerrainGenerator.Generate(
-                        region,
-                        field,
+                        context,
                         settings.Mountain);
                     return new WorldPatternCandidateResult(
                         baseSurfaceUnits + result.SurfaceOffsetUnits,
-                        baseDetailUnits,
+                        result.DetailUnits,
                         0f,
                         0f,
                         0f,
@@ -1214,11 +1314,11 @@ namespace MiniCivilization.World.Generation
                 case WorldPatternType.Canyon:
                 {
                     var result = CanyonTerrainGenerator.Generate(
-                        region,
+                        context,
                         settings.Canyon);
                     return new WorldPatternCandidateResult(
                         baseSurfaceUnits + result.SurfaceOffsetUnits,
-                        baseDetailUnits * settings.Canyon.DetailStrength,
+                        0f,
                         -result.SurfaceOffsetUnits,
                         result.DepthProgress,
                         0f,
@@ -1227,8 +1327,7 @@ namespace MiniCivilization.World.Generation
                 }
                 case WorldPatternType.Sea:
                     return SeaPatternGenerator.Generate(
-                        region,
-                        field,
+                        context,
                         settings.Sea);
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -1319,21 +1418,43 @@ namespace MiniCivilization.World.Generation
     internal static class SeaPatternGenerator
     {
         public static WorldPatternCandidateResult Generate(
-            in WorldPatternRegionCandidate region,
-            in WorldFieldSample field,
+            in TerrainPatternFieldContext context,
             in SeaPatternSettingsData settings)
         {
-            var depthProgress = Math.Clamp(
-                settings.DepthByInterior.EvaluateMonotonic(
-                    region.InteriorProgress),
+            const int channel = 5000;
+            var coordinates = TerrainPatternFieldSampler.Warp(
+                context,
+                settings.DomainWarp,
+                channel);
+            var basinVariation = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.BasinField,
+                    channel + 10)
+                * settings.BasinVariation;
+            var basinProgress = Math.Clamp(
+                context.Region.InteriorProgress + basinVariation,
                 0f,
                 1f);
-            var maximumDepthUnits = settings.MaximumDepthCells
-                * WorldGrid.HeightStepsPerCell;
+            var depthProgress = Math.Clamp(
+                settings.DepthByBasin.EvaluateMonotonic(basinProgress),
+                0f,
+                1f);
+            var maximumDepthUnits = TerrainPatternFieldSampler.Resolve(
+                context,
+                settings.MaximumDepthUnits,
+                channel + 20);
             var depthUnits = depthProgress * maximumDepthUnits;
-            var seabedDetailUnits = field.SeaDetail
-                * settings.ShapeDetailStrength
-                * depthUnits;
+            var seabedDetailUnits = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.SeabedField,
+                    channel + 30)
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.SeabedAmplitudeUnits,
+                    channel + 40)
+                * depthProgress;
             return WorldPatternResolver.CreateSeaCandidate(
                 settings.SurfaceUnits - depthUnits + seabedDetailUnits,
                 depthUnits,
@@ -1346,91 +1467,115 @@ namespace MiniCivilization.World.Generation
     internal static class SmoothTerrainGenerator
     {
         public static TerrainPatternContribution Generate(
-            in WorldFieldSample field,
-            in SmoothTerrainSettingsData settings) => new(
-                settings.UndulationByWeirdness.Evaluate(field.Weirdness),
-                settings.DetailByRoughness.Evaluate(field.Roughness));
+            in TerrainPatternFieldContext context,
+            in SmoothTerrainSettingsData settings)
+        {
+            const int channel = 1000;
+            var coordinates = TerrainPatternFieldSampler.Warp(
+                context,
+                settings.DomainWarp,
+                channel);
+            var height = settings.HeightResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.HeightField,
+                        channel + 10))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.HeightAmplitudeUnits,
+                    channel + 20);
+            var detail = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.DetailField,
+                    channel + 30)
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.DetailAmplitudeUnits,
+                    channel + 40);
+            return new TerrainPatternContribution(height + detail, 0f);
+        }
     }
 
     internal static class RuggedTerrainGenerator
     {
         public static TerrainPatternContribution Generate(
-            in WorldFieldSample field,
-            in RuggedTerrainSettingsData settings) => new(
-                settings.ReliefByPeaksValleys.Evaluate(field.PeaksValleys)
-                * settings.ReliefScaleByRoughness.Evaluate(field.Roughness),
-                settings.DetailByRoughness.Evaluate(field.Roughness));
+            in TerrainPatternFieldContext context,
+            in RuggedTerrainSettingsData settings)
+        {
+            const int channel = 2000;
+            var coordinates = TerrainPatternFieldSampler.Warp(
+                context,
+                settings.DomainWarp,
+                channel);
+            var relief = settings.ReliefResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.ReliefField,
+                        channel + 10))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.ReliefAmplitudeUnits,
+                    channel + 20);
+            var detail = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.DetailField,
+                    channel + 30)
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.DetailAmplitudeUnits,
+                    channel + 40);
+            return new TerrainPatternContribution(relief + detail, 0f);
+        }
     }
 
     internal static class MountainTerrainGenerator
     {
-        private const int SlopeSegmentCount = 6;
-
         public static TerrainPatternContribution Generate(
-            in WorldPatternRegionCandidate region,
-            in WorldFieldSample field,
+            in TerrainPatternFieldContext context,
             in MountainTerrainSettingsData settings)
         {
-            var heightSelector = Hash01(region.RegionKey, 401);
-            var selectedHeight = Lerp(
-                settings.MinimumHeightUnits,
-                settings.MaximumHeightUnits,
-                MathF.Pow(heightSelector, settings.HeightBias));
-            var climb = IntegratedPositiveSlope(
-                region.InteriorProgress,
-                region.RegionKey,
-                settings.SlopeVariation);
-            var ridge = field.PeaksValleys
-                * settings.RidgeStrengthUnits
-                * WorldPatternRegionSampler.SmootherStep(
-                    region.InteriorProgress);
+            const int channel = 3000;
+            var coordinates = TerrainPatternFieldSampler.Warp(
+                context,
+                settings.DomainWarp,
+                channel);
+            var mass = settings.MassResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.MassField,
+                        channel + 10))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.HeightUnits,
+                    channel + 20);
+            var ridge = settings.RidgeResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.RidgeField,
+                        channel + 30))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.RidgeStrengthUnits,
+                    channel + 40);
+            var detail = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.DetailField,
+                    channel + 50)
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.DetailAmplitudeUnits,
+                    channel + 60);
             return new TerrainPatternContribution(
-                selectedHeight * climb + ridge,
+                mass + ridge + detail,
                 0f);
         }
-
-        private static float IntegratedPositiveSlope(
-            float progress,
-            int regionKey,
-            float variation)
-        {
-            progress = Math.Clamp(progress, 0f, 1f);
-            var totalArea = 0f;
-            var partialArea = 0f;
-            var scaled = progress * SlopeSegmentCount;
-            for (var segment = 0; segment < SlopeSegmentCount; segment++)
-            {
-                var from = Slope(regionKey, segment, variation);
-                var to = Slope(regionKey, segment + 1, variation);
-                var area = (from + to) * 0.5f;
-                totalArea += area;
-                if (scaled <= segment)
-                {
-                    continue;
-                }
-
-                var amount = Math.Clamp(scaled - segment, 0f, 1f);
-                partialArea += from * amount
-                    + (to - from) * amount * amount * 0.5f;
-            }
-
-            return totalArea > 0f
-                ? Math.Clamp(partialArea / totalArea, 0f, 1f)
-                : progress;
-        }
-
-        private static float Slope(int regionKey, int index, float variation)
-        {
-            var value = Hash01(regionKey, 503 + index * 37) * 2f - 1f;
-            return MathF.Exp(value * variation);
-        }
-
-        private static float Hash01(int regionKey, int channel) =>
-            (DeterministicNoise.Hash(regionKey, channel, 7193)
-                & 0x00FFFFFFu) / 16777215f;
-
-        private static float Lerp(float from, float to, float amount) =>
-            from + (to - from) * amount;
     }
 
     internal static class CanyonTerrainGenerator
@@ -1448,150 +1593,56 @@ namespace MiniCivilization.World.Generation
         }
 
         public static CanyonContribution Generate(
-            in WorldPatternRegionCandidate region,
+            in TerrainPatternFieldContext context,
             in CanyonTerrainSettingsData settings)
         {
-            var selectedRegionDepth = Lerp(
-                settings.MinimumDepthUnits,
-                settings.MaximumDepthUnits,
-                Hash01(region.RegionKey, 149));
-            var regionDepthRatio = Lerp(
-                settings.MinimumRegionDepthRatio,
-                settings.MaximumRegionDepthRatio,
-                Hash01(region.RegionKey, 163));
-            var basinDepth = selectedRegionDepth * regionDepthRatio;
-            var additionalDepthCapacity = Math.Max(
-                0f,
-                settings.MaximumDepthUnits - basinDepth);
-            var valleyCount = SelectValleyCount(region.RegionKey, settings);
-            var remainingOutsideValleys = 1f;
-            var baseAngle = Hash01(region.RegionKey, 101) * MathF.PI;
-            var angleSpacing = MathF.PI / valleyCount;
-            for (var valleyIndex = 0; valleyIndex < valleyCount; valleyIndex++)
-            {
-                var angle = baseAngle
-                    + (valleyIndex + Hash01(
-                        region.RegionKey,
-                        113 + valleyIndex * 97))
-                    * angleSpacing;
-                var valley = EvaluateValley(
-                    region,
-                    settings,
-                    valleyIndex,
-                    angle,
-                    selectedRegionDepth,
-                    basinDepth,
-                    additionalDepthCapacity);
-                remainingOutsideValleys *= 1f - valley;
-            }
-
-            var valleyNetwork = 1f - remainingOutsideValleys;
-            var regionEnvelope = WorldPatternRegionSampler.SmootherStep(
-                region.InteriorProgress);
-            var finalDepth = regionEnvelope
-                * (basinDepth + additionalDepthCapacity * valleyNetwork);
-            var depthProgress = settings.MaximumDepthUnits > 0f
-                ? Math.Clamp(finalDepth / settings.MaximumDepthUnits, 0f, 1f)
-                : 0f;
-            return new CanyonContribution(-finalDepth, depthProgress);
-        }
-
-        private static float EvaluateValley(
-            in WorldPatternRegionCandidate region,
-            in CanyonTerrainSettingsData settings,
-            int valleyIndex,
-            float angle,
-            float selectedRegionDepth,
-            float basinDepth,
-            float additionalDepthCapacity)
-        {
-            var directionX = MathF.Cos(angle);
-            var directionZ = MathF.Sin(angle);
-            var perpendicularX = -directionZ;
-            var perpendicularZ = directionX;
-            var along = region.LocalX * directionX + region.LocalZ * directionZ;
-            var across = region.LocalX * perpendicularX
-                + region.LocalZ * perpendicularZ;
-            var offset = (Hash01(
-                    region.RegionKey,
-                    179 + valleyIndex * 131) * 2f - 1f)
-                * region.SizeCells
-                * settings.MaximumValleyOffsetRatio;
-            var axisWarp = AxisWarp(
-                along,
-                region,
-                settings,
-                valleyIndex);
-            var width = Lerp(
-                settings.MinimumWidthCells,
-                settings.MaximumWidthCells,
-                AlongNoise(along, region, 311 + valleyIndex * 149));
-            var proximity = 1f - Math.Clamp(
-                (float)Math.Abs(across - offset - axisWarp)
-                    / Math.Max(0.5f, width),
+            const int channel = 4000;
+            var coordinates = TerrainPatternFieldSampler.Warp(
+                context,
+                settings.DomainWarp,
+                channel);
+            var basin = settings.BasinResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.BasinField,
+                        channel + 10))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.BasinDepthRatio,
+                    channel + 20);
+            var valley = settings.ValleyResponse.Evaluate(
+                    TerrainPatternFieldSampler.Sample01(
+                        context,
+                        coordinates,
+                        settings.ValleyField,
+                        channel + 30))
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.ValleyDepthRatio,
+                    channel + 40);
+            var depthProgress = Math.Clamp(
+                1f - (1f - basin) * (1f - valley),
                 0f,
                 1f);
-            var crossSection = WorldPatternRegionSampler.SmootherStep(proximity);
-            if (additionalDepthCapacity <= 0f)
-            {
-                return 0f;
-            }
-
-            var valleyDepth = Lerp(
-                selectedRegionDepth,
-                settings.MaximumDepthUnits,
-                Hash01(region.RegionKey, 197 + valleyIndex * 167));
-            var relativeDepth = Math.Clamp(
-                (valleyDepth - basinDepth) / additionalDepthCapacity,
-                0f,
-                1f);
-            return crossSection * relativeDepth;
+            var depthUnits = depthProgress
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.DepthUnits,
+                    channel + 50);
+            var detailUnits = TerrainPatternFieldSampler.SampleSigned(
+                    context,
+                    coordinates,
+                    settings.DetailField,
+                    channel + 60)
+                * TerrainPatternFieldSampler.Resolve(
+                    context,
+                    settings.DetailAmplitudeUnits,
+                    channel + 70);
+            return new CanyonContribution(
+                -depthUnits + detailUnits,
+                depthProgress);
         }
-
-        private static int SelectValleyCount(
-            int regionKey,
-            in CanyonTerrainSettingsData settings)
-        {
-            var range = settings.MaximumValleyCount
-                - settings.MinimumValleyCount
-                + 1;
-            var selected = (int)(Hash01(regionKey, 89) * range);
-            return settings.MinimumValleyCount + Math.Min(range - 1, selected);
-        }
-
-        private static float AxisWarp(
-            double along,
-            in WorldPatternRegionCandidate region,
-            in CanyonTerrainSettingsData settings,
-            int valleyIndex)
-        {
-            var channel = 233 + valleyIndex * 181;
-            var current = AlongNoise(along, region, channel);
-            var center = AlongNoise(0.0, region, channel);
-            return (current - center) * 2f * settings.AxisWarpCells;
-        }
-
-        private static float AlongNoise(
-            double along,
-            in WorldPatternRegionCandidate region,
-            int channel)
-        {
-            var seed = unchecked(region.RegionKey ^ channel * 7919);
-            return DeterministicNoise.FractalNoise(
-                along / Math.Max(16.0, region.SizeCells * 0.65),
-                channel * 0.173,
-                seed,
-                3,
-                2f,
-                0.5f);
-        }
-
-        private static float Hash01(int regionKey, int channel) =>
-            (DeterministicNoise.Hash(regionKey, channel, 1237)
-                & 0x00FFFFFFu) / 16777215f;
-
-        private static float Lerp(float from, float to, float amount) =>
-            from + (to - from) * amount;
     }
 
     internal static class WorldDensityStage
