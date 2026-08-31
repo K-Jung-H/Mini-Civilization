@@ -15,7 +15,10 @@ namespace MiniCivilization.World.Generation
 
         public WorldData Generate()
         {
-            return WorldGenerationPipeline.Build(CreateBuildInput());
+            var input = CreateBuildInput();
+            var world = WorldGenerationPipeline.Build(input);
+            WorldGenerationDiagnostics.LogInitial(input.GenerationTiming);
+            return world;
         }
 
         public WorldBuildInput CreateBuildInput()

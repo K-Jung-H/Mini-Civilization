@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Generation
@@ -8,9 +9,12 @@ namespace MiniCivilization.World.Generation
         private WorldBuildInput(WorldGenerationSettings settings, int seed)
         {
             Settings = settings.CreateData(seed);
+            Hydrology = new WorldHydrology(Settings);
         }
 
         public WorldSettingsData Settings { get; }
+        internal WorldHydrology Hydrology { get; }
+        internal WorldGenerationTimingSummary GenerationTiming { get; } = new();
         public int Seed => Settings.Seed;
 
         public static WorldBuildInput Create(
@@ -31,23 +35,34 @@ namespace MiniCivilization.World.Generation
         }
 
         internal WorldChunkBuildInput CreateChunkInput(
-            ChunkCoordinate coordinate) =>
-            WorldChunkBuildInput.Create(Settings, coordinate);
+            ChunkCoordinate coordinate,
+            HydrologyPlanScope planScope) =>
+            WorldChunkBuildInput.Create(
+                Settings,
+                coordinate,
+                Hydrology,
+                planScope);
     }
 
     internal sealed class WorldChunkBuildInput
     {
         private WorldChunkBuildInput(
             WorldSettingsData settings,
-            ChunkCoordinate coordinate)
+            ChunkCoordinate coordinate,
+            WorldHydrology hydrology,
+            HydrologyPlanScope planScope)
         {
             Settings = settings;
+            Hydrology = hydrology;
+            PlanScope = planScope;
             Coordinate = coordinate;
             OriginX = checked(coordinate.X * settings.ChunkCellCountXZ);
             OriginZ = checked(coordinate.Z * settings.ChunkCellCountXZ);
         }
 
         public WorldSettingsData Settings { get; }
+        public WorldHydrology Hydrology { get; }
+        public HydrologyPlanScope PlanScope { get; }
         public ChunkCoordinate Coordinate { get; }
         public int ChunkSizeXZ => Settings.ChunkCellCountXZ;
         public int WorldHeight => Settings.WorldHeight;
@@ -58,7 +73,9 @@ namespace MiniCivilization.World.Generation
 
         public static WorldChunkBuildInput Create(
             WorldSettingsData settings,
-            ChunkCoordinate coordinate)
+            ChunkCoordinate coordinate,
+            WorldHydrology hydrology,
+            HydrologyPlanScope planScope)
         {
             if (settings == null)
             {
@@ -74,7 +91,28 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentOutOfRangeException(nameof(coordinate));
             }
 
-            return new WorldChunkBuildInput(settings, coordinate);
+            if (hydrology == null)
+            {
+                throw new ArgumentNullException(nameof(hydrology));
+            }
+
+            if (!ReferenceEquals(hydrology.Settings, settings))
+            {
+                throw new ArgumentException(
+                    "The Hydrology service must use the Chunk Build settings.",
+                    nameof(hydrology));
+            }
+
+            if (planScope == null)
+            {
+                throw new ArgumentNullException(nameof(planScope));
+            }
+
+            return new WorldChunkBuildInput(
+                settings,
+                coordinate,
+                hydrology,
+                planScope);
         }
 
         public int ToWorldX(int localX)
@@ -185,7 +223,11 @@ namespace MiniCivilization.World.Generation
             int waterTopUnits,
             WaterType waterType,
             float riverInfluence = 0f,
-            float riverDepthUnits = 0f)
+            float riverDepthUnits = 0f,
+            int hydrologyComponentId = 0,
+            float hydrologyMembership = 0f,
+            float hydrologyInteriorProgress = 0f,
+            WaterType hydrologyType = WaterType.None)
         {
             SurfaceOffsetUnits = surfaceOffsetUnits;
             VerticalFactor = verticalFactor;
@@ -200,6 +242,10 @@ namespace MiniCivilization.World.Generation
             WaterType = waterType;
             RiverInfluence = riverInfluence;
             RiverDepthUnits = riverDepthUnits;
+            HydrologyComponentId = hydrologyComponentId;
+            HydrologyMembership = hydrologyMembership;
+            HydrologyInteriorProgress = hydrologyInteriorProgress;
+            HydrologyType = hydrologyType;
         }
 
         public float SurfaceOffsetUnits { get; }
@@ -215,6 +261,10 @@ namespace MiniCivilization.World.Generation
         public WaterType WaterType { get; }
         public float RiverInfluence { get; }
         public float RiverDepthUnits { get; }
+        public int HydrologyComponentId { get; }
+        public float HydrologyMembership { get; }
+        public float HydrologyInteriorProgress { get; }
+        public WaterType HydrologyType { get; }
         public bool HasWaterPattern => WaterType != WaterType.None;
     }
 
@@ -343,11 +393,12 @@ namespace MiniCivilization.World.Generation
     internal sealed class GenerationWorkingData
     {
         private WorldFieldSample[] worldFieldSamples;
+        private WorldPatternResult[] baseTerrainPatternResults;
         private WorldPatternResult[] worldPatternResults;
-        private float[] worldDensity;
         private float[] finalSurfaceUnits;
         private WorldColumnBuildData[] finalColumns;
         private bool[] finalColumnWritten;
+        private HydrologyBatch hydrologyBatch;
 
         public GenerationWorkingData(
             WorldChunkBuildInput input,
@@ -367,14 +418,24 @@ namespace MiniCivilization.World.Generation
                 SampleSizeXZ * SampleSizeXZ)];
             worldPatternResults = new WorldPatternResult[
                 worldFieldSamples.Length];
-            worldDensity = new float[checked(
-                SampleSizeXZ
-                * SampleSizeXZ
-                * DensityHeightUnitCount)];
+            baseTerrainPatternResults = new WorldPatternResult[
+                worldFieldSamples.Length];
             finalSurfaceUnits = new float[worldFieldSamples.Length];
             finalColumns = new WorldColumnBuildData[
                 checked(input.ChunkSizeXZ * input.ChunkSizeXZ)];
             finalColumnWritten = new bool[finalColumns.Length];
+            var metricsBefore = input.Hydrology.CaptureMetrics();
+            var hydrologyTimer = Stopwatch.StartNew();
+            hydrologyBatch = HydrologyBatchBuilder.Build(
+                input.Hydrology,
+                input.PlanScope,
+                SampleOriginX,
+                SampleOriginZ,
+                SampleSizeXZ,
+                SampleSizeXZ);
+            HydrologyBatchMilliseconds = hydrologyTimer.ElapsedMilliseconds;
+            HydrologyMetrics = input.Hydrology.CaptureMetrics()
+                .Delta(metricsBefore);
         }
 
         public WorldChunkBuildInput Input { get; }
@@ -382,12 +443,22 @@ namespace MiniCivilization.World.Generation
         public int SampleOriginX { get; }
         public int SampleOriginZ { get; }
         public int SampleSizeXZ { get; }
-        public int DensityHeightUnitCount => checked(Input.HeightUnitCount + 1);
         public bool HasWorldField { get; private set; }
+        public bool HasBaseTerrainPattern { get; private set; }
         public bool HasWorldPatternResult { get; private set; }
-        public bool HasWorldDensity { get; private set; }
         public bool HasFinalSurface { get; private set; }
         public bool IsCompleted => finalColumns == null;
+        public long HydrologyBatchMilliseconds { get; }
+        public HydrologyMetricsSnapshot HydrologyMetrics { get; }
+        public HydrologyBatch HydrologyBatch => hydrologyBatch
+            ?? throw new InvalidOperationException(
+                "Hydrology Batch has already been released.");
+
+        public void ReleaseHydrologyBatch()
+        {
+            hydrologyBatch?.Dispose();
+            hydrologyBatch = null;
+        }
 
         public void SetWorldField(
             int sampleLocalX,
@@ -435,16 +506,58 @@ namespace MiniCivilization.World.Generation
                 sampleLocalZ)];
         }
 
+        public void SetBaseTerrainPattern(
+            int sampleLocalX,
+            int sampleLocalZ,
+            in WorldPatternResult value)
+        {
+            EnsureNotCompleted();
+            if (!HasWorldField || HasBaseTerrainPattern)
+            {
+                throw new InvalidOperationException(
+                    "Base Terrain Pattern stage order is invalid.");
+            }
+            baseTerrainPatternResults[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)] = value;
+        }
+
+        public void CompleteBaseTerrainPattern()
+        {
+            EnsureNotCompleted();
+            if (!HasWorldField || HasBaseTerrainPattern)
+            {
+                throw new InvalidOperationException(
+                    "Base Terrain Pattern stage order is invalid.");
+            }
+            HasBaseTerrainPattern = true;
+        }
+
+        public WorldPatternResult GetBaseTerrainPattern(
+            int sampleLocalX,
+            int sampleLocalZ)
+        {
+            EnsureNotCompleted();
+            if (!HasBaseTerrainPattern)
+            {
+                throw new InvalidOperationException(
+                    "Base Terrain Pattern is not ready.");
+            }
+            return baseTerrainPatternResults[ToSurfaceIndex(
+                sampleLocalX,
+                sampleLocalZ)];
+        }
+
         public void SetWorldPatternResult(
             int sampleLocalX,
             int sampleLocalZ,
             in WorldPatternResult value)
         {
             EnsureNotCompleted();
-            if (!HasWorldField)
+            if (!HasBaseTerrainPattern)
             {
                 throw new InvalidOperationException(
-                    "World Field must be ready before its Pattern Result is built.");
+                    "Base Terrain Pattern must be ready before Hydrology composition.");
             }
 
             if (HasWorldPatternResult)
@@ -461,10 +574,10 @@ namespace MiniCivilization.World.Generation
         public void CompleteWorldPatternResult()
         {
             EnsureNotCompleted();
-            if (!HasWorldField)
+            if (!HasBaseTerrainPattern)
             {
                 throw new InvalidOperationException(
-                    "World Field must be ready before its Pattern Result is finalized.");
+                    "Base Terrain Pattern must be ready before Hydrology composition is finalized.");
             }
 
             if (HasWorldPatternResult)
@@ -492,82 +605,16 @@ namespace MiniCivilization.World.Generation
                 sampleLocalZ)];
         }
 
-        public void SetWorldDensity(
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ,
-            float density)
-        {
-            EnsureNotCompleted();
-            if (!HasWorldPatternResult)
-            {
-                throw new InvalidOperationException(
-                    "World Pattern Result must be ready before World Density is built.");
-            }
-
-            if (HasWorldDensity)
-            {
-                throw new InvalidOperationException(
-                    "World Density has already been finalized.");
-            }
-
-            if (!float.IsFinite(density))
-            {
-                throw new ArgumentOutOfRangeException(nameof(density));
-            }
-
-            worldDensity[ToDensityIndex(
-                sampleLocalX,
-                heightUnit,
-                sampleLocalZ)] = density;
-        }
-
-        public void CompleteWorldDensity()
-        {
-            EnsureNotCompleted();
-            if (!HasWorldPatternResult)
-            {
-                throw new InvalidOperationException(
-                    "World Pattern Result must be ready before World Density is finalized.");
-            }
-
-            if (HasWorldDensity)
-            {
-                throw new InvalidOperationException(
-                    "World Density has already been finalized.");
-            }
-
-            HasWorldDensity = true;
-        }
-
-        public float GetWorldDensity(
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ)
-        {
-            EnsureNotCompleted();
-            if (!HasWorldDensity)
-            {
-                throw new InvalidOperationException(
-                    "World Density is not ready.");
-            }
-
-            return worldDensity[ToDensityIndex(
-                sampleLocalX,
-                heightUnit,
-                sampleLocalZ)];
-        }
-
         public void SetFinalSurfaceUnits(
             int sampleLocalX,
             int sampleLocalZ,
             float surfaceUnits)
         {
             EnsureNotCompleted();
-            if (!HasWorldDensity)
+            if (!HasWorldPatternResult)
             {
                 throw new InvalidOperationException(
-                    "World Density must be ready before Final Surface is extracted.");
+                    "World Pattern Result must be ready before Final Surface is extracted.");
             }
 
             if (HasFinalSurface)
@@ -591,10 +638,10 @@ namespace MiniCivilization.World.Generation
         public void CompleteFinalSurface()
         {
             EnsureNotCompleted();
-            if (!HasWorldDensity)
+            if (!HasWorldPatternResult)
             {
                 throw new InvalidOperationException(
-                    "World Density must be ready before Final Surface is finalized.");
+                    "World Pattern Result must be ready before Final Surface is finalized.");
             }
 
             if (HasFinalSurface)
@@ -643,15 +690,15 @@ namespace MiniCivilization.World.Generation
             finalColumnWritten[index] = true;
         }
 
-        public WorldChunkBuildData Complete()
+        public WorldChunkBuildData Complete(in WorldChunkGenerationTiming timing)
         {
             EnsureNotCompleted();
             if (!HasWorldField
-                || !HasWorldPatternResult
-                || !HasWorldDensity)
+                || !HasBaseTerrainPattern
+                || !HasWorldPatternResult)
             {
                 throw new InvalidOperationException(
-                    "World Field, World Pattern Result, and World Density must be ready before final output is transferred.");
+                    "Every terrain and Hydrology generation stage must be ready before final output is transferred.");
             }
 
             if (!HasFinalSurface)
@@ -671,12 +718,13 @@ namespace MiniCivilization.World.Generation
 
             var columns = finalColumns;
             worldFieldSamples = null;
+            baseTerrainPatternResults = null;
             worldPatternResults = null;
-            worldDensity = null;
             finalSurfaceUnits = null;
             finalColumns = null;
             finalColumnWritten = null;
-            return new WorldChunkBuildData(Input, columns);
+            ReleaseHydrologyBatch();
+            return new WorldChunkBuildData(Input, columns, timing);
         }
 
         private void EnsureNotCompleted()
@@ -686,32 +734,6 @@ namespace MiniCivilization.World.Generation
                 throw new InvalidOperationException(
                     "Generation working data has already transferred its final output.");
             }
-        }
-
-        private int ToDensityIndex(
-            int sampleLocalX,
-            int heightUnit,
-            int sampleLocalZ)
-        {
-            if ((uint)sampleLocalX >= SampleSizeXZ)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sampleLocalX));
-            }
-
-            if ((uint)sampleLocalZ >= SampleSizeXZ)
-            {
-                throw new ArgumentOutOfRangeException(nameof(sampleLocalZ));
-            }
-
-            if ((uint)heightUnit >= DensityHeightUnitCount)
-            {
-                throw new ArgumentOutOfRangeException(nameof(heightUnit));
-            }
-
-            return checked(
-                heightUnit
-                + DensityHeightUnitCount
-                * (sampleLocalX + SampleSizeXZ * sampleLocalZ));
         }
 
         private int ToSurfaceIndex(int sampleLocalX, int sampleLocalZ)
@@ -744,7 +766,6 @@ namespace MiniCivilization.World.Generation
             var working = new GenerationWorkingData(
                 input,
                 RequiredHaloCellCount);
-            var router = new WorldNoiseRouter(input.Settings);
             for (var sampleLocalZ = 0;
                  sampleLocalZ < working.SampleSizeXZ;
                  sampleLocalZ++)
@@ -754,10 +775,13 @@ namespace MiniCivilization.World.Generation
             {
                 var worldX = checked(working.SampleOriginX + sampleLocalX);
                 var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
+                var terrain = working.HydrologyBatch.SampleBaseTerrainState(
+                    worldX,
+                    worldZ);
                 working.SetWorldField(
                     sampleLocalX,
                     sampleLocalZ,
-                    router.Sample(worldX, worldZ));
+                    terrain.Field);
             }
 
             working.CompleteWorldField();
@@ -1153,6 +1177,31 @@ namespace MiniCivilization.World.Generation
         }
     }
 
+    internal static class BaseTerrainPatternStage
+    {
+        public static void Build(GenerationWorkingData working)
+        {
+            if (working == null || !working.HasWorldField)
+            {
+                throw new InvalidOperationException("World Field is not ready.");
+            }
+
+            for (var z = 0; z < working.SampleSizeXZ; z++)
+            for (var x = 0; x < working.SampleSizeXZ; x++)
+            {
+                var worldX = checked(working.SampleOriginX + x);
+                var worldZ = checked(working.SampleOriginZ + z);
+                var terrain = working.HydrologyBatch
+                    .SampleBaseTerrainState(worldX, worldZ);
+                working.SetBaseTerrainPattern(
+                    x,
+                    z,
+                    terrain.Terrain);
+            }
+            working.CompleteBaseTerrainPattern();
+        }
+    }
+
     internal static class WorldPatternStage
     {
         public static void Build(GenerationWorkingData working)
@@ -1162,40 +1211,54 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(working));
             }
 
-            if (!working.HasWorldField)
+            if (!working.HasBaseTerrainPattern)
             {
-                throw new InvalidOperationException("World Field is not ready.");
+                throw new InvalidOperationException(
+                    "Base Terrain Pattern is not ready.");
             }
 
             var settings = working.Input.Settings;
-            var router = new WorldNoiseRouter(settings);
-            for (var sampleLocalZ = 0;
-                 sampleLocalZ < working.SampleSizeXZ;
-                 sampleLocalZ++)
-            for (var sampleLocalX = 0;
-                 sampleLocalX < working.SampleSizeXZ;
-                 sampleLocalX++)
+            try
             {
-                var worldX = checked(working.SampleOriginX + sampleLocalX);
-                var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
-                working.SetWorldPatternResult(
-                    sampleLocalX,
-                    sampleLocalZ,
-                    RiverPatternResolver.Resolve(
-                        router,
-                        worldX,
-                        worldZ,
-                        working.GetWorldField(sampleLocalX, sampleLocalZ),
-                        settings,
-                        out _));
-            }
+                for (var sampleLocalZ = 0;
+                     sampleLocalZ < working.SampleSizeXZ;
+                     sampleLocalZ++)
+                for (var sampleLocalX = 0;
+                     sampleLocalX < working.SampleSizeXZ;
+                     sampleLocalX++)
+                {
+                    var worldX = checked(working.SampleOriginX + sampleLocalX);
+                    var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
+                    working.SetWorldPatternResult(
+                        sampleLocalX,
+                        sampleLocalZ,
+                        HydrologyPatternResolver.Resolve(
+                            worldX,
+                            worldZ,
+                            settings,
+                            working.HydrologyBatch,
+                            working.GetBaseTerrainPattern(
+                                sampleLocalX,
+                                sampleLocalZ)));
+                }
 
-            working.CompleteWorldPatternResult();
+                working.CompleteWorldPatternResult();
+            }
+            finally
+            {
+                working.ReleaseHydrologyBatch();
+            }
         }
     }
 
     internal static class WorldPatternResolver
     {
+        public static WorldPatternWeights SampleWeights(
+            in WorldNoiseRouter router,
+            int worldX,
+            int worldZ) => CreateWeights(
+                router.SampleRegion(worldX, worldZ));
+
         public static WorldPatternResult Resolve(
             in WorldNoiseRouter router,
             int worldX,
@@ -1645,59 +1708,6 @@ namespace MiniCivilization.World.Generation
         }
     }
 
-    internal static class WorldDensityStage
-    {
-        public static void Build(GenerationWorkingData working)
-        {
-            if (working == null)
-            {
-                throw new ArgumentNullException(nameof(working));
-            }
-
-            if (!working.HasWorldPatternResult)
-            {
-                throw new InvalidOperationException(
-                    "World Pattern Result is not ready.");
-            }
-
-            var field = new WorldDensityField(
-                working.Input.Settings);
-            for (var sampleLocalZ = 0;
-                 sampleLocalZ < working.SampleSizeXZ;
-                 sampleLocalZ++)
-            for (var sampleLocalX = 0;
-                 sampleLocalX < working.SampleSizeXZ;
-                 sampleLocalX++)
-            {
-                var worldX = checked(working.SampleOriginX + sampleLocalX);
-                var worldZ = checked(working.SampleOriginZ + sampleLocalZ);
-                var fieldSample = working.GetWorldField(
-                    sampleLocalX,
-                    sampleLocalZ);
-                var profile = working.GetWorldPatternResult(
-                    sampleLocalX,
-                    sampleLocalZ);
-                for (var heightUnit = 0;
-                     heightUnit < working.DensityHeightUnitCount;
-                     heightUnit++)
-                {
-                    working.SetWorldDensity(
-                        sampleLocalX,
-                        heightUnit,
-                        sampleLocalZ,
-                        field.Sample(
-                            worldX,
-                            heightUnit,
-                            worldZ,
-                            fieldSample,
-                            profile));
-                }
-            }
-
-            working.CompleteWorldDensity();
-        }
-    }
-
     internal readonly struct WorldDensityField
     {
         private readonly WorldNoiseRouter noiseRouter;
@@ -1772,12 +1782,14 @@ namespace MiniCivilization.World.Generation
             GenerationWorkingData working)
         {
             ValidateWorkingData(working);
-            if (!working.HasWorldDensity)
+            if (!working.HasWorldPatternResult)
             {
                 throw new InvalidOperationException(
-                    "World Density is not ready.");
+                    "World Pattern Result is not ready.");
             }
 
+            var settings = working.Input.Settings;
+            var density = new WorldDensityField(settings);
             for (var sampleLocalZ = 0;
                  sampleLocalZ < working.SampleSizeXZ;
                  sampleLocalZ++)
@@ -1785,71 +1797,30 @@ namespace MiniCivilization.World.Generation
                  sampleLocalX < working.SampleSizeXZ;
                  sampleLocalX++)
             {
+                var worldX = checked(
+                    working.SampleOriginX + sampleLocalX);
+                var worldZ = checked(
+                    working.SampleOriginZ + sampleLocalZ);
+                var field = working.GetWorldField(
+                    sampleLocalX,
+                    sampleLocalZ);
+                var profile = working.GetWorldPatternResult(
+                    sampleLocalX,
+                    sampleLocalZ);
+                var surfaceUnits = TerrainSurfaceSampler.SampleResolved(
+                    density,
+                    settings,
+                    worldX,
+                    worldZ,
+                    field,
+                    profile).SurfaceUnits;
                 working.SetFinalSurfaceUnits(
                     sampleLocalX,
                     sampleLocalZ,
-                    FindSurfaceUnits(
-                        working,
-                        sampleLocalX,
-                        sampleLocalZ));
+                    surfaceUnits);
             }
 
             working.CompleteFinalSurface();
-        }
-
-        private static float FindSurfaceUnits(
-            GenerationWorkingData working,
-            int sampleLocalX,
-            int sampleLocalZ)
-        {
-            var topUnit = working.Input.HeightUnitCount;
-            if (working.GetWorldDensity(
-                    sampleLocalX,
-                    topUnit,
-                    sampleLocalZ) >= 0f)
-            {
-                return topUnit;
-            }
-
-            if (working.GetWorldDensity(
-                    sampleLocalX,
-                    0,
-                    sampleLocalZ) < 0f)
-            {
-                return 0;
-            }
-
-            for (var lowerUnit = working.Input.HeightUnitCount - 1;
-                 lowerUnit >= 0;
-                 lowerUnit--)
-            {
-                var lowerDensity = working.GetWorldDensity(
-                    sampleLocalX,
-                    lowerUnit,
-                    sampleLocalZ);
-                var upperDensity = working.GetWorldDensity(
-                    sampleLocalX,
-                    lowerUnit + 1,
-                    sampleLocalZ);
-                if (lowerDensity < 0f || upperDensity >= 0f)
-                {
-                    continue;
-                }
-
-                var denominator = lowerDensity - upperDensity;
-                var fraction = denominator > 0f
-                    ? lowerDensity / denominator
-                    : 0f;
-                var continuousSurface = lowerUnit
-                    + Math.Clamp(fraction, 0f, 1f);
-                return Math.Clamp(
-                    continuousSurface,
-                    0f,
-                    working.Input.HeightUnitCount);
-            }
-
-            throw new InvalidOperationException(
-                "Terrain Density does not contain a solid-to-air surface.");
         }
 
         private static void ValidateWorkingData(
@@ -1909,6 +1880,9 @@ namespace MiniCivilization.World.Generation
                             working.Input.HeightUnitCount)
                         : 0;
                 var hasWater = waterSurfaceUnits > solidHeightUnits;
+                var waterBedSurface = hasWater
+                    ? ResolveWaterBedSurface(pattern.WaterType)
+                    : SurfaceType.None;
                 working.SetFinalColumn(
                     localX,
                     localZ,
@@ -1917,15 +1891,24 @@ namespace MiniCivilization.World.Generation
                         waterSurfaceUnits,
                         hasWater ? WaterRole.Source : WaterRole.None,
                         hasWater ? pattern.WaterType : WaterType.None,
-                        hasWater ? SurfaceType.Seabed : SurfaceType.None,
+                        waterBedSurface,
                         solidHeightUnits > 0
                             ? hasWater
-                                ? SurfaceType.Seabed
+                                ? waterBedSurface
                                 : SurfaceType.Ground
                             : SurfaceType.None,
                         emptyBiome));
             }
         }
+
+        private static SurfaceType ResolveWaterBedSurface(
+            WaterType waterType) => waterType switch
+            {
+                WaterType.River => SurfaceType.Riverbed,
+                WaterType.Lake or WaterType.Pond => SurfaceType.Lakebed,
+                WaterType.Sea => SurfaceType.Seabed,
+                _ => SurfaceType.None
+            };
     }
 
     internal readonly struct WorldColumnBuildData
@@ -1957,13 +1940,127 @@ namespace MiniCivilization.World.Generation
         public CellBiome Biome { get; }
     }
 
+    internal readonly struct WorldChunkGenerationTiming
+    {
+        public WorldChunkGenerationTiming(
+            long hydrologyBatchMilliseconds,
+            long worldFieldMilliseconds,
+            long baseTerrainPatternMilliseconds,
+            long hydrologyCompositionMilliseconds,
+            long densitySurfaceMilliseconds,
+            long densityFillMilliseconds,
+            long totalMilliseconds,
+            in HydrologyMetricsSnapshot hydrologyMetrics)
+        {
+            HydrologyBatchMilliseconds = hydrologyBatchMilliseconds;
+            WorldFieldMilliseconds = worldFieldMilliseconds;
+            BaseTerrainPatternMilliseconds = baseTerrainPatternMilliseconds;
+            HydrologyCompositionMilliseconds = hydrologyCompositionMilliseconds;
+            DensitySurfaceMilliseconds = densitySurfaceMilliseconds;
+            DensityFillMilliseconds = densityFillMilliseconds;
+            TotalMilliseconds = totalMilliseconds;
+            HydrologyMetrics = hydrologyMetrics;
+        }
+
+        public long HydrologyBatchMilliseconds { get; }
+        public long WorldFieldMilliseconds { get; }
+        public long BaseTerrainPatternMilliseconds { get; }
+        public long HydrologyCompositionMilliseconds { get; }
+        public long DensitySurfaceMilliseconds { get; }
+        public long DensityFillMilliseconds { get; }
+        public long TotalMilliseconds { get; }
+        public HydrologyMetricsSnapshot HydrologyMetrics { get; }
+    }
+
+    internal sealed class WorldGenerationTimingSummary
+    {
+        private int chunkCount;
+        private long hydrologyBatchMilliseconds;
+        private long worldFieldMilliseconds;
+        private long baseTerrainPatternMilliseconds;
+        private long hydrologyCompositionMilliseconds;
+        private long densitySurfaceMilliseconds;
+        private long densityFillMilliseconds;
+        private long chunkTotalMilliseconds;
+        private long worldApplyMilliseconds;
+        private long pipelineTotalMilliseconds;
+        private HydrologyMetricsSnapshot hydrologyMetrics;
+
+        public void Add(in WorldChunkGenerationTiming timing)
+        {
+            chunkCount++;
+            hydrologyBatchMilliseconds += timing.HydrologyBatchMilliseconds;
+            worldFieldMilliseconds += timing.WorldFieldMilliseconds;
+            baseTerrainPatternMilliseconds += timing.BaseTerrainPatternMilliseconds;
+            hydrologyCompositionMilliseconds += timing.HydrologyCompositionMilliseconds;
+            densitySurfaceMilliseconds += timing.DensitySurfaceMilliseconds;
+            densityFillMilliseconds += timing.DensityFillMilliseconds;
+            chunkTotalMilliseconds += timing.TotalMilliseconds;
+            hydrologyMetrics = hydrologyMetrics.Add(timing.HydrologyMetrics);
+        }
+
+        public void SetPipelineTotal(long milliseconds) =>
+            pipelineTotalMilliseconds = milliseconds;
+
+        public void AddWorldApply(long milliseconds) =>
+            worldApplyMilliseconds += milliseconds;
+
+        public string ToInitialLog()
+        {
+            var average = chunkCount > 0
+                ? chunkTotalMilliseconds / (double)chunkCount
+                : 0d;
+            return $"[WorldGenerationTiming] Initial terrain: chunks={chunkCount}, "
+                + $"pipeline={pipelineTotalMilliseconds}ms, chunkSum={chunkTotalMilliseconds}ms, "
+                + $"chunkAvg={average:F1}ms, hydrologyBatch={hydrologyBatchMilliseconds}ms, "
+                + $"worldField={worldFieldMilliseconds}ms, "
+                + $"baseTerrain={baseTerrainPatternMilliseconds}ms, "
+                + $"hydrologyCompose={hydrologyCompositionMilliseconds}ms, "
+                + $"densitySurface={densitySurfaceMilliseconds}ms, "
+                + $"densityFill={densityFillMilliseconds}ms, "
+                + $"worldApply={worldApplyMilliseconds}ms, "
+                + $"hydrologyPlans=[{hydrologyMetrics.ToLogFragment()}]";
+        }
+    }
+
+    internal static class WorldGenerationDiagnostics
+    {
+        public static void LogInitial(WorldGenerationTimingSummary timing)
+        {
+            if (timing == null)
+            {
+                throw new ArgumentNullException(nameof(timing));
+            }
+
+            UnityEngine.Debug.Log(timing.ToInitialLog());
+        }
+
+        public static void LogStreaming(
+            ChunkCoordinate coordinate,
+            in WorldChunkGenerationTiming timing,
+            long worldApplyMilliseconds,
+            bool wasApplied) =>
+            UnityEngine.Debug.Log(
+                $"[WorldGenerationTiming] Streaming chunk={coordinate.X},{coordinate.Z}, "
+                + $"applied={wasApplied}, worldApply={worldApplyMilliseconds}ms, "
+                + $"total={timing.TotalMilliseconds}ms, "
+                + $"hydrologyBatch={timing.HydrologyBatchMilliseconds}ms, "
+                + $"worldField={timing.WorldFieldMilliseconds}ms, "
+                + $"baseTerrain={timing.BaseTerrainPatternMilliseconds}ms, "
+                + $"hydrologyCompose={timing.HydrologyCompositionMilliseconds}ms, "
+                + $"densitySurface={timing.DensitySurfaceMilliseconds}ms, "
+                + $"densityFill={timing.DensityFillMilliseconds}ms, "
+                + $"hydrologyPlans=[{timing.HydrologyMetrics.ToLogFragment()}]");
+    }
+
     internal sealed class WorldChunkBuildData
     {
         private readonly WorldColumnBuildData[] columns;
 
         internal WorldChunkBuildData(
             WorldChunkBuildInput input,
-            WorldColumnBuildData[] columns)
+            WorldColumnBuildData[] columns,
+            in WorldChunkGenerationTiming timing)
         {
             if (input == null)
             {
@@ -1982,11 +2079,13 @@ namespace MiniCivilization.World.Generation
 
             Coordinate = input.Coordinate;
             ChunkSizeXZ = input.ChunkSizeXZ;
+            Timing = timing;
         }
 
         public ChunkCoordinate Coordinate { get; }
         public int ChunkSizeXZ { get; }
         public int ColumnCount => columns.Length;
+        public WorldChunkGenerationTiming Timing { get; }
 
         public WorldColumnBuildData GetColumn(int localX, int localZ)
         {
@@ -2204,12 +2303,31 @@ namespace MiniCivilization.World.Generation
                 throw new ArgumentNullException(nameof(input));
             }
 
+            var totalTimer = Stopwatch.StartNew();
+            var stageTimer = Stopwatch.StartNew();
             var working = WorldFieldStage.Build(input);
+            var worldFieldMilliseconds = stageTimer.ElapsedMilliseconds;
+            stageTimer.Restart();
+            BaseTerrainPatternStage.Build(working);
+            var baseTerrainPatternMilliseconds = stageTimer.ElapsedMilliseconds;
+            stageTimer.Restart();
             WorldPatternStage.Build(working);
-            WorldDensityStage.Build(working);
+            var hydrologyCompositionMilliseconds = stageTimer.ElapsedMilliseconds;
+            stageTimer.Restart();
             DensitySurfaceStage.BuildFinalSurface(working);
+            var densitySurfaceMilliseconds = stageTimer.ElapsedMilliseconds;
+            stageTimer.Restart();
             DensityToFilledStage.Build(working);
-            return working.Complete();
+            var densityFillMilliseconds = stageTimer.ElapsedMilliseconds;
+            return working.Complete(new WorldChunkGenerationTiming(
+                working.HydrologyBatchMilliseconds,
+                worldFieldMilliseconds,
+                baseTerrainPatternMilliseconds,
+                hydrologyCompositionMilliseconds,
+                densitySurfaceMilliseconds,
+                densityFillMilliseconds,
+                totalTimer.ElapsedMilliseconds,
+                working.HydrologyMetrics));
         }
     }
 }

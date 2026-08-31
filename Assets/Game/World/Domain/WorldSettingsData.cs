@@ -446,108 +446,6 @@ namespace MiniCivilization.World.Domain
         public int SurfaceUnits { get; }
     }
 
-    public readonly struct RiverPatternSettingsData
-    {
-        public RiverPatternSettingsData(
-            int planningRegionSizeCells,
-            int routeSampleSpacingCells,
-            float networkDensity,
-            float terrainChangeCost,
-            float uphillCost,
-            float crossSlopeCost,
-            float corridorExposureCost,
-            float bankMarginCells,
-            float valleyPreference,
-            WorldNoiseFieldSettingsData routeVariationField,
-            float routeVariationCost,
-            int smoothingIterations,
-            WorldNoiseFieldSettingsData widthField,
-            int maximumWidthCells,
-            WorldCurveSettingsData crossSection,
-            WorldSeededRangeSettingsData depthUnits,
-            WorldSeededRangeSettingsData waterInsetUnits,
-            int dropTransitionCells,
-            WorldCurveSettingsData dropTransition,
-            WorldNoiseFieldSettingsData riverbedField,
-            WorldSeededRangeSettingsData riverbedAmplitudeUnits)
-        {
-            if (planningRegionSizeCells < 16
-                || routeSampleSpacingCells < 1
-                || planningRegionSizeCells % routeSampleSpacingCells != 0
-                || !float.IsFinite(networkDensity)
-                || networkDensity < 0f
-                || networkDensity > 1f
-                || !float.IsFinite(terrainChangeCost)
-                || terrainChangeCost < 0f
-                || !float.IsFinite(uphillCost)
-                || uphillCost < 0f
-                || !float.IsFinite(crossSlopeCost)
-                || crossSlopeCost < 0f
-                || !float.IsFinite(corridorExposureCost)
-                || corridorExposureCost < 0f
-                || !float.IsFinite(bankMarginCells)
-                || bankMarginCells < 0f
-                || !float.IsFinite(valleyPreference)
-                || valleyPreference < 0f
-                || !float.IsFinite(routeVariationCost)
-                || routeVariationCost < 0f
-                || smoothingIterations < 0
-                || smoothingIterations > 4
-                || maximumWidthCells < 1
-                || maximumWidthCells > 10
-                || dropTransitionCells < 1)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(planningRegionSizeCells),
-                    "River Pattern settings are invalid.");
-            }
-
-            PlanningRegionSizeCells = planningRegionSizeCells;
-            RouteSampleSpacingCells = routeSampleSpacingCells;
-            NetworkDensity = networkDensity;
-            TerrainChangeCost = terrainChangeCost;
-            UphillCost = uphillCost;
-            CrossSlopeCost = crossSlopeCost;
-            CorridorExposureCost = corridorExposureCost;
-            BankMarginCells = bankMarginCells;
-            ValleyPreference = valleyPreference;
-            RouteVariationField = routeVariationField;
-            RouteVariationCost = routeVariationCost;
-            SmoothingIterations = smoothingIterations;
-            WidthField = widthField;
-            MaximumWidthCells = maximumWidthCells;
-            CrossSection = crossSection;
-            DepthUnits = depthUnits;
-            WaterInsetUnits = waterInsetUnits;
-            DropTransitionCells = dropTransitionCells;
-            DropTransition = dropTransition;
-            RiverbedField = riverbedField;
-            RiverbedAmplitudeUnits = riverbedAmplitudeUnits;
-        }
-
-        public int PlanningRegionSizeCells { get; }
-        public int RouteSampleSpacingCells { get; }
-        public float NetworkDensity { get; }
-        public float TerrainChangeCost { get; }
-        public float UphillCost { get; }
-        public float CrossSlopeCost { get; }
-        public float CorridorExposureCost { get; }
-        public float BankMarginCells { get; }
-        public float ValleyPreference { get; }
-        public WorldNoiseFieldSettingsData RouteVariationField { get; }
-        public float RouteVariationCost { get; }
-        public int SmoothingIterations { get; }
-        public WorldNoiseFieldSettingsData WidthField { get; }
-        public int MaximumWidthCells { get; }
-        public WorldCurveSettingsData CrossSection { get; }
-        public WorldSeededRangeSettingsData DepthUnits { get; }
-        public WorldSeededRangeSettingsData WaterInsetUnits { get; }
-        public int DropTransitionCells { get; }
-        public WorldCurveSettingsData DropTransition { get; }
-        public WorldNoiseFieldSettingsData RiverbedField { get; }
-        public WorldSeededRangeSettingsData RiverbedAmplitudeUnits { get; }
-    }
-
     public readonly struct WorldPatternSettingsData
     {
         public WorldPatternSettingsData(
@@ -557,8 +455,7 @@ namespace MiniCivilization.World.Domain
             RuggedTerrainSettingsData rugged,
             MountainTerrainSettingsData mountain,
             CanyonTerrainSettingsData canyon,
-            SeaPatternSettingsData sea,
-            RiverPatternSettingsData river)
+            SeaPatternSettingsData sea)
         {
             Region = region;
             BaseDensity = baseDensity;
@@ -567,7 +464,6 @@ namespace MiniCivilization.World.Domain
             Mountain = mountain;
             Canyon = canyon;
             Sea = sea;
-            River = river;
         }
 
         public WorldPatternRegionSettingsData Region { get; }
@@ -577,7 +473,6 @@ namespace MiniCivilization.World.Domain
         public MountainTerrainSettingsData Mountain { get; }
         public CanyonTerrainSettingsData Canyon { get; }
         public SeaPatternSettingsData Sea { get; }
-        public RiverPatternSettingsData River { get; }
     }
 
     public sealed class WorldSettingsData
@@ -594,14 +489,9 @@ namespace MiniCivilization.World.Domain
             int roadMaxHeightSteps,
             WorldNoiseRouterSettingsData worldNoiseRouter,
             WorldPatternSettingsData worldPatterns,
+            HydrologySettingsData hydrology,
             float temperatureScale,
             int terrainBaseHeightUnits,
-            float lakeDensity,
-            int lakeRegionSizeCells,
-            int maximumLakeRadiusCells,
-            int maximumLakeDepthSteps,
-            int minimumInlandLakeArea,
-            int minimumInlandLakeDepthSteps,
             int pondMaximumArea,
             WaterFlowRules waterFlowRules,
             float coldClimateThreshold)
@@ -648,14 +538,9 @@ namespace MiniCivilization.World.Domain
             RoadMaxHeightSteps = roadMaxHeightSteps;
             WorldNoiseRouter = worldNoiseRouter;
             WorldPatterns = worldPatterns;
+            Hydrology = hydrology;
             TemperatureScale = temperatureScale;
             TerrainBaseHeightUnits = terrainBaseHeightUnits;
-            LakeDensity = lakeDensity;
-            LakeRegionSizeCells = lakeRegionSizeCells;
-            MaximumLakeRadiusCells = maximumLakeRadiusCells;
-            MaximumLakeDepthSteps = maximumLakeDepthSteps;
-            MinimumInlandLakeArea = minimumInlandLakeArea;
-            MinimumInlandLakeDepthSteps = minimumInlandLakeDepthSteps;
             PondMaximumArea = pondMaximumArea;
             WaterFlowRules = waterFlowRules;
             ColdClimateThreshold = Math.Clamp(
@@ -709,14 +594,9 @@ namespace MiniCivilization.World.Domain
 
         public WorldNoiseRouterSettingsData WorldNoiseRouter { get; }
         public WorldPatternSettingsData WorldPatterns { get; }
+        public HydrologySettingsData Hydrology { get; }
         public float TemperatureScale { get; }
         public int TerrainBaseHeightUnits { get; }
-        public float LakeDensity { get; }
-        public int LakeRegionSizeCells { get; }
-        public int MaximumLakeRadiusCells { get; }
-        public int MaximumLakeDepthSteps { get; }
-        public int MinimumInlandLakeArea { get; }
-        public int MinimumInlandLakeDepthSteps { get; }
         public int PondMaximumArea { get; }
         public WaterFlowRules WaterFlowRules { get; }
         public float ColdClimateThreshold { get; }

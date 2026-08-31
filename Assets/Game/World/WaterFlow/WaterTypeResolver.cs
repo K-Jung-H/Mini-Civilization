@@ -98,6 +98,8 @@ namespace MiniCivilization.World.WaterFlow
                 var touchesEdge = false;
                 var touchesUnloadedBoundary = false;
                 var containsSea = false;
+                var containsLakeSource = false;
+                var containsPondSource = false;
                 while (queue.Count > 0)
                 {
                     var column = queue.Dequeue();
@@ -111,6 +113,14 @@ namespace MiniCivilization.World.WaterFlow
                         world,
                         column,
                         WaterType.Sea);
+                    containsLakeSource |= HasSourceWaterType(
+                        world,
+                        column,
+                        WaterType.Lake);
+                    containsPondSource |= HasSourceWaterType(
+                        world,
+                        column,
+                        WaterType.Pond);
 
                     for (var directionIndex = 0;
                          directionIndex < Directions.Length;
@@ -149,9 +159,13 @@ namespace MiniCivilization.World.WaterFlow
 
                 var type = containsSea || touchesEdge
                     ? WaterType.Sea
-                    : component.Count <= world.PondMaximumArea
-                        ? WaterType.Pond
-                        : WaterType.Lake;
+                    : containsLakeSource
+                        ? WaterType.Lake
+                        : containsPondSource
+                            ? WaterType.Pond
+                            : component.Count <= world.PondMaximumArea
+                                ? WaterType.Pond
+                                : WaterType.Lake;
                 for (var componentIndex = 0;
                      componentIndex < component.Count;
                      componentIndex++)
@@ -177,6 +191,25 @@ namespace MiniCivilization.World.WaterFlow
             {
                 var water = world.GetCell(column.X, y, column.Z).Water;
                 if (water.HasWater && water.Type == type)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasSourceWaterType(
+            WorldData world,
+            CellColumnCoordinate column,
+            WaterType type)
+        {
+            for (var y = 0; y < world.Height; y++)
+            {
+                var water = world.GetCell(column.X, y, column.Z).Water;
+                if (water.HasWater
+                    && water.Role == WaterRole.Source
+                    && water.Type == type)
                 {
                     return true;
                 }
@@ -219,6 +252,7 @@ namespace MiniCivilization.World.WaterFlow
                 var cell = world.GetCell(column.X, y, column.Z);
                 if (!cell.HasWater
                     || cell.Water.Type == WaterType.River
+                    || cell.Water.Role == WaterRole.Source
                     || cell.Water.Type == type)
                 {
                     continue;

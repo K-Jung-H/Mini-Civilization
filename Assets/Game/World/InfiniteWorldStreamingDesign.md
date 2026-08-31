@@ -2,6 +2,12 @@
 
 ## 문서 목적
 
+> **Hydrology 재설계 기준 (2026-08-31):** Sea/River/Lake/Pond Pattern의
+> 최종 구조와 구현 단계는
+> [HydrologyRedesign/README.md](HydrologyRedesign/README.md)를 우선한다.
+> 이 문서의 좌표·Chunk·스트리밍 계약은 유지하되, 9단계의 기존 Hydrology
+> 세부 설명과 충돌하는 Water Pattern 구현은 새 문서를 따른다.
+
 최종 목표는 Seed와 절대 좌표를 기준으로 X/Z 방향에 연속 생성되는 무한 월드다. 필요한 청크만 준비·렌더링·시뮬레이션하며, 렌더 객체는 Pool로 재사용한다.
 
 먼저 같은 구조에 유한 Bounds만 적용해 한 번에 모든 청크를 활성화하지 않는 범위를 확인한다. 이후 Bounds 제한과 유한 월드 전용 생성 규칙만 제거해 무한 월드로 전환한다. 유한 단계용 별도 데이터 구조를 만들지 않는다.
@@ -23,7 +29,7 @@
 | 6. Chunk별 Cache와 경계 갱신 | 완료·테스트 통과 | Surface·Navigation·Exposure Cache를 준비된 Chunk 단위로 관리하고 준비·해제 시 경계를 갱신한다. |
 | 7. Entity·Building·Road/Way 스트리밍 | 완료·테스트 통과 | Minecraft 용어 통일, Entity 소유·Tick·렌더 범위, 다중 Chunk Building 참조, 준비된 Chunk의 Way Graph를 적용했다. |
 | 8. Water 스트리밍 | 구현 완료·직접 테스트 필요 | Chunk별 Frontier 소유, Active 범위 실행, 비활성 경계 보류, 준비된 Chunk 한정 WaterBody 해석을 적용했다. |
-| 9. 3D Density 기반 절대 좌표 생성 | 교체 진행 중·1~5단계 완료 | 절대 Y 지형 기준과 Water Distribution의 개별 수면 높이를 분리했다. Continental Sea Distribution은 연속 깊이 곡선으로 해안·해저 Density를 합성하며, 설정 Y 범위 밖 Density를 강제로 공기로 바꾸지 않는다. |
+| 9. 3D Density 기반 절대 좌표 생성 | Hydrology 재설계로 대체 | Sea/River/Lake/Pond의 구현 상태와 다음 작업은 `HydrologyRedesign/README.md` 및 단계 문서만을 기준으로 한다. |
 | 10~11 | 미진행 | 아래 로드맵 순서대로 진행한다. |
 
 현재 런타임 범위는 다음과 같다.

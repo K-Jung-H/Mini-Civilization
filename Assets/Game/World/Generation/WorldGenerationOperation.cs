@@ -69,10 +69,13 @@ namespace MiniCivilization.World.Generation
             }
 
             var world = generationTask.GetAwaiter().GetResult();
+            WorldGenerationDiagnostics.LogInitial(input.GenerationTiming);
             CompleteCurrentStage();
             BeginStage(WorldOperationStage.PrepareRuntime);
             prepareRuntimeTask = Task.Run(
-                () => WorldRuntime.CreatePrepared(world));
+                () => WorldRuntime.CreatePrepared(
+                    world,
+                    input.Hydrology));
             phase = Phase.PrepareRuntime;
         }
 

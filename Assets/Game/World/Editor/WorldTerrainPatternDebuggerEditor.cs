@@ -4,6 +4,7 @@ using MiniCivilization.World.Generation;
 using MiniCivilization.World.Runtime;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Editor
 {
@@ -22,6 +23,11 @@ namespace MiniCivilization.World.Editor
             SeaArea,
             SeaDepth,
             SeaWater,
+            BasinArea,
+            BasinDepth,
+            LakeWater,
+            PondWater,
+            HydrologyComponent,
             RiverArea,
             RiverDepth,
             RiverWater
@@ -32,19 +38,40 @@ namespace MiniCivilization.World.Editor
             public PatternDebugSample(
                 in WorldPatternWeights weights,
                 in WorldPatternResult result,
-                float finalSurfaceUnits,
                 float riverMaximumDepthUnits)
             {
                 Weights = weights;
                 Result = result;
-                FinalSurfaceUnits = finalSurfaceUnits;
                 RiverMaximumDepthUnits = riverMaximumDepthUnits;
+                FinalSurfaceUnits = 0f;
+                HasFinalSurface = false;
+            }
+
+            private PatternDebugSample(
+                in WorldPatternWeights weights,
+                in WorldPatternResult result,
+                float riverMaximumDepthUnits,
+                float finalSurfaceUnits)
+            {
+                Weights = weights;
+                Result = result;
+                RiverMaximumDepthUnits = riverMaximumDepthUnits;
+                FinalSurfaceUnits = finalSurfaceUnits;
+                HasFinalSurface = true;
             }
 
             public WorldPatternWeights Weights { get; }
             public WorldPatternResult Result { get; }
             public float FinalSurfaceUnits { get; }
             public float RiverMaximumDepthUnits { get; }
+            public bool HasFinalSurface { get; }
+
+            public PatternDebugSample WithFinalSurface(
+                float finalSurfaceUnits) => new(
+                Weights,
+                Result,
+                RiverMaximumDepthUnits,
+                finalSurfaceUnits);
         }
 
         private static readonly Color SmoothColor = new(0.25f, 0.8f, 0.3f);
@@ -53,6 +80,8 @@ namespace MiniCivilization.World.Editor
         private static readonly Color CanyonColor = new(0.65f, 0.15f, 0.75f);
         private static readonly Color SeaColor = new(0.1f, 0.45f, 0.9f);
         private static readonly Color RiverColor = new(0.1f, 0.85f, 0.95f);
+        private static readonly Color LakeColor = new(0.08f, 0.55f, 0.95f);
+        private static readonly Color PondColor = new(0.15f, 0.75f, 0.7f);
 
         private Vector2Int previewCenter;
         private int previewAreaCells = 512;
@@ -61,8 +90,18 @@ namespace MiniCivilization.World.Editor
         private PatternDebugSample[] samples;
         private Vector2Int[] sampleCells;
         private PatternDebugSample[] detailSamples;
+        private WorldSettingsData previewSettings;
+        private WorldHydrology previewHydrology;
         private Texture2D previewTexture;
         private Texture2D detailTexture;
+        private Mesh worldOverlayMesh;
+        private Material worldOverlayMaterial;
+        private readonly System.Collections.Generic.List<Vector3>
+            overlayVertices = new();
+        private readonly System.Collections.Generic.List<Color>
+            overlayColors = new();
+        private readonly System.Collections.Generic.List<int>
+            overlayTriangles = new();
         private string statistics;
         private string selectedCellDetails;
         private Vector2Int? selectedCell;
@@ -243,11 +282,14 @@ namespace MiniCivilization.World.Editor
         {
             SceneView.duringSceneGui -= DrawWorldOverlay;
             ClearPreview();
+            DestroyOverlayResources();
         }
 
         private void BuildPreview(WorldGenerationController controller)
         {
             var settings = ResolveSettings(controller);
+            previewSettings = settings;
+            previewHydrology = ResolveHydrology(settings);
             var router = new WorldNoiseRouter(settings);
             var resolution = previewResolution;
             samples = new PatternDebugSample[resolution * resolution];
@@ -258,55 +300,74 @@ namespace MiniCivilization.World.Editor
             var weightSums = new float[5];
             var riverCount = 0;
             var riverInfluenceSum = 0f;
+            var lakeCount = 0;
+            var pondCount = 0;
             var halfArea = previewAreaCells * 0.5;
             var unitsPerPixel = previewAreaCells / (double)resolution;
             selectedCell = null;
             selectedCellDetails = string.Empty;
-
-            for (var z = 0; z < resolution; z++)
-            for (var x = 0; x < resolution; x++)
+            HydrologyPlanScope scope = RequiresHydrologyPlan(patternView)
+                ? previewHydrology.BeginPlanScope()
+                : null;
+            try
             {
-                var worldX = checked((int)Math.Floor(
-                    previewCenter.x - halfArea
-                    + (x + 0.5) * unitsPerPixel));
-                var worldZ = checked((int)Math.Floor(
-                    previewCenter.y - halfArea
-                    + (z + 0.5) * unitsPerPixel));
-                var profile = RiverPatternResolver.Resolve(
-                    router,
-                    worldX,
-                    worldZ,
-                    router.Sample(worldX, worldZ),
-                    settings,
-                    out var weights);
-                var sampleIndex = x + resolution * z;
-                samples[sampleIndex] = new PatternDebugSample(
-                    weights,
-                    profile,
-                    settings.TerrainBaseHeightUnits
-                        + profile.SurfaceOffsetUnits,
-                    settings.WorldPatterns.River.DepthUnits.Maximum);
-                sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
-                for (var index = 0; index < 5; index++)
+                for (var z = 0; z < resolution; z++)
+                for (var x = 0; x < resolution; x++)
                 {
-                    var weight = GetWeight(weights, index);
-                    weightSums[index] += weight;
-                    maximumWeights[index] = Math.Max(
-                        maximumWeights[index],
-                        weight);
-                    if (weight >= 0.35f)
+                    var worldX = checked((int)Math.Floor(
+                        previewCenter.x - halfArea
+                        + (x + 0.5) * unitsPerPixel));
+                    var worldZ = checked((int)Math.Floor(
+                        previewCenter.y - halfArea
+                        + (z + 0.5) * unitsPerPixel));
+                    var terrain = previewHydrology.SampleBaseTerrain(worldX, worldZ);
+                    var profile = scope == null
+                        ? terrain.Terrain
+                        : HydrologyPatternResolver.Resolve(
+                            settings,
+                            HydrologyBatchBuilder.Sample(
+                                previewHydrology,
+                                scope,
+                                worldX,
+                                worldZ),
+                            terrain.Terrain);
+                    var weights = WorldPatternResolver.SampleWeights(
+                        router,
+                        worldX,
+                        worldZ);
+                    var sampleIndex = x + resolution * z;
+                    samples[sampleIndex] = new PatternDebugSample(
+                        weights,
+                        profile,
+                        settings.Hydrology.RiverCorridor.DepthUnits.Maximum);
+                    sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
+                    for (var index = 0; index < 5; index++)
                     {
-                        strongCounts[index]++;
+                        var weight = GetWeight(weights, index);
+                        weightSums[index] += weight;
+                        maximumWeights[index] = Math.Max(
+                            maximumWeights[index],
+                            weight);
+                        if (weight >= 0.35f)
+                        {
+                            strongCounts[index]++;
+                        }
+
                     }
 
+                    dominantCounts[(int)profile.DominantPattern]++;
+                    if (profile.RiverInfluence > 0f)
+                    {
+                        riverCount++;
+                        riverInfluenceSum += profile.RiverInfluence;
+                    }
+                    if (profile.WaterType == WaterType.Lake) lakeCount++;
+                    if (profile.WaterType == WaterType.Pond) pondCount++;
                 }
-
-                dominantCounts[(int)profile.DominantPattern]++;
-                if (profile.RiverInfluence > 0f)
-                {
-                    riverCount++;
-                    riverInfluenceSum += profile.RiverInfluence;
-                }
+            }
+            finally
+            {
+                scope?.Dispose();
             }
 
             var count = samples.Length;
@@ -332,7 +393,9 @@ namespace MiniCivilization.World.Editor
                 + $"협곡 {maximumWeights[3]:0.000} / "
                 + $"바다 {maximumWeights[4]:0.000}\n"
                 + $"강 영역 {Percent(riverCount, count)} / "
-                + $"평균 강 단면 진행 {(riverCount > 0 ? riverInfluenceSum / riverCount : 0f):0.000}";
+                + $"평균 강 단면 진행 {(riverCount > 0 ? riverInfluenceSum / riverCount : 0f):0.000}\n"
+                + $"Lake 수면 {Percent(lakeCount, count)} / "
+                + $"Pond 수면 {Percent(pondCount, count)}";
             RenderPreview();
         }
 
@@ -408,16 +471,22 @@ namespace MiniCivilization.World.Editor
             }
 
             var cell = selectedCell.Value;
-            var settings = ResolveSettings(controller);
+            var settings = ResolvePreviewSettings(controller);
             var router = new WorldNoiseRouter(settings);
-            var field = router.Sample(cell.x, cell.y);
-            var profile = RiverPatternResolver.Resolve(
+            var hydrology = ResolvePreviewHydrology(settings)
+                ?? throw new InvalidOperationException(
+                    "Preview Hydrology is not ready.");
+            using var scope = hydrology.BeginPlanScope();
+            var terrain = hydrology.SampleBaseTerrain(cell.x, cell.y);
+            var field = terrain.Field;
+            var profile = HydrologyPatternResolver.Resolve(
+                settings,
+                HydrologyBatchBuilder.Sample(hydrology, scope, cell.x, cell.y),
+                terrain.Terrain);
+            var weights = WorldPatternResolver.SampleWeights(
                 router,
                 cell.x,
-                cell.y,
-                field,
-                settings,
-                out var weights);
+                cell.y);
             var hasActualSurface = TryGetActualSurface(
                 cell.x,
                 cell.y,
@@ -465,6 +534,8 @@ namespace MiniCivilization.World.Editor
                 + $"패턴 세부 {profile.PatternDetailUnits / WorldGrid.HeightStepsPerCell:+0.00;-0.00;0.00} Cell\n"
                 + $"강 단면 진행 {profile.RiverInfluence:0.000} / "
                 + $"강 수심 {profile.RiverDepthUnits / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
+                + $"Hydrology: {profile.HydrologyType} / Component {profile.HydrologyComponentId} / "
+                + $"영역 {profile.HydrologyMembership:0.000} / 내부 {profile.HydrologyInteriorProgress:0.000}\n"
                 + $"수면 {profile.WaterTopUnits / (float)WorldGrid.HeightStepsPerCell:0.00} Cell / "
                 + $"합성 표면 {(settings.TerrainBaseHeightUnits + profile.SurfaceOffsetUnits) / WorldGrid.HeightStepsPerCell:0.00} Cell\n"
                 + $"실제 지형 표면: {actualHeight}\n"
@@ -525,7 +596,9 @@ namespace MiniCivilization.World.Editor
 
             var cellSize = world.CellSize;
             var verticalOffset = world.HeightStep * 0.04f;
-            var corners = new Vector3[4];
+            overlayVertices.Clear();
+            overlayColors.Clear();
+            overlayTriangles.Clear();
 
             for (var z = center.y - worldOverlayRadius;
                  z <= center.y + worldOverlayRadius;
@@ -553,20 +626,38 @@ namespace MiniCivilization.World.Editor
                 color.a = 0.3f;
                 var y = surface.GroundHeight * world.HeightStep
                     + verticalOffset;
-                corners[0] = ToWorldPosition(
-                    new Vector3(x * cellSize, y, z * cellSize));
-                corners[1] = ToWorldPosition(
-                    new Vector3((x + 1) * cellSize, y, z * cellSize));
-                corners[2] = ToWorldPosition(new Vector3(
+                var vertexStart = overlayVertices.Count;
+                overlayVertices.Add(ToWorldPosition(
+                    new Vector3(x * cellSize, y, z * cellSize)));
+                overlayVertices.Add(ToWorldPosition(
+                    new Vector3((x + 1) * cellSize, y, z * cellSize)));
+                overlayVertices.Add(ToWorldPosition(new Vector3(
                     (x + 1) * cellSize,
                     y,
-                    (z + 1) * cellSize));
-                corners[3] = ToWorldPosition(
-                    new Vector3(x * cellSize, y, (z + 1) * cellSize));
-                Handles.DrawSolidRectangleWithOutline(
-                    corners,
-                    color,
-                    new Color(color.r, color.g, color.b, 0.75f));
+                    (z + 1) * cellSize)));
+                overlayVertices.Add(ToWorldPosition(
+                    new Vector3(x * cellSize, y, (z + 1) * cellSize)));
+                overlayColors.Add(color);
+                overlayColors.Add(color);
+                overlayColors.Add(color);
+                overlayColors.Add(color);
+                overlayTriangles.Add(vertexStart);
+                overlayTriangles.Add(vertexStart + 1);
+                overlayTriangles.Add(vertexStart + 2);
+                overlayTriangles.Add(vertexStart);
+                overlayTriangles.Add(vertexStart + 2);
+                overlayTriangles.Add(vertexStart + 3);
+            }
+
+            if (overlayVertices.Count > 0 && EnsureOverlayResources())
+            {
+                worldOverlayMesh.Clear();
+                worldOverlayMesh.SetVertices(overlayVertices);
+                worldOverlayMesh.SetColors(overlayColors);
+                worldOverlayMesh.SetTriangles(overlayTriangles, 0);
+                worldOverlayMesh.RecalculateBounds();
+                worldOverlayMaterial.SetPass(0);
+                Graphics.DrawMeshNow(worldOverlayMesh, Matrix4x4.identity);
             }
 
             if (TryGetActualSurface(center.x, center.y, out var selectedHeight))
@@ -579,6 +670,47 @@ namespace MiniCivilization.World.Editor
                     labelPosition,
                     $"Cell ({center.x}, {center.y})");
             }
+        }
+
+        private bool EnsureOverlayResources()
+        {
+            if (worldOverlayMesh == null)
+            {
+                worldOverlayMesh = new Mesh
+                {
+                    name = "World Terrain Pattern Overlay",
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                worldOverlayMesh.MarkDynamic();
+            }
+
+            if (worldOverlayMaterial != null)
+            {
+                return true;
+            }
+
+            var shader = Shader.Find("Hidden/Internal-Colored");
+            if (shader == null)
+            {
+                return false;
+            }
+
+            worldOverlayMaterial = new Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            worldOverlayMaterial.SetInt(
+                "_SrcBlend",
+                (int)BlendMode.SrcAlpha);
+            worldOverlayMaterial.SetInt(
+                "_DstBlend",
+                (int)BlendMode.OneMinusSrcAlpha);
+            worldOverlayMaterial.SetInt("_Cull", (int)CullMode.Off);
+            worldOverlayMaterial.SetInt("_ZWrite", 0);
+            worldOverlayMaterial.SetInt(
+                "_ZTest",
+                (int)CompareFunction.LessEqual);
+            return true;
         }
 
         private bool TryGetActualSurface(
@@ -622,6 +754,39 @@ namespace MiniCivilization.World.Editor
             && worldManager.CurrentWorldRuntime != null
                 ? worldManager.CurrentWorldRuntime.Data.Settings
                 : controller.Settings.CreateData(controller.Seed);
+
+        private WorldSettingsData ResolvePreviewSettings(
+            WorldGenerationController controller) =>
+            previewSettings ?? ResolveSettings(controller);
+
+        private WorldHydrology ResolveHydrology(
+            WorldSettingsData settings)
+        {
+            if (TryResolveWorldManager()
+                && worldManager.CurrentWorldRuntime != null
+                && ReferenceEquals(
+                    worldManager.CurrentWorldRuntime.Data.Settings,
+                    settings))
+            {
+                return worldManager.CurrentWorldRuntime.Hydrology;
+            }
+
+            return new WorldHydrology(settings);
+        }
+
+        private WorldHydrology ResolvePreviewHydrology(
+            WorldSettingsData settings)
+        {
+            if (previewHydrology == null
+                || !ReferenceEquals(
+                    previewHydrology.Settings,
+                    settings))
+            {
+                previewHydrology = ResolveHydrology(settings);
+            }
+
+            return previewHydrology;
+        }
 
         private bool IsColumnLoaded(Vector2Int cell) =>
             TryResolveWorldManager()
@@ -684,6 +849,11 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
+            if (RequiresFinalSurface(patternView))
+            {
+                EnsurePreviewFinalSurfaces();
+            }
+
             var resolution = (int)Math.Sqrt(samples.Length);
             if (previewTexture == null
                 || previewTexture.width != resolution
@@ -712,6 +882,117 @@ namespace MiniCivilization.World.Editor
             previewTexture.Apply(false, false);
         }
 
+        private static bool RequiresFinalSurface(PatternView view) =>
+            view is PatternView.SeaWater or PatternView.RiverWater;
+
+        private static bool RequiresHydrologyPlan(PatternView view) =>
+            view is PatternView.Dominant
+                or PatternView.BasinArea
+                or PatternView.BasinDepth
+                or PatternView.LakeWater
+                or PatternView.PondWater
+                or PatternView.HydrologyComponent
+                or PatternView.RiverArea
+                or PatternView.RiverDepth
+                or PatternView.RiverWater;
+
+        private static bool RequiresFinalSurface(
+            in PatternDebugSample sample,
+            PatternView view) =>
+            view == PatternView.SeaWater
+                && sample.Result.WaterType == WaterType.Sea
+            || view == PatternView.RiverWater
+                && sample.Result.WaterType == WaterType.River;
+
+        private void EnsurePreviewFinalSurfaces()
+        {
+            if (samples == null || sampleCells == null || previewSettings == null)
+            {
+                return;
+            }
+
+            var settings = previewSettings;
+            var hydrology = ResolvePreviewHydrology(settings);
+            var density = new WorldDensityField(settings);
+            for (var index = 0; index < samples.Length; index++)
+            {
+                var sample = samples[index];
+                if (sample.HasFinalSurface
+                    || !RequiresFinalSurface(sample, patternView))
+                {
+                    continue;
+                }
+
+                var cell = sampleCells[index];
+                samples[index] = ResolveFinalSurface(
+                    sample,
+                    hydrology,
+                    density,
+                    settings,
+                    cell.x,
+                    cell.y);
+            }
+        }
+
+        private void EnsureDetailFinalSurfaces()
+        {
+            if (detailSamples == null || !selectedCell.HasValue)
+            {
+                return;
+            }
+
+            var settings = previewSettings;
+            if (settings == null)
+            {
+                return;
+            }
+
+            var hydrology = ResolvePreviewHydrology(settings);
+            var density = new WorldDensityField(settings);
+            var resolution = worldOverlayRadius * 2 + 1;
+            var center = selectedCell.Value;
+            for (var z = 0; z < resolution; z++)
+            for (var x = 0; x < resolution; x++)
+            {
+                var index = x + resolution * z;
+                var sample = detailSamples[index];
+                if (sample.HasFinalSurface
+                    || !RequiresFinalSurface(sample, patternView))
+                {
+                    continue;
+                }
+
+                detailSamples[index] = ResolveFinalSurface(
+                    sample,
+                    hydrology,
+                    density,
+                    settings,
+                    center.x - worldOverlayRadius + x,
+                    center.y - worldOverlayRadius + z);
+            }
+        }
+
+        private static PatternDebugSample ResolveFinalSurface(
+            in PatternDebugSample sample,
+            WorldHydrology hydrology,
+            in WorldDensityField density,
+            WorldSettingsData settings,
+            int worldX,
+            int worldZ)
+        {
+            var terrain = hydrology.SampleBaseTerrain(
+                worldX,
+                worldZ);
+            return sample.WithFinalSurface(
+                TerrainSurfaceSampler.SampleResolved(
+                    density,
+                    settings,
+                    worldX,
+                    worldZ,
+                    terrain.Field,
+                    sample.Result).SurfaceUnits);
+        }
+
         private void BuildDetailPreview(
             WorldGenerationController controller)
         {
@@ -722,30 +1003,43 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            var settings = ResolveSettings(controller);
+            var settings = ResolvePreviewSettings(controller);
+            var hydrology = ResolvePreviewHydrology(settings);
             var router = new WorldNoiseRouter(settings);
             var resolution = worldOverlayRadius * 2 + 1;
             detailSamples = new PatternDebugSample[
                 resolution * resolution];
             var center = selectedCell.Value;
+            using var scope = hydrology.BeginPlanScope();
+            using var hydrologyBatch = HydrologyBatchBuilder.Build(
+                hydrology,
+                scope,
+                center.x - worldOverlayRadius,
+                center.y - worldOverlayRadius,
+                resolution,
+                resolution);
             for (var z = 0; z < resolution; z++)
             for (var x = 0; x < resolution; x++)
             {
-                var profile = RiverPatternResolver.Resolve(
-                    router,
-                    center.x - worldOverlayRadius + x,
-                    center.y - worldOverlayRadius + z,
-                    router.Sample(
-                        center.x - worldOverlayRadius + x,
-                        center.y - worldOverlayRadius + z),
+                var worldX = center.x - worldOverlayRadius + x;
+                var worldZ = center.y - worldOverlayRadius + z;
+                var terrain = hydrologyBatch.SampleBaseTerrainState(
+                    worldX,
+                    worldZ);
+                var profile = HydrologyPatternResolver.Resolve(
+                    worldX,
+                    worldZ,
                     settings,
-                    out var weights);
+                    hydrologyBatch,
+                    terrain.Terrain);
+                var weights = WorldPatternResolver.SampleWeights(
+                    router,
+                    worldX,
+                    worldZ);
                 detailSamples[x + resolution * z] = new PatternDebugSample(
                     weights,
                     profile,
-                    settings.TerrainBaseHeightUnits
-                        + profile.SurfaceOffsetUnits,
-                    settings.WorldPatterns.River.DepthUnits.Maximum);
+                    settings.Hydrology.RiverCorridor.DepthUnits.Maximum);
             }
 
             RenderDetailPreview();
@@ -756,6 +1050,11 @@ namespace MiniCivilization.World.Editor
             if (detailSamples == null || detailSamples.Length == 0)
             {
                 return;
+            }
+
+            if (RequiresFinalSurface(patternView))
+            {
+                EnsureDetailFinalSurfaces();
             }
 
             var resolution = (int)Math.Sqrt(detailSamples.Length);
@@ -823,6 +1122,67 @@ namespace MiniCivilization.World.Editor
                         1f)
                     : 0f;
                 return Color.Lerp(Color.black, SeaColor, ratio);
+            }
+
+            if (view == PatternView.BasinArea)
+            {
+                var basin = sample.Result.HydrologyType is WaterType.Lake
+                    or WaterType.Pond;
+                return Color.Lerp(
+                    Color.black,
+                    sample.Result.HydrologyType == WaterType.Lake
+                        ? LakeColor
+                        : PondColor,
+                    basin ? sample.Result.HydrologyMembership : 0f);
+            }
+
+            if (view == PatternView.BasinDepth)
+            {
+                var basin = sample.Result.HydrologyType is WaterType.Lake
+                    or WaterType.Pond;
+                return Color.Lerp(
+                    Color.black,
+                    sample.Result.HydrologyType == WaterType.Lake
+                        ? LakeColor
+                        : PondColor,
+                    basin ? sample.Result.HydrologyInteriorProgress : 0f);
+            }
+
+            if (view is PatternView.LakeWater or PatternView.PondWater)
+            {
+                var type = view == PatternView.LakeWater
+                    ? WaterType.Lake
+                    : WaterType.Pond;
+                var waterColor = type == WaterType.Lake
+                    ? LakeColor
+                    : PondColor;
+                return sample.Result.WaterType == type
+                    ? waterColor
+                    : Color.black;
+            }
+
+            if (view == PatternView.HydrologyComponent)
+            {
+                return sample.Result.HydrologyMembership > 0f
+                    ? ComponentColor(sample.Result.HydrologyComponentId)
+                    : Color.black;
+            }
+
+            if (view == PatternView.Dominant
+                && sample.Result.HydrologyMembership > 0f)
+            {
+                var hydrologyColor = sample.Result.HydrologyType switch
+                {
+                    WaterType.River => RiverColor,
+                    WaterType.Lake => LakeColor,
+                    WaterType.Pond => PondColor,
+                    WaterType.Sea => SeaColor,
+                    _ => Color.black
+                };
+                return Color.Lerp(
+                    Color.black,
+                    hydrologyColor,
+                    sample.Result.HydrologyMembership);
             }
 
             if (view == PatternView.RiverArea)
@@ -906,6 +1266,12 @@ namespace MiniCivilization.World.Editor
                 _ => throw new ArgumentOutOfRangeException(nameof(index))
             };
 
+        private static Color ComponentColor(int componentId)
+        {
+            var hash = unchecked((uint)componentId * 2654435761u);
+            return Color.HSVToRGB((hash & 0x00FFFFFFu) / 16777215f, 0.75f, 1f);
+        }
+
         private static string Percent(int value, int total) =>
             $"{value * 100f / total:0.0}%";
 
@@ -914,6 +1280,8 @@ namespace MiniCivilization.World.Editor
             samples = null;
             sampleCells = null;
             detailSamples = null;
+            previewSettings = null;
+            previewHydrology = null;
             statistics = string.Empty;
             selectedCell = null;
             selectedCellDetails = string.Empty;
@@ -942,6 +1310,25 @@ namespace MiniCivilization.World.Editor
 
             DestroyImmediate(detailTexture);
             detailTexture = null;
+        }
+
+        private void DestroyOverlayResources()
+        {
+            if (worldOverlayMesh != null)
+            {
+                DestroyImmediate(worldOverlayMesh);
+                worldOverlayMesh = null;
+            }
+
+            if (worldOverlayMaterial != null)
+            {
+                DestroyImmediate(worldOverlayMaterial);
+                worldOverlayMaterial = null;
+            }
+
+            overlayVertices.Clear();
+            overlayColors.Clear();
+            overlayTriangles.Clear();
         }
     }
 }

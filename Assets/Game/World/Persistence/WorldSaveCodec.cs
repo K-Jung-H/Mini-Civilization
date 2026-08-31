@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Persistence
         private const uint Footer = 0x444E454D;
         private const uint WaterFlowScheduleMarker = 0x31534657;
         private const uint EntitiesMarker = 0x31544E45;
-        private const ushort CurrentVersion = 28;
+        private const ushort CurrentVersion = 30;
         private const int CellByteSize = 18;
         private const int MaximumSectionBytes = 256 * 1024 * 1024;
 
@@ -792,28 +792,6 @@ namespace MiniCivilization.World.Persistence
             WriteNoiseField(writer, patterns.Sea.SeabedField);
             WriteSeededRange(writer, patterns.Sea.SeabedAmplitudeUnits);
             writer.Write(patterns.Sea.SurfaceUnits);
-            var river = patterns.River;
-            writer.Write(river.PlanningRegionSizeCells);
-            writer.Write(river.RouteSampleSpacingCells);
-            writer.Write(river.NetworkDensity);
-            writer.Write(river.TerrainChangeCost);
-            writer.Write(river.UphillCost);
-            writer.Write(river.CrossSlopeCost);
-            writer.Write(river.CorridorExposureCost);
-            writer.Write(river.BankMarginCells);
-            writer.Write(river.ValleyPreference);
-            WriteNoiseField(writer, river.RouteVariationField);
-            writer.Write(river.RouteVariationCost);
-            writer.Write(river.SmoothingIterations);
-            WriteNoiseField(writer, river.WidthField);
-            writer.Write(river.MaximumWidthCells);
-            WriteCurve(writer, river.CrossSection);
-            WriteSeededRange(writer, river.DepthUnits);
-            WriteSeededRange(writer, river.WaterInsetUnits);
-            writer.Write(river.DropTransitionCells);
-            WriteCurve(writer, river.DropTransition);
-            WriteNoiseField(writer, river.RiverbedField);
-            WriteSeededRange(writer, river.RiverbedAmplitudeUnits);
         }
 
         private static WorldPatternSettingsData ReadWorldPatterns(
@@ -867,29 +845,127 @@ namespace MiniCivilization.World.Persistence
                 ReadSeededRange(reader),
                 ReadNoiseField(reader),
                 ReadSeededRange(reader),
-                reader.ReadInt32()),
-            new RiverPatternSettingsData(
+                reader.ReadInt32()));
+
+        private static void WriteHydrology(
+            BinaryWriter writer,
+            in HydrologySettingsData hydrology)
+        {
+            var map = hydrology.Map;
+            writer.Write(map.PlanningRegionSizeCells);
+            writer.Write(map.RouteSampleSpacingCells);
+            writer.Write(map.BasinSeedSpacingCells);
+            WriteNoiseField(writer, map.BasinPotentialField);
+            WriteCurve(writer, map.BasinPotentialResponse);
+            writer.Write(map.BasinPotentialCost);
+            writer.Write(map.TerrainDeformationCost);
+            writer.Write(map.SlopeCost);
+
+            var network = hydrology.RiverNetwork;
+            writer.Write(network.HeadDensity);
+            writer.Write(network.EndDensity);
+            WriteSeededRange(writer, network.LengthCells);
+            writer.Write(network.JunctionChance);
+            writer.Write(network.LakeEndpointWeight);
+            writer.Write(network.PondEndpointWeight);
+            writer.Write(network.SeaEndpointWeight);
+            writer.Write(network.NaturalEndpointWeight);
+            writer.Write(network.TerrainChangeCost);
+            writer.Write(network.UphillCost);
+            writer.Write(network.CrossSlopeCost);
+            writer.Write(network.ValleyPreference);
+            WriteNoiseField(writer, network.RouteVariationField);
+            writer.Write(network.RouteVariationCost);
+            writer.Write(network.NaturalHeadTransitionCells);
+            WriteCurve(writer, network.NaturalHeadTransition);
+            writer.Write(network.NaturalEndTransitionCells);
+            WriteCurve(writer, network.NaturalEndTransition);
+
+            var graph = hydrology.RiverGraph;
+            WriteSeededRange(writer, graph.ConnectionRadiusCells);
+            writer.Write(graph.ElevationChangeCost);
+            writer.Write(graph.NaturalTransitionCells);
+            WriteCurve(writer, graph.NaturalTransitionRate);
+            WriteCurve(writer, graph.ProximityChance);
+            WriteCurve(writer, graph.AlignmentChance);
+
+            var corridor = hydrology.RiverCorridor;
+            writer.Write(corridor.CorridorExposureCost);
+            writer.Write(corridor.BankMarginCells);
+            writer.Write(corridor.SmoothingIterations);
+            WriteNoiseField(writer, corridor.WidthField);
+            WriteSeededRange(writer, corridor.WidthCells);
+            WriteCurve(writer, corridor.CrossSection);
+            WriteSeededRange(writer, corridor.DepthUnits);
+            WriteSeededRange(writer, corridor.WaterInsetUnits);
+            writer.Write(corridor.DropTransitionCells);
+            WriteCurve(writer, corridor.DropTransition);
+            WriteNoiseField(writer, corridor.RiverbedField);
+            WriteSeededRange(writer, corridor.RiverbedAmplitudeUnits);
+
+            var basins = hydrology.Basins;
+            writer.Write(basins.MinimumSeparationCells);
+            writer.Write(basins.MaximumReachCells);
+            writer.Write(basins.CutCost);
+            writer.Write(basins.FillCost);
+            writer.Write(basins.RimCost);
+            writer.Write(basins.ShoreTransitionCells);
+            WriteCurve(writer, basins.ShoreTransition);
+            WriteCurve(writer, basins.DepthByInterior);
+            WriteNoiseField(writer, basins.BedField);
+            WriteSeededRange(writer, basins.BedAmplitudeUnits);
+            WriteBasinProfile(writer, basins.Lake);
+            WriteBasinProfile(writer, basins.Pond);
+        }
+
+        private static HydrologySettingsData ReadHydrology(
+            BinaryReader reader) => new(
+            new HydrologyMapSettingsData(
+                reader.ReadInt32(), reader.ReadInt32(),
                 reader.ReadInt32(),
-                reader.ReadInt32(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                reader.ReadSingle(),
-                ReadNoiseField(reader),
-                reader.ReadSingle(),
-                reader.ReadInt32(),
-                ReadNoiseField(reader),
-                reader.ReadInt32(),
-                ReadCurve(reader),
-                ReadSeededRange(reader),
-                ReadSeededRange(reader),
-                reader.ReadInt32(),
-                ReadCurve(reader),
-                ReadNoiseField(reader),
-                ReadSeededRange(reader)));
+                ReadNoiseField(reader), ReadCurve(reader),
+                reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+            new RiverNetworkSettingsData(
+                reader.ReadSingle(), reader.ReadSingle(), ReadSeededRange(reader),
+                reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                ReadNoiseField(reader), reader.ReadSingle(), reader.ReadInt32(),
+                ReadCurve(reader), reader.ReadInt32(), ReadCurve(reader)),
+            new RiverGraphSettingsData(
+                ReadSeededRange(reader), reader.ReadSingle(), reader.ReadInt32(),
+                ReadCurve(reader), ReadCurve(reader), ReadCurve(reader)),
+            new RiverCorridorSettingsData(
+                reader.ReadSingle(), reader.ReadSingle(), reader.ReadInt32(),
+                ReadNoiseField(reader), ReadSeededRange(reader), ReadCurve(reader),
+                ReadSeededRange(reader), ReadSeededRange(reader),
+                reader.ReadInt32(), ReadCurve(reader), ReadNoiseField(reader),
+                ReadSeededRange(reader)),
+            new BasinPatternSettingsData(
+                reader.ReadInt32(), reader.ReadInt32(),
+                reader.ReadSingle(), reader.ReadSingle(),
+                reader.ReadSingle(), reader.ReadInt32(), ReadCurve(reader),
+                ReadCurve(reader), ReadNoiseField(reader), ReadSeededRange(reader),
+                ReadBasinProfile(reader), ReadBasinProfile(reader)));
+
+        private static void WriteBasinProfile(
+            BinaryWriter writer,
+            in BasinProfileSettingsData profile)
+        {
+            writer.Write(profile.Occurrence);
+            WriteSeededRange(writer, profile.AreaCells);
+            WriteSeededRange(writer, profile.MaximumDepthUnits);
+            writer.Write(profile.RiverConnectionChance);
+            writer.Write(profile.HeadRoleChance);
+        }
+
+        private static BasinProfileSettingsData ReadBasinProfile(
+            BinaryReader reader) => new(
+            reader.ReadSingle(),
+            ReadSeededRange(reader),
+            ReadSeededRange(reader),
+            reader.ReadSingle(),
+            reader.ReadSingle());
 
         private static void WriteSettings(
             BinaryWriter writer,
@@ -913,14 +989,9 @@ namespace MiniCivilization.World.Persistence
             WriteNoiseField(writer, router.Detail);
             WriteNoiseField(writer, router.SeaDetail);
             WriteWorldPatterns(writer, settings.WorldPatterns);
+            WriteHydrology(writer, settings.Hydrology);
             writer.Write(settings.TemperatureScale);
             writer.Write(settings.TerrainBaseHeightUnits);
-            writer.Write(settings.LakeDensity);
-            writer.Write(settings.LakeRegionSizeCells);
-            writer.Write(settings.MaximumLakeRadiusCells);
-            writer.Write(settings.MaximumLakeDepthSteps);
-            writer.Write(settings.MinimumInlandLakeArea);
-            writer.Write(settings.MinimumInlandLakeDepthSteps);
             writer.Write(settings.PondMaximumArea);
             writer.Write(settings.WaterFlowRules.SpreadAmountLoss);
             writer.Write(settings.WaterFlowRules.MinimumSpreadAmount);
@@ -968,14 +1039,9 @@ namespace MiniCivilization.World.Persistence
                     ReadNoiseField(reader),
                     ReadNoiseField(reader)),
                 worldPatterns: ReadWorldPatterns(reader),
+                hydrology: ReadHydrology(reader),
                 temperatureScale: reader.ReadSingle(),
                 terrainBaseHeightUnits: reader.ReadInt32(),
-                lakeDensity: reader.ReadSingle(),
-                lakeRegionSizeCells: reader.ReadInt32(),
-                maximumLakeRadiusCells: reader.ReadInt32(),
-                maximumLakeDepthSteps: reader.ReadInt32(),
-                minimumInlandLakeArea: reader.ReadInt32(),
-                minimumInlandLakeDepthSteps: reader.ReadInt32(),
                 pondMaximumArea: reader.ReadInt32(),
                 waterFlowRules: new WaterFlowRules(
                     reader.ReadByte(),

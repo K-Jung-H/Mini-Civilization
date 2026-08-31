@@ -6,77 +6,8 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Generation
 {
-    internal readonly struct RiverPatternSample
-    {
-        public RiverPatternSample(
-            float influence,
-            float surfaceDownUnits,
-            float depthUnits,
-            int waterTopUnits)
-        {
-            Influence = influence;
-            SurfaceDownUnits = surfaceDownUnits;
-            DepthUnits = depthUnits;
-            WaterTopUnits = waterTopUnits;
-        }
-
-        public float Influence { get; }
-        public float SurfaceDownUnits { get; }
-        public float DepthUnits { get; }
-        public int WaterTopUnits { get; }
-        public bool HasRiver => Influence > 0f && DepthUnits > 0f;
-    }
-
-    internal static class RiverPatternResolver
-    {
-        public static WorldPatternResult Resolve(
-            in WorldNoiseRouter router,
-            int worldX,
-            int worldZ,
-            in WorldFieldSample field,
-            WorldSettingsData settings,
-            out WorldPatternWeights weights)
-        {
-            var terrain = WorldPatternResolver.Resolve(
-                router,
-                worldX,
-                worldZ,
-                field,
-                settings,
-                out weights);
-            var river = RiverHydrologyPlanner.Sample(
-                router,
-                settings,
-                worldX,
-                worldZ);
-            if (!river.HasRiver)
-            {
-                return terrain;
-            }
-
-            var keepSeaWater = terrain.WaterType == WaterType.Sea;
-            return new WorldPatternResult(
-                terrain.SurfaceOffsetUnits - river.SurfaceDownUnits,
-                terrain.VerticalFactor,
-                terrain.DetailUnits,
-                terrain.DominantPattern,
-                terrain.RegionKey,
-                terrain.InteriorProgress,
-                terrain.PatternDepthUnits,
-                terrain.PatternDepthProgress,
-                terrain.PatternDetailUnits,
-                keepSeaWater ? terrain.WaterTopUnits : river.WaterTopUnits,
-                keepSeaWater ? WaterType.Sea : WaterType.River,
-                river.Influence,
-                river.DepthUnits);
-        }
-    }
-
     internal static class RiverHydrologyPlanner
     {
-        private const int VerticalEdgeChannel = 7101;
-        private const int HorizontalEdgeChannel = 7102;
-        private const int PortalOffsetChannel = 7110;
         private const int RouteVariationChannel = 7120;
         private const int WidthChannel = 7130;
         private const int DepthChannel = 7140;
@@ -85,63 +16,161 @@ namespace MiniCivilization.World.Generation
         private const int RiverbedAmplitudeChannel = 7170;
 
         private static readonly ConditionalWeakTable<
-            WorldSettingsData,
-            RiverPlanCache> Caches = new();
+            HydrologyGenerationContext,
+            RiverEdgeStore> EdgeStores = new();
 
-        public static RiverPatternSample Sample(
-            in WorldNoiseRouter router,
-            WorldSettingsData settings,
-            int worldX,
-            int worldZ)
+        internal static RiverEdgeLease AcquireForBatch(
+            HydrologyGenerationContext context,
+            int originX,
+            int originZ,
+            int width,
+            int height) => EdgeStores.GetValue(
+                context,
+                _ => new RiverEdgeStore(context)).Acquire(
+                    originX,
+                    originZ,
+                    width,
+                    height);
+
+        internal static void RasterizeBatch(
+            HydrologyGenerationContext context,
+            int originX,
+            int originZ,
+            int width,
+            int height,
+            HydrologyMapCell[] cells,
+            RiverEdgeLease lease)
         {
-            if (settings == null)
+            if (cells == null || cells.Length != width * height)
             {
-                throw new ArgumentNullException(nameof(settings));
+                throw new ArgumentException(
+                    "Hydrology Batch raster dimensions are invalid.",
+                    nameof(cells));
             }
 
-            var riverSettings = settings.WorldPatterns.River;
-            var regionSize = riverSettings.PlanningRegionSizeCells;
-            var regionX = FloorDivide(worldX, regionSize);
-            var regionZ = FloorDivide(worldZ, regionSize);
-            var maximumRadius = Math.Max(
-                0.75f,
-                riverSettings.MaximumWidthCells * 0.5f);
-            var neighborReach = checked(
-                (int)Math.Ceiling(maximumRadius / regionSize));
-            var nearest = default(RiverPathSample);
-            var hasNearest = false;
-
-            for (var offsetZ = -neighborReach;
-                 offsetZ <= neighborReach;
-                 offsetZ++)
-            for (var offsetX = -neighborReach;
-                 offsetX <= neighborReach;
-                 offsetX++)
+            var nearest = new RiverPathSample[cells.Length];
+            var hasNearest = new bool[cells.Length];
+            var settings = context.Settings;
+            var maximumRadius = settings.Hydrology.RiverCorridor
+                .WidthCells.Maximum * 0.5f;
+            var edges = lease.GetEdges(
+                originX,
+                originZ,
+                width,
+                height);
+            for (var edgeIndex = 0; edgeIndex < edges.Count; edgeIndex++)
             {
-                var plan = GetPlan(
-                    settings,
-                    regionX + offsetX,
-                    regionZ + offsetZ);
-                if (!plan.TrySample(worldX, worldZ, out var candidate)
-                    || hasNearest
-                    && !candidate.IsCloserThan(nearest))
+                var edge = edges[edgeIndex];
+                for (var segmentIndex = 0;
+                     segmentIndex < edge.Segments.Length;
+                     segmentIndex++)
+                {
+                    RasterizeSegment(
+                        edge.Segments[segmentIndex],
+                        originX,
+                        originZ,
+                        width,
+                        height,
+                        maximumRadius,
+                        cells,
+                        nearest,
+                        hasNearest);
+                }
+            }
+
+            for (var index = 0; index < cells.Length; index++)
+            {
+                if (cells[index].HasTerrainTarget || !hasNearest[index])
                 {
                     continue;
                 }
 
-                nearest = candidate;
-                hasNearest = true;
+                var worldX = originX + index % width;
+                var worldZ = originZ + index / width;
+                if (!TryCreateCell(
+                    context,
+                    worldX,
+                    worldZ,
+                    nearest[index],
+                    out var river))
+                {
+                    continue;
+                }
+
+                cells[index] = river;
+            }
+        }
+
+        private static void RasterizeSegment(
+            in RiverSegment segment,
+            int originX,
+            int originZ,
+            int width,
+            int height,
+            float maximumRadius,
+            IReadOnlyList<HydrologyMapCell> baseCells,
+            RiverPathSample[] nearest,
+            bool[] hasNearest)
+        {
+            var minimumX = Math.Max(
+                0,
+                (int)Math.Ceiling(
+                    segment.MinimumX - maximumRadius - originX));
+            var maximumX = Math.Min(
+                width - 1,
+                (int)Math.Floor(
+                    segment.MaximumX + maximumRadius - originX));
+            var minimumZ = Math.Max(
+                0,
+                (int)Math.Ceiling(
+                    segment.MinimumZ - maximumRadius - originZ));
+            var maximumZ = Math.Min(
+                height - 1,
+                (int)Math.Floor(
+                    segment.MaximumZ + maximumRadius - originZ));
+            if (minimumX > maximumX || minimumZ > maximumZ)
+            {
+                return;
             }
 
-            if (!hasNearest)
+            for (var localZ = minimumZ; localZ <= maximumZ; localZ++)
+            for (var localX = minimumX; localX <= maximumX; localX++)
             {
-                return default;
-            }
+                var index = localX + width * localZ;
+                if (baseCells[index].HasTerrainTarget)
+                {
+                    continue;
+                }
 
-            var radius = Math.Max(0.75f, nearest.WidthCells * 0.5f);
-            if (nearest.Distance >= radius)
+                var candidate = segment.Sample(
+                    originX + localX,
+                    originZ + localZ);
+                if (hasNearest[index]
+                    && !candidate.IsCloserThan(nearest[index]))
+                {
+                    continue;
+                }
+
+                nearest[index] = candidate;
+                hasNearest[index] = true;
+            }
+        }
+
+        private static bool TryCreateCell(
+            HydrologyGenerationContext context,
+            int worldX,
+            int worldZ,
+            in RiverPathSample nearest,
+            out HydrologyMapCell cell)
+        {
+            cell = default;
+            var settings = context.Settings;
+            var riverSettings = settings.Hydrology.RiverCorridor;
+
+            var radius = nearest.WidthCells * 0.5f;
+            if (radius <= 0f || nearest.Distance >= radius)
             {
-                return default;
+                return false;
             }
 
             var coreProgress = Math.Clamp(
@@ -154,7 +183,7 @@ namespace MiniCivilization.World.Generation
                 1f);
             if (influence <= 0f)
             {
-                return default;
+                return false;
             }
 
             var centerDepthUnits = nearest.BedDepthUnits;
@@ -172,11 +201,8 @@ namespace MiniCivilization.World.Generation
                         Seed(settings.Seed, RiverbedAmplitudeChannel)));
             var waterTopUnits = checked((int)Math.Floor(
                 nearest.WaterTopUnits));
-            var densityField = new WorldDensityField(settings);
             var terrainSurfaceUnits = SampleTerrain(
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     worldX,
                     worldZ)
                 .SurfaceUnits;
@@ -196,64 +222,376 @@ namespace MiniCivilization.World.Generation
             var targetBedUnits = Math.Min(
                 terrainRelativeBedUnits,
                 waterRelativeBedUnits);
-            var surfaceDownUnits = Math.Max(
-                0f,
-                terrainSurfaceUnits - targetBedUnits);
-            var resultingSurfaceUnits = terrainSurfaceUnits
-                - surfaceDownUnits;
             var depthUnits = Math.Max(
                 0f,
-                nearest.WaterTopUnits - resultingSurfaceUnits);
-            return new RiverPatternSample(
+                nearest.WaterTopUnits - targetBedUnits);
+            cell = new HydrologyMapCell(
+                nearest.ComponentId,
+                WaterType.River,
                 influence,
-                surfaceDownUnits,
-                depthUnits,
-                waterTopUnits);
+                influence,
+                targetBedUnits,
+                waterTopUnits,
+                true,
+                influence,
+                depthUnits);
+            return true;
         }
 
-        private static RiverPlan GetPlan(
-            WorldSettingsData settings,
+        internal sealed class RiverEdgeLease : IDisposable
+        {
+            private RiverEdgeStore store;
+            private List<RiverGraphEntry> entries;
+
+            internal RiverEdgeLease(
+                RiverEdgeStore store,
+                List<RiverGraphEntry> entries)
+            {
+                this.store = store;
+                this.entries = entries;
+            }
+
+            internal IReadOnlyList<RiverEdge> GetEdges(
+                int originX,
+                int originZ,
+                int width,
+                int height)
+            {
+                if (store == null)
+                {
+                    throw new ObjectDisposedException(nameof(RiverEdgeLease));
+                }
+
+                return store.GetRegisteredEdges(
+                    originX,
+                    originZ,
+                    width,
+                    height);
+            }
+
+            public void Dispose()
+            {
+                if (store == null)
+                {
+                    return;
+                }
+
+                store.Release(entries);
+                store = null;
+                entries = null;
+            }
+        }
+
+        internal sealed class RiverEdgeStore
+        {
+            private readonly HydrologyGenerationContext context;
+            private readonly int regionSize;
+            private readonly float maximumRadius;
+            private readonly float ownerReachCells;
+            private readonly object gate = new();
+            private readonly Dictionary<long, RiverGraphEntry> graphs = new();
+            private readonly Dictionary<RiverEdgeId, RiverEdge> edges = new();
+            private readonly Dictionary<long, HashSet<RiverEdgeId>> regionEdges = new();
+
+            public RiverEdgeStore(HydrologyGenerationContext context)
+            {
+                this.context = context;
+                var settings = context.Settings;
+                regionSize = settings.Hydrology.Map.PlanningRegionSizeCells;
+                maximumRadius = settings.Hydrology.RiverCorridor
+                    .WidthCells.Maximum * 0.5f;
+                ownerReachCells = settings.Hydrology.RiverNetwork
+                    .LengthCells.Maximum + maximumRadius;
+            }
+
+            public RiverEdgeLease Acquire(
+                int originX,
+                int originZ,
+                int width,
+                int height)
+            {
+                var halo = checked((int)Math.Ceiling(ownerReachCells));
+                var minimumRegionX = FloorDivide(originX - halo, regionSize);
+                var maximumRegionX = FloorDivide(
+                    checked(originX + width - 1 + halo),
+                    regionSize);
+                var minimumRegionZ = FloorDivide(originZ - halo, regionSize);
+                var maximumRegionZ = FloorDivide(
+                    checked(originZ + height - 1 + halo),
+                    regionSize);
+                var entries = new List<RiverGraphEntry>();
+                lock (gate)
+                {
+                    for (var regionZ = minimumRegionZ;
+                         regionZ <= maximumRegionZ;
+                         regionZ++)
+                    for (var regionX = minimumRegionX;
+                         regionX <= maximumRegionX;
+                         regionX++)
+                    {
+                        var ownerRegionX = regionX;
+                        var ownerRegionZ = regionZ;
+                        var key = CoordinateKey(ownerRegionX, ownerRegionZ);
+                        if (!graphs.TryGetValue(key, out var entry))
+                        {
+                            entry = new RiverGraphEntry(
+                                key,
+                                () => BuildRegionPlan(
+                                    context,
+                                    ownerRegionX,
+                                    ownerRegionZ));
+                            graphs.Add(key, entry);
+                        }
+
+                        entry.LeaseCount++;
+                        entries.Add(entry);
+                    }
+                }
+
+                try
+                {
+                    for (var index = 0; index < entries.Count; index++)
+                    {
+                        Register(entries[index]);
+                    }
+                    return new RiverEdgeLease(this, entries);
+                }
+                catch
+                {
+                    Release(entries);
+                    throw;
+                }
+            }
+
+            public IReadOnlyList<RiverEdge> GetRegisteredEdges(
+                int originX,
+                int originZ,
+                int width,
+                int height)
+            {
+                var minimumRegionX = FloorDivide(originX, regionSize);
+                var maximumRegionX = FloorDivide(
+                    checked(originX + width - 1),
+                    regionSize);
+                var minimumRegionZ = FloorDivide(originZ, regionSize);
+                var maximumRegionZ = FloorDivide(
+                    checked(originZ + height - 1),
+                    regionSize);
+                lock (gate)
+                {
+                    var ids = new HashSet<RiverEdgeId>();
+                    for (var regionZ = minimumRegionZ;
+                         regionZ <= maximumRegionZ;
+                         regionZ++)
+                    for (var regionX = minimumRegionX;
+                         regionX <= maximumRegionX;
+                         regionX++)
+                    {
+                        if (!regionEdges.TryGetValue(
+                                CoordinateKey(regionX, regionZ),
+                                out var registered))
+                        {
+                            continue;
+                        }
+
+                        ids.UnionWith(registered);
+                    }
+
+                    var result = new List<RiverEdge>(ids.Count);
+                    foreach (var id in ids)
+                    {
+                        if (edges.TryGetValue(id, out var edge))
+                        {
+                            result.Add(edge);
+                        }
+                    }
+
+                    return result;
+                }
+            }
+
+            public void Release(IReadOnlyList<RiverGraphEntry> entries)
+            {
+                lock (gate)
+                {
+                    for (var index = 0; index < entries.Count; index++)
+                    {
+                        var entry = entries[index];
+                        entry.LeaseCount--;
+                        if (entry.LeaseCount != 0)
+                        {
+                            continue;
+                        }
+
+                        Remove(entry);
+                    }
+                }
+            }
+
+            private void Register(RiverGraphEntry entry)
+            {
+                var plan = entry.Plan.Value;
+                lock (gate)
+                {
+                    if (entry.Registered)
+                    {
+                        return;
+                    }
+
+                    for (var edgeIndex = 0;
+                         edgeIndex < plan.Edges.Length;
+                         edgeIndex++)
+                    {
+                        var edge = plan.Edges[edgeIndex];
+                        edges.Add(edge.Id, edge);
+                        RegisterAffectedRegions(edge);
+                    }
+
+                    entry.Registered = true;
+                }
+            }
+
+            private void Remove(RiverGraphEntry entry)
+            {
+                graphs.Remove(entry.Key);
+                if (!entry.Registered)
+                {
+                    return;
+                }
+
+                var plan = entry.Plan.Value;
+                for (var edgeIndex = 0;
+                     edgeIndex < plan.Edges.Length;
+                     edgeIndex++)
+                {
+                    var edge = plan.Edges[edgeIndex];
+                    edges.Remove(edge.Id);
+                    UnregisterAffectedRegions(edge);
+                }
+            }
+
+            private void RegisterAffectedRegions(in RiverEdge edge)
+            {
+                GetAffectedRegionBounds(
+                    edge,
+                    out var minimumRegionX,
+                    out var maximumRegionX,
+                    out var minimumRegionZ,
+                    out var maximumRegionZ);
+                for (var regionZ = minimumRegionZ;
+                     regionZ <= maximumRegionZ;
+                     regionZ++)
+                for (var regionX = minimumRegionX;
+                     regionX <= maximumRegionX;
+                     regionX++)
+                {
+                    var key = CoordinateKey(regionX, regionZ);
+                    if (!regionEdges.TryGetValue(key, out var ids))
+                    {
+                        ids = new HashSet<RiverEdgeId>();
+                        regionEdges.Add(key, ids);
+                    }
+                    ids.Add(edge.Id);
+                }
+            }
+
+            private void UnregisterAffectedRegions(in RiverEdge edge)
+            {
+                GetAffectedRegionBounds(
+                    edge,
+                    out var minimumRegionX,
+                    out var maximumRegionX,
+                    out var minimumRegionZ,
+                    out var maximumRegionZ);
+                for (var regionZ = minimumRegionZ;
+                     regionZ <= maximumRegionZ;
+                     regionZ++)
+                for (var regionX = minimumRegionX;
+                     regionX <= maximumRegionX;
+                     regionX++)
+                {
+                    var key = CoordinateKey(regionX, regionZ);
+                    if (!regionEdges.TryGetValue(key, out var ids))
+                    {
+                        continue;
+                    }
+
+                    ids.Remove(edge.Id);
+                    if (ids.Count == 0)
+                    {
+                        regionEdges.Remove(key);
+                    }
+                }
+            }
+
+            private void GetAffectedRegionBounds(
+                in RiverEdge edge,
+                out int minimumRegionX,
+                out int maximumRegionX,
+                out int minimumRegionZ,
+                out int maximumRegionZ)
+            {
+                minimumRegionX = FloorDivide(
+                    (int)Math.Floor(edge.MinimumX - maximumRadius),
+                    regionSize);
+                maximumRegionX = FloorDivide(
+                    (int)Math.Ceiling(edge.MaximumX + maximumRadius),
+                    regionSize);
+                minimumRegionZ = FloorDivide(
+                    (int)Math.Floor(edge.MinimumZ - maximumRadius),
+                    regionSize);
+                maximumRegionZ = FloorDivide(
+                    (int)Math.Ceiling(edge.MaximumZ + maximumRadius),
+                    regionSize);
+            }
+        }
+
+        internal sealed class RiverGraphEntry
+        {
+            public RiverGraphEntry(long key, Func<RiverRegionPlan> create)
+            {
+                Key = key;
+                Plan = new Lazy<RiverRegionPlan>(create, true);
+            }
+
+            public long Key { get; }
+            public Lazy<RiverRegionPlan> Plan { get; }
+            public int LeaseCount;
+            public bool Registered;
+        }
+
+        internal static RiverRegionPlan BuildRegionPlan(
+            HydrologyGenerationContext context,
             int regionX,
             int regionZ)
         {
-            var cache = Caches.GetValue(settings, _ => new RiverPlanCache());
-            var key = ((long)regionX << 32) ^ (uint)regionZ;
-            return cache.Plans.GetOrAdd(
-                    key,
-                    _ => new Lazy<RiverPlan>(
-                        () => BuildPlan(settings, regionX, regionZ),
-                        true))
-                .Value;
-        }
-
-        private static RiverPlan BuildPlan(
-            WorldSettingsData settings,
-            int regionX,
-            int regionZ)
-        {
-            var riverSettings = settings.WorldPatterns.River;
-            var spacing = riverSettings.RouteSampleSpacingCells;
-            var regionSize = riverSettings.PlanningRegionSizeCells;
-            var gridSize = checked(regionSize / spacing + 1);
+            var settings = context.Settings;
+            var mapSettings = settings.Hydrology.Map;
+            var riverSettings = settings.Hydrology.RiverCorridor;
+            var networkSettings = settings.Hydrology.RiverNetwork;
+            var spacing = mapSettings.RouteSampleSpacingCells;
+            var regionSize = mapSettings.PlanningRegionSizeCells;
+            var routeReachCells = checked(
+                (int)Math.Ceiling(networkSettings.LengthCells.Maximum / spacing)
+                * spacing);
+            var routeSizeCells = checked(regionSize + routeReachCells * 2);
+            var gridSize = checked(routeSizeCells / spacing + 1);
             var nodeCount = checked(gridSize * gridSize);
-            var originX = checked(regionX * regionSize);
-            var originZ = checked(regionZ * regionSize);
+            var regionOriginX = checked(regionX * regionSize);
+            var regionOriginZ = checked(regionZ * regionSize);
+            var originX = checked(regionOriginX - routeReachCells);
+            var originZ = checked(regionOriginZ - routeReachCells);
             var surfaceUnits = new float[nodeCount];
             var slope = new float[nodeCount];
             var valleyDepth = new float[nodeCount];
             var sea = new bool[nodeCount];
-            var router = new WorldNoiseRouter(settings);
-            var densityField = new WorldDensityField(settings);
-
             for (var z = 0; z < gridSize; z++)
             for (var x = 0; x < gridSize; x++)
             {
                 var worldX = checked(originX + x * spacing);
                 var worldZ = checked(originZ + z * spacing);
                 var terrain = SampleTerrain(
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     worldX,
                     worldZ);
                 var index = x + gridSize * z;
@@ -267,34 +605,40 @@ namespace MiniCivilization.World.Generation
                 valleyDepth,
                 gridSize,
                 spacing);
-
-            var portals = BuildPortals(
-                settings,
+            var basinComponent = BuildBasinComponentGrid(
+                context,
+                originX,
+                originZ,
+                gridSize,
+                spacing);
+            var endpoints = BuildEndpointCatalog(
+                context,
                 regionX,
                 regionZ,
-                gridSize);
-            var seaTarget = FindCoastalSeaTarget(
+                regionOriginX,
+                regionOriginZ,
+                regionSize,
+                routeReachCells,
+                originX,
+                originZ,
+                gridSize,
+                spacing,
                 surfaceUnits,
-                sea,
-                gridSize);
-            if (seaTarget < 0 && portals.Count < 2
-                || seaTarget >= 0 && portals.Count < 1)
+                sea);
+            var graphEdges = BuildGraphEdges(
+                settings,
+                endpoints);
+            if (graphEdges.Count == 0)
             {
-                return RiverPlan.Empty;
+                return RiverRegionPlan.Empty;
             }
 
-            var trunk = new bool[nodeCount];
-            var outlet = seaTarget >= 0
-                ? seaTarget
-                : SelectLowestPortal(portals, surfaceUnits);
-            trunk[outlet] = true;
-            portals.Remove(outlet);
-            portals.Sort((left, right) =>
-                surfaceUnits[right].CompareTo(surfaceUnits[left]));
-            var segments = new List<RiverSegment>();
-
-            for (var index = 0; index < portals.Count; index++)
+            var edges = new List<RiverEdge>();
+            for (var index = 0; index < graphEdges.Count; index++)
             {
+                var edge = graphEdges[index];
+                var goals = new bool[nodeCount];
+                goals[edge.End.GridIndex] = true;
                 var path = FindRoute(
                     settings,
                     originX,
@@ -305,36 +649,41 @@ namespace MiniCivilization.World.Generation
                     slope,
                     valleyDepth,
                     sea,
-                    portals[index],
-                    trunk);
+                    basinComponent,
+                    edge.Head,
+                    edge.End,
+                    goals);
                 if (path.Count < 2)
                 {
                     continue;
                 }
 
-                for (var pathIndex = 0;
-                     pathIndex < path.Count;
-                     pathIndex++)
-                {
-                    trunk[path[pathIndex]] = true;
-                }
-
+                var segments = new List<RiverSegment>();
                 AddLocalProfileSegments(
                     segments,
                     path,
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     originX,
                     originZ,
                     gridSize,
                     spacing,
-                    riverSettings.SmoothingIterations);
+                    riverSettings.SmoothingIterations,
+                    edge);
+                if (segments.Count > 0)
+                {
+                    edges.Add(new RiverEdge(
+                        new RiverEdgeId(
+                            regionX,
+                            regionZ,
+                            edge.ComponentId),
+                        segments.ToArray()));
+                }
             }
 
-            return segments.Count == 0
-                ? RiverPlan.Empty
-                : new RiverPlan(segments.ToArray());
+            return edges.Count == 0
+                ? RiverRegionPlan.Empty
+                : new RiverRegionPlan(
+                    edges.ToArray());
         }
 
         private static void BuildTerrainMetrics(
@@ -365,141 +714,433 @@ namespace MiniCivilization.World.Generation
             }
         }
 
-        private static List<int> BuildPortals(
+        private static int[] BuildBasinComponentGrid(
+            HydrologyGenerationContext context,
+            int originX,
+            int originZ,
+            int gridSize,
+            int spacing)
+        {
+            var result = new int[gridSize * gridSize];
+            for (var z = 0; z < gridSize; z++)
+            for (var x = 0; x < gridSize; x++)
+            {
+                var worldX = originX + x * spacing;
+                var worldZ = originZ + z * spacing;
+                var sample = HydrologyRegionPlanner.SampleBase(
+                    context,
+                    worldX,
+                    worldZ);
+                result[x + gridSize * z] = sample.WaterType is WaterType.Lake
+                    or WaterType.Pond
+                    ? sample.ComponentId
+                    : 0;
+            }
+            return result;
+        }
+
+        private static List<PlannedEndpoint> BuildEndpointCatalog(
+            HydrologyGenerationContext context,
+            int regionX,
+            int regionZ,
+            int regionOriginX,
+            int regionOriginZ,
+            int regionSize,
+            int routeReachCells,
+            int originX,
+            int originZ,
+            int gridSize,
+            int spacing,
+            float[] surfaceUnits,
+            bool[] sea)
+        {
+            var settings = context.Settings;
+            var result = new List<PlannedEndpoint>();
+            var endpointReach = checked(routeReachCells * 2);
+            var minimumRegionX = FloorDivide(
+                regionOriginX - endpointReach,
+                regionSize);
+            var maximumRegionX = FloorDivide(
+                regionOriginX + regionSize - 1 + endpointReach,
+                regionSize);
+            var minimumRegionZ = FloorDivide(
+                regionOriginZ - endpointReach,
+                regionSize);
+            var maximumRegionZ = FloorDivide(
+                regionOriginZ + regionSize - 1 + endpointReach,
+                regionSize);
+            for (var endpointRegionZ = minimumRegionZ;
+                 endpointRegionZ <= maximumRegionZ;
+                 endpointRegionZ++)
+            for (var endpointRegionX = minimumRegionX;
+                 endpointRegionX <= maximumRegionX;
+                 endpointRegionX++)
+            {
+                var plannedEndpoints = HydrologyRegionPlanner.GetEndpoints(
+                    context,
+                    endpointRegionX,
+                    endpointRegionZ);
+                for (var index = 0; index < plannedEndpoints.Count; index++)
+                {
+                    var endpoint = plannedEndpoints[index];
+                    var localX = (int)Math.Round(
+                        (endpoint.WorldX - originX) / (double)spacing,
+                        MidpointRounding.AwayFromZero);
+                    var localZ = (int)Math.Round(
+                        (endpoint.WorldZ - originZ) / (double)spacing,
+                        MidpointRounding.AwayFromZero);
+                    var gridIndex = (uint)localX < gridSize
+                        && (uint)localZ < gridSize
+                            ? localX + gridSize * localZ
+                            : -1;
+                    result.Add(new PlannedEndpoint(
+                        endpoint.ComponentId,
+                        endpoint.WorldX,
+                        endpoint.WorldZ,
+                        gridIndex,
+                        endpoint.WaterTopUnits,
+                        endpoint.Kind,
+                        endpoint.Role,
+                        endpoint.WorldX >= regionOriginX
+                            && endpoint.WorldX < regionOriginX + regionSize
+                            && endpoint.WorldZ >= regionOriginZ
+                            && endpoint.WorldZ < regionOriginZ + regionSize
+                            && endpoint.Kind is (
+                                HydrologyEndpointKind.Lake
+                                or HydrologyEndpointKind.Pond)));
+                }
+
+                AddNaturalEndpointsForRegion(
+                    result,
+                    context,
+                    settings,
+                    endpointRegionX,
+                    endpointRegionZ,
+                    regionX,
+                    regionZ,
+                    originX,
+                    originZ,
+                    gridSize,
+                    spacing,
+                    surfaceUnits,
+                    sea);
+            }
+            return result;
+        }
+
+        private static void AddNaturalEndpointsForRegion(
+            List<PlannedEndpoint> endpoints,
+            HydrologyGenerationContext context,
+            WorldSettingsData settings,
+            int endpointRegionX,
+            int endpointRegionZ,
+            int ownerRegionX,
+            int ownerRegionZ,
+            int routeOriginX,
+            int routeOriginZ,
+            int gridSize,
+            int spacing,
+            float[] surfaceUnits,
+            bool[] sea)
+        {
+            var network = settings.Hydrology.RiverNetwork;
+            TryAddNaturalEndpointForRegion(
+                endpoints,
+                context,
+                settings,
+                endpointRegionX,
+                endpointRegionZ,
+                ownerRegionX,
+                ownerRegionZ,
+                routeOriginX,
+                routeOriginZ,
+                gridSize,
+                spacing,
+                surfaceUnits,
+                sea,
+                network.HeadDensity,
+                HydrologyEndpointRole.Head,
+                7200);
+            TryAddNaturalEndpointForRegion(
+                endpoints,
+                context,
+                settings,
+                endpointRegionX,
+                endpointRegionZ,
+                ownerRegionX,
+                ownerRegionZ,
+                routeOriginX,
+                routeOriginZ,
+                gridSize,
+                spacing,
+                surfaceUnits,
+                sea,
+                network.EndDensity,
+                HydrologyEndpointRole.End,
+                7210);
+        }
+
+        private static void TryAddNaturalEndpointForRegion(
+            List<PlannedEndpoint> endpoints,
+            HydrologyGenerationContext context,
             WorldSettingsData settings,
             int regionX,
             int regionZ,
-            int gridSize)
-        {
-            var density = settings.WorldPatterns.River.NetworkDensity;
-            var portals = new List<int>(4);
-            TryAddPortal(
-                portals,
-                regionX,
-                regionZ,
-                VerticalEdgeChannel,
-                PortalOffsetChannel,
-                density,
-                gridSize,
-                westOrSouth: true,
-                vertical: true,
-                settings.Seed);
-            TryAddPortal(
-                portals,
-                regionX + 1,
-                regionZ,
-                VerticalEdgeChannel,
-                PortalOffsetChannel,
-                density,
-                gridSize,
-                westOrSouth: false,
-                vertical: true,
-                settings.Seed);
-            TryAddPortal(
-                portals,
-                regionX,
-                regionZ,
-                HorizontalEdgeChannel,
-                PortalOffsetChannel + 1,
-                density,
-                gridSize,
-                westOrSouth: true,
-                vertical: false,
-                settings.Seed);
-            TryAddPortal(
-                portals,
-                regionX,
-                regionZ + 1,
-                HorizontalEdgeChannel,
-                PortalOffsetChannel + 1,
-                density,
-                gridSize,
-                westOrSouth: false,
-                vertical: false,
-                settings.Seed);
-            return portals;
-        }
-
-        private static void TryAddPortal(
-            List<int> portals,
-            int edgeX,
-            int edgeZ,
-            int activationChannel,
-            int offsetChannel,
-            float density,
+            int ownerRegionX,
+            int ownerRegionZ,
+            int routeOriginX,
+            int routeOriginZ,
             int gridSize,
-            bool westOrSouth,
-            bool vertical,
-            int worldSeed)
+            int spacing,
+            float[] surfaceUnits,
+            bool[] sea,
+            float density,
+            HydrologyEndpointRole role,
+            int channel)
         {
             if (DeterministicNoise.Value01(
-                    edgeX,
-                    edgeZ,
-                    Seed(worldSeed, activationChannel)) >= density)
+                    regionX,
+                    regionZ,
+                    Seed(settings.Seed, channel)) >= density)
             {
                 return;
             }
 
-            var selector = DeterministicNoise.Value01(
-                edgeX,
-                edgeZ,
-                Seed(worldSeed, offsetChannel));
-            var interiorIndex = 1 + Math.Min(
-                gridSize - 3,
-                (int)(selector * (gridSize - 2)));
-            var x = vertical
-                ? (westOrSouth ? 0 : gridSize - 1)
-                : interiorIndex;
-            var z = vertical
-                ? interiorIndex
-                : (westOrSouth ? 0 : gridSize - 1);
-            portals.Add(x + gridSize * z);
+            var selectorX = DeterministicNoise.Value01(
+                regionX,
+                regionZ,
+                Seed(settings.Seed, channel + 1));
+            var selectorZ = DeterministicNoise.Value01(
+                regionZ,
+                regionX,
+                Seed(settings.Seed, channel + 2));
+            var regionSize = settings.Hydrology.Map.PlanningRegionSizeCells;
+            var worldX = checked(regionX * regionSize
+                + Math.Min(regionSize - 1, (int)(selectorX * regionSize)));
+            var worldZ = checked(regionZ * regionSize
+                + Math.Min(regionSize - 1, (int)(selectorZ * regionSize)));
+            var x = (int)Math.Round(
+                (worldX - routeOriginX) / (double)spacing,
+                MidpointRounding.AwayFromZero);
+            var z = (int)Math.Round(
+                (worldZ - routeOriginZ) / (double)spacing,
+                MidpointRounding.AwayFromZero);
+            var index = (uint)x < gridSize && (uint)z < gridSize
+                ? x + gridSize * z
+                : -1;
+            if (index >= 0 && sea[index])
+            {
+                return;
+            }
+
+            var outsideSea = false;
+            var waterTopUnits = index >= 0
+                ? (int)Math.Floor(surfaceUnits[index])
+                : ResolveNaturalEndpointSurface(
+                    context,
+                    worldX,
+                    worldZ,
+                    out outsideSea);
+            if (index < 0 && outsideSea)
+            {
+                return;
+            }
+
+            endpoints.Add(new PlannedEndpoint(
+                unchecked((int)DeterministicNoise.Hash(
+                    regionX,
+                    regionZ,
+                    Seed(settings.Seed, channel + 3))),
+                worldX,
+                worldZ,
+                index,
+                waterTopUnits,
+                HydrologyEndpointKind.Natural,
+                role,
+                regionX == ownerRegionX && regionZ == ownerRegionZ));
         }
 
-        private static int FindCoastalSeaTarget(
-            float[] surfaceUnits,
-            bool[] sea,
-            int gridSize)
+        private static int ResolveNaturalEndpointSurface(
+            HydrologyGenerationContext context,
+            int worldX,
+            int worldZ,
+            out bool sea)
         {
-            var target = -1;
-            var highestSurface = float.NegativeInfinity;
-            for (var z = 1; z < gridSize - 1; z++)
-            for (var x = 1; x < gridSize - 1; x++)
+            var terrain = context.SampleBaseTerrain(
+                worldX,
+                worldZ);
+            sea = terrain.HasSeaWater;
+            return (int)Math.Floor(terrain.SurfaceUnits);
+        }
+
+        private static List<GraphEdge> BuildGraphEdges(
+            WorldSettingsData settings,
+            IReadOnlyList<PlannedEndpoint> endpoints)
+        {
+            var heads = new List<PlannedEndpoint>();
+            var ends = new List<PlannedEndpoint>();
+            for (var index = 0; index < endpoints.Count; index++)
             {
-                var index = x + gridSize * z;
-                if (!sea[index])
+                if (endpoints[index].Role == HydrologyEndpointRole.Head)
+                {
+                    heads.Add(endpoints[index]);
+                }
+                else
+                {
+                    ends.Add(endpoints[index]);
+                }
+            }
+
+            var result = new List<GraphEdge>();
+            var network = settings.Hydrology.RiverNetwork;
+            for (var headIndex = 0; headIndex < heads.Count; headIndex++)
+            {
+                var head = heads[headIndex];
+                if (!head.OwnedByPlan || head.GridIndex < 0)
                 {
                     continue;
                 }
 
-                var coastal = !sea[index - 1]
-                    || !sea[index + 1]
-                    || !sea[index - gridSize]
-                    || !sea[index + gridSize];
-                if (coastal && surfaceUnits[index] > highestSurface)
+                var candidates = new List<EndpointMatch>();
+                var targetLength = ResolveRange(
+                    network.LengthCells,
+                    DeterministicNoise.Value01(
+                        head.WorldX,
+                        head.WorldZ,
+                        Seed(settings.Seed, 7220)));
+                for (var endIndex = 0; endIndex < ends.Count; endIndex++)
                 {
-                    highestSurface = surfaceUnits[index];
-                    target = index;
-                }
-            }
+                    var end = ends[endIndex];
+                    if (head.ComponentId == end.ComponentId)
+                    {
+                        continue;
+                    }
 
-            return target;
+                    var distance = EndpointDistance(head, end);
+                    if (distance < network.LengthCells.Minimum
+                        || distance > network.LengthCells.Maximum)
+                    {
+                        continue;
+                    }
+
+                    if (end.GridIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    var elevationPenalty = Math.Max(
+                        0f,
+                        end.WaterTopUnits - head.WaterTopUnits);
+                    var score = MathF.Abs(distance - targetLength)
+                        + elevationPenalty * network.UphillCost
+                        - EndpointWeight(network, end.Kind);
+                    candidates.Add(new EndpointMatch(end, score));
+                }
+
+                candidates.Sort((left, right) =>
+                {
+                    var order = left.Score.CompareTo(right.Score);
+                    return order != 0
+                        ? order
+                        : left.Endpoint.ComponentId.CompareTo(
+                            right.Endpoint.ComponentId);
+                });
+                if (candidates.Count == 0)
+                {
+                    continue;
+                }
+
+                var selected = candidates[0].Endpoint;
+                var selectedHead = FindBestHeadForEnd(
+                    settings,
+                    selected,
+                    heads,
+                    network);
+                var mutual = selectedHead.ComponentId == head.ComponentId;
+                if (!mutual && (selected.Kind is HydrologyEndpointKind.Lake
+                        or HydrologyEndpointKind.Pond
+                    || DeterministicNoise.Value01(
+                        head.ComponentId,
+                        selected.ComponentId,
+                        Seed(settings.Seed, 7230)) >= network.JunctionChance))
+                {
+                    continue;
+                }
+
+                result.Add(new GraphEdge(
+                    unchecked((int)DeterministicNoise.Hash(
+                        head.ComponentId,
+                        selected.ComponentId,
+                        Seed(settings.Seed, 7240))),
+                    head,
+                    selected));
+            }
+            return result;
         }
 
-        private static int SelectLowestPortal(
-            List<int> portals,
-            float[] surfaceUnits)
+        private static PlannedEndpoint FindBestHeadForEnd(
+            WorldSettingsData settings,
+            in PlannedEndpoint end,
+            IReadOnlyList<PlannedEndpoint> heads,
+            in RiverNetworkSettingsData network)
         {
-            var lowest = portals[0];
-            for (var index = 1; index < portals.Count; index++)
+            var found = false;
+            var best = default(PlannedEndpoint);
+            var bestScore = float.PositiveInfinity;
+            for (var index = 0; index < heads.Count; index++)
             {
-                if (surfaceUnits[portals[index]] < surfaceUnits[lowest])
+                var head = heads[index];
+                if (head.ComponentId == end.ComponentId)
                 {
-                    lowest = portals[index];
+                    continue;
+                }
+
+                var distance = EndpointDistance(head, end);
+                if (distance < network.LengthCells.Minimum
+                    || distance > network.LengthCells.Maximum)
+                {
+                    continue;
+                }
+
+                var targetLength = ResolveRange(
+                    network.LengthCells,
+                    DeterministicNoise.Value01(
+                        head.WorldX,
+                        head.WorldZ,
+                        Seed(settings.Seed, 7220)));
+                var score = MathF.Abs(distance - targetLength)
+                    + Math.Max(0f, end.WaterTopUnits - head.WaterTopUnits)
+                        * network.UphillCost
+                    - EndpointWeight(network, end.Kind);
+                if (!found || score < bestScore
+                    || score == bestScore
+                    && head.ComponentId < best.ComponentId)
+                {
+                    best = head;
+                    bestScore = score;
+                    found = true;
                 }
             }
+            return best;
+        }
 
-            return lowest;
+        private static float EndpointWeight(
+            in RiverNetworkSettingsData settings,
+            HydrologyEndpointKind kind) => kind switch
+            {
+                HydrologyEndpointKind.Lake => settings.LakeEndpointWeight,
+                HydrologyEndpointKind.Pond => settings.PondEndpointWeight,
+                HydrologyEndpointKind.Sea => settings.SeaEndpointWeight,
+                _ => settings.NaturalEndpointWeight
+            };
+
+        private static float EndpointDistance(
+            in PlannedEndpoint from,
+            in PlannedEndpoint to)
+        {
+            var deltaX = from.WorldX - to.WorldX;
+            var deltaZ = from.WorldZ - to.WorldZ;
+            return MathF.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
         }
 
         private static List<int> FindRoute(
@@ -512,7 +1153,9 @@ namespace MiniCivilization.World.Generation
             float[] slope,
             float[] valleyDepth,
             bool[] sea,
-            int start,
+            int[] basinComponent,
+            in PlannedEndpoint head,
+            in PlannedEndpoint end,
             bool[] goals)
         {
             var nodeCount = surfaceUnits.Length;
@@ -522,10 +1165,10 @@ namespace MiniCivilization.World.Generation
             Array.Fill(cost, float.PositiveInfinity);
             Array.Fill(previous, -1);
             var frontier = new MinimumHeap();
-            cost[start] = 0f;
-            frontier.Push(start, 0f);
+            cost[head.GridIndex] = 0f;
+            frontier.Push(head.GridIndex, 0f);
             var destination = -1;
-            var river = settings.WorldPatterns.River;
+            var river = settings.Hydrology.RiverNetwork;
             var variationSeed = Seed(settings.Seed, RouteVariationChannel);
             ReadOnlySpan<int> neighborX = stackalloc int[]
                 { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -564,6 +1207,14 @@ namespace MiniCivilization.World.Generation
                         continue;
                     }
 
+                    if (sea[next] && next != end.GridIndex
+                        || basinComponent[next] != 0
+                        && basinComponent[next] != head.ComponentId
+                        && basinComponent[next] != end.ComponentId)
+                    {
+                        continue;
+                    }
+
                     var deltaCells = (surfaceUnits[next] - surfaceUnits[current])
                         / WorldGrid.HeightStepsPerCell;
                     var variation = Sample01(
@@ -587,7 +1238,8 @@ namespace MiniCivilization.World.Generation
                         + MathF.Abs(deltaCells) * river.TerrainChangeCost
                         + Math.Max(0f, deltaCells) * river.UphillCost
                         + slope[next] * river.CrossSlopeCost
-                        + corridorExposure * river.CorridorExposureCost
+                        + corridorExposure
+                            * settings.Hydrology.RiverCorridor.CorridorExposureCost
                         + variation * river.RouteVariationCost;
                     terrainCost /= 1f
                         + valleyDepth[next] * river.ValleyPreference;
@@ -616,7 +1268,7 @@ namespace MiniCivilization.World.Generation
             for (var node = destination; node >= 0; node = previous[node])
             {
                 path.Add(node);
-                if (node == start)
+                if (node == head.GridIndex)
                 {
                     break;
                 }
@@ -645,16 +1297,17 @@ namespace MiniCivilization.World.Generation
                 return 0f;
             }
 
-            var river = settings.WorldPatterns.River;
+            var river = settings.Hydrology.RiverCorridor;
             var worldX = originX + nextX * spacing;
             var worldZ = originZ + nextZ * spacing;
-            var width = 1f + Sample01(
+            var width = ResolveRange(
+                river.WidthCells,
+                Sample01(
                     worldX,
                     worldZ,
                     river.WidthField,
-                    Seed(settings.Seed, WidthChannel))
-                * (river.MaximumWidthCells - 1f);
-            var bankOffsetCells = Math.Max(0.75f, width * 0.5f)
+                    Seed(settings.Seed, WidthChannel)));
+            var bankOffsetCells = width * 0.5f
                 + river.BankMarginCells;
             var directionX = nextX - currentX;
             var directionZ = nextZ - currentZ;
@@ -681,10 +1334,10 @@ namespace MiniCivilization.World.Generation
                     river.WidthField,
                     Seed(settings.Seed, WaterInsetChannel)));
             var waterTopUnits = surfaceUnits[next] - insetUnits;
-            var leftBankUnits = ToSolidHeightUnits(
+            var leftBankUnits = ToFullyFilledHeightUnits(
                 SampleGridSurface(surfaceUnits, gridSize, leftX, leftZ),
                 settings);
-            var rightBankUnits = ToSolidHeightUnits(
+            var rightBankUnits = ToFullyFilledHeightUnits(
                 SampleGridSurface(surfaceUnits, gridSize, rightX, rightZ),
                 settings);
             return Math.Max(
@@ -736,15 +1389,15 @@ namespace MiniCivilization.World.Generation
         private static void AddLocalProfileSegments(
             List<RiverSegment> segments,
             List<int> path,
-            in WorldNoiseRouter router,
-            in WorldDensityField densityField,
-            WorldSettingsData settings,
+            HydrologyGenerationContext context,
             int originX,
             int originZ,
             int gridSize,
             int spacing,
-            int smoothingIterations)
+            int smoothingIterations,
+            in GraphEdge edge)
         {
+            var settings = context.Settings;
             var points = new List<RiverPoint>(path.Count);
             for (var index = 0; index < path.Count; index++)
             {
@@ -771,7 +1424,7 @@ namespace MiniCivilization.World.Generation
                 points = smoothed;
             }
 
-            var river = settings.WorldPatterns.River;
+            var river = settings.Hydrology.RiverCorridor;
             var rawWaterTopUnits = new float[points.Count];
             var containedWaterTopUnits = new float[points.Count];
             var widths = new float[points.Count];
@@ -795,12 +1448,13 @@ namespace MiniCivilization.World.Generation
                 var normalZ = tangentLength > double.Epsilon
                     ? tangentX / tangentLength
                     : 1.0;
-                var width = 1f + Sample01(
+                var width = ResolveRange(
+                    river.WidthCells,
+                    Sample01(
                         point.X,
                         point.Z,
                         river.WidthField,
-                        widthSeed)
-                    * (river.MaximumWidthCells - 1f);
+                        widthSeed));
                 var depthUnits = Lerp(
                     river.DepthUnits,
                     Sample01(
@@ -816,26 +1470,20 @@ namespace MiniCivilization.World.Generation
                         river.WidthField,
                         insetSeed));
                 var center = SampleTerrain(
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     point.X,
                     point.Z);
                 var waterTopUnits = center.HasSeaWater
                     ? center.WaterTopUnits
                     : center.SurfaceUnits - insetUnits;
-                var bankOffset = Math.Max(0.75f, width * 0.5f)
+                var bankOffset = width * 0.5f
                     + river.BankMarginCells;
                 var leftBank = SampleTerrain(
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     point.X + normalX * bankOffset,
                     point.Z + normalZ * bankOffset);
                 var rightBank = SampleTerrain(
-                    router,
-                    densityField,
-                    settings,
+                    context,
                     point.X - normalX * bankOffset,
                     point.Z - normalZ * bankOffset);
                 var containedWaterTop = waterTopUnits;
@@ -846,8 +1494,12 @@ namespace MiniCivilization.World.Generation
                     containedWaterTop = Math.Min(
                         containedWaterTop,
                         Math.Min(
-                            ToSolidHeightUnits(leftBank.SurfaceUnits, settings),
-                            ToSolidHeightUnits(rightBank.SurfaceUnits, settings)));
+                            ToFullyFilledHeightUnits(
+                                leftBank.SurfaceUnits,
+                                settings),
+                            ToFullyFilledHeightUnits(
+                                rightBank.SurfaceUnits,
+                                settings)));
                 }
 
                 rawWaterTopUnits[index] = waterTopUnits;
@@ -863,10 +1515,20 @@ namespace MiniCivilization.World.Generation
                 containedWaterTopUnits,
                 river.DropTransitionCells,
                 river.DropTransition);
+            ApplyEndpointProfiles(
+                points,
+                edge,
+                settings.Hydrology.RiverNetwork,
+                river,
+                hydraulicWaterTopUnits,
+                widths,
+                bedDepths,
+                waterDepthBases);
             var profiles = new RiverProfilePoint[points.Count];
             for (var index = 0; index < profiles.Length; index++)
             {
                 profiles[index] = new RiverProfilePoint(
+                    edge.ComponentId,
                     points[index].X,
                     points[index].Z,
                     hydraulicWaterTopUnits[index],
@@ -875,12 +1537,160 @@ namespace MiniCivilization.World.Generation
                     waterDepthBases[index]);
             }
 
+            if (!IsCorridorCompatibleWithBasins(
+                    context,
+                    profiles,
+                    edge.Head.ComponentId,
+                    edge.End.ComponentId))
+            {
+                return;
+            }
+
             for (var index = 0; index < points.Count - 1; index++)
             {
                 segments.Add(new RiverSegment(
                     profiles[index],
                     profiles[index + 1]));
             }
+        }
+
+        private static bool IsCorridorCompatibleWithBasins(
+            HydrologyGenerationContext context,
+            IReadOnlyList<RiverProfilePoint> profiles,
+            int allowedComponentIdA,
+            int allowedComponentIdB)
+        {
+            var settings = context.Settings;
+            for (var segmentIndex = 0;
+                 segmentIndex < profiles.Count - 1;
+                 segmentIndex++)
+            {
+                var from = profiles[segmentIndex];
+                var to = profiles[segmentIndex + 1];
+                var deltaX = to.X - from.X;
+                var deltaZ = to.Z - from.Z;
+                var length = Math.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
+                var sampleCount = Math.Max(1, (int)Math.Ceiling(length));
+                var normalX = length > double.Epsilon ? -deltaZ / length : 0.0;
+                var normalZ = length > double.Epsilon ? deltaX / length : 1.0;
+                for (var sampleIndex = 0;
+                     sampleIndex <= sampleCount;
+                     sampleIndex++)
+                {
+                    var amount = sampleIndex / (double)sampleCount;
+                    var centerX = from.X + deltaX * amount;
+                    var centerZ = from.Z + deltaZ * amount;
+                    var radius = (from.WidthCells
+                            + (to.WidthCells - from.WidthCells) * amount)
+                        * 0.5
+                        + settings.Hydrology.RiverCorridor.BankMarginCells;
+                    var lateralSamples = Math.Max(1, (int)Math.Ceiling(radius));
+                    for (var lateral = -lateralSamples;
+                         lateral <= lateralSamples;
+                         lateral++)
+                    {
+                        var offset = Math.Clamp(lateral, -radius, radius);
+                        var worldX = (int)Math.Round(
+                            centerX + normalX * offset,
+                            MidpointRounding.AwayFromZero);
+                        var worldZ = (int)Math.Round(
+                            centerZ + normalZ * offset,
+                            MidpointRounding.AwayFromZero);
+                        if (HydrologyRegionPlanner.IsBasinReserved(
+                                context,
+                                worldX,
+                                worldZ,
+                                allowedComponentIdA,
+                                allowedComponentIdB))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        private static void ApplyEndpointProfiles(
+            IReadOnlyList<RiverPoint> points,
+            in GraphEdge edge,
+            in RiverNetworkSettingsData network,
+            in RiverCorridorSettingsData corridor,
+            float[] waterTopUnits,
+            float[] widths,
+            float[] bedDepths,
+            float[] waterDepthBases)
+        {
+            var distances = new double[points.Count];
+            for (var index = 1; index < points.Count; index++)
+            {
+                var deltaX = points[index].X - points[index - 1].X;
+                var deltaZ = points[index].Z - points[index - 1].Z;
+                distances[index] = distances[index - 1]
+                    + Math.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
+            }
+
+            var total = distances[^1];
+            for (var index = 0; index < points.Count; index++)
+            {
+                var factor = 1f;
+                if (edge.Head.Kind == HydrologyEndpointKind.Natural)
+                {
+                    factor = Math.Min(
+                        factor,
+                        network.NaturalHeadTransition.Evaluate(
+                            (float)Math.Clamp(
+                                distances[index]
+                                    / network.NaturalHeadTransitionCells,
+                                0.0,
+                                1.0)));
+                }
+
+                if (edge.End.Kind == HydrologyEndpointKind.Natural)
+                {
+                    factor = Math.Min(
+                        factor,
+                        network.NaturalEndTransition.Evaluate(
+                            (float)Math.Clamp(
+                                (total - distances[index])
+                                    / network.NaturalEndTransitionCells,
+                                0.0,
+                                1.0)));
+                }
+
+                widths[index] *= factor;
+                bedDepths[index] *= factor;
+                waterDepthBases[index] *= factor;
+                ApplyConnectedWaterTop(
+                    ref waterTopUnits[index],
+                    edge.Head,
+                    distances[index],
+                    corridor);
+                ApplyConnectedWaterTop(
+                    ref waterTopUnits[index],
+                    edge.End,
+                    total - distances[index],
+                    corridor);
+            }
+        }
+
+        private static void ApplyConnectedWaterTop(
+            ref float waterTopUnits,
+            in PlannedEndpoint endpoint,
+            double distance,
+            in RiverCorridorSettingsData corridor)
+        {
+            if (endpoint.Kind == HydrologyEndpointKind.Natural
+                || distance > corridor.DropTransitionCells)
+            {
+                return;
+            }
+
+            var progress = 1f - (float)(distance
+                / corridor.DropTransitionCells);
+            var amount = corridor.DropTransition.Evaluate(progress);
+            waterTopUnits += (endpoint.WaterTopUnits - waterTopUnits) * amount;
         }
 
         private static float[] BuildWaterProfile(
@@ -954,10 +1764,8 @@ namespace MiniCivilization.World.Generation
             return profile;
         }
 
-        private static RiverTerrainSample SampleTerrain(
-            in WorldNoiseRouter router,
-            in WorldDensityField densityField,
-            WorldSettingsData settings,
+        private static TerrainSurfaceSample SampleTerrain(
+            HydrologyGenerationContext context,
             double worldX,
             double worldZ)
         {
@@ -967,108 +1775,23 @@ namespace MiniCivilization.World.Generation
             var sampleZ = checked((int)Math.Round(
                 worldZ,
                 MidpointRounding.AwayFromZero));
-            var field = router.Sample(sampleX, sampleZ);
-            var terrain = WorldPatternResolver.Resolve(
-                router,
-                sampleX,
-                sampleZ,
-                field,
-                settings,
-                out _);
-            return new RiverTerrainSample(
-                FindSurfaceUnits(
-                    densityField,
-                    settings,
-                    sampleX,
-                    sampleZ,
-                    field,
-                    terrain),
-                terrain.WaterType == WaterType.Sea,
-                terrain.WaterTopUnits);
+            return context.SampleBaseTerrain(sampleX, sampleZ);
         }
 
-        private static float FindSurfaceUnits(
-            in WorldDensityField densityField,
-            WorldSettingsData settings,
-            int worldX,
-            int worldZ,
-            in WorldFieldSample field,
-            in WorldPatternResult profile)
-        {
-            var maximumHeightUnit = checked(
-                settings.WorldHeight * WorldGrid.HeightStepsPerCell);
-            var verticalFactor = MathF.Abs(profile.VerticalFactor);
-            var detailMagnitude = MathF.Abs(profile.DetailUnits);
-            var expectedSurface = settings.TerrainBaseHeightUnits
-                + profile.SurfaceOffsetUnits;
-            var upperBound = verticalFactor > float.Epsilon
-                ? expectedSurface
-                    + detailMagnitude * (
-                        MathF.Abs(field.Detail) + 1f / verticalFactor)
-                : maximumHeightUnit;
-            var upperUnit = Math.Clamp(
-                (int)MathF.Ceiling(upperBound) + 1,
-                1,
-                maximumHeightUnit);
-            var upperDensity = densityField.Sample(
-                worldX,
-                upperUnit,
-                worldZ,
-                field,
-                profile);
-            while (upperDensity >= 0f && upperUnit < maximumHeightUnit)
-            {
-                upperUnit++;
-                upperDensity = densityField.Sample(
-                    worldX,
-                    upperUnit,
-                    worldZ,
-                    field,
-                    profile);
-            }
-
-            if (upperDensity >= 0f)
-            {
-                return maximumHeightUnit;
-            }
-
-            for (var lowerUnit = upperUnit - 1; lowerUnit >= 0; lowerUnit--)
-            {
-                var lowerDensity = densityField.Sample(
-                    worldX,
-                    lowerUnit,
-                    worldZ,
-                    field,
-                    profile);
-                if (lowerDensity < 0f)
-                {
-                    upperDensity = lowerDensity;
-                    continue;
-                }
-
-                var denominator = lowerDensity - upperDensity;
-                var fraction = denominator > 0f
-                    ? lowerDensity / denominator
-                    : 0f;
-                return Math.Clamp(
-                    lowerUnit + Math.Clamp(fraction, 0f, 1f),
-                    0f,
-                    maximumHeightUnit);
-            }
-
-            return 0f;
-        }
-
-        private static int ToSolidHeightUnits(
+        private static int ToFullyFilledHeightUnits(
             float surfaceUnits,
-            WorldSettingsData settings) => Math.Clamp(
-            Math.Max(
-                1,
+            WorldSettingsData settings)
+        {
+            var solidHeightUnits = Math.Clamp(
                 (int)MathF.Round(
                     surfaceUnits,
-                    MidpointRounding.AwayFromZero)),
-            1,
-            checked(settings.WorldHeight * WorldGrid.HeightStepsPerCell));
+                    MidpointRounding.AwayFromZero),
+                0,
+                checked(settings.WorldHeight
+                    * WorldGrid.HeightStepsPerCell));
+            return solidHeightUnits / WorldGrid.HeightStepsPerCell
+                * WorldGrid.HeightStepsPerCell;
+        }
 
         private static float Sample01(
             double worldX,
@@ -1098,6 +1821,11 @@ namespace MiniCivilization.World.Generation
             float amount) => range.Minimum
                 + (range.Maximum - range.Minimum) * amount;
 
+        private static float ResolveRange(
+            in WorldSeededRangeSettingsData range,
+            float amount) => range.Minimum
+                + (range.Maximum - range.Minimum) * amount;
+
         private static int Seed(int worldSeed, int channel) => unchecked(
             (int)DeterministicNoise.Hash(channel, channel * 31L, worldSeed));
 
@@ -1108,42 +1836,143 @@ namespace MiniCivilization.World.Generation
             return remainder < 0 ? quotient - 1 : quotient;
         }
 
-        private sealed class RiverPlanCache
-        {
-            public ConcurrentDictionary<long, Lazy<RiverPlan>> Plans { get; } =
-                new();
-        }
+        private static long CoordinateKey(int x, int z) =>
+            ((long)x << 32) ^ (uint)z;
 
-        private sealed class RiverPlan
+        private readonly struct PlannedEndpoint
         {
-            public static readonly RiverPlan Empty = new(Array.Empty<RiverSegment>());
-            private readonly RiverSegment[] segments;
-
-            public RiverPlan(RiverSegment[] segments)
+            public PlannedEndpoint(
+                int componentId,
+                int worldX,
+                int worldZ,
+                int gridIndex,
+                int waterTopUnits,
+                HydrologyEndpointKind kind,
+                HydrologyEndpointRole role,
+                bool ownedByPlan)
             {
-                this.segments = segments;
+                ComponentId = componentId;
+                WorldX = worldX;
+                WorldZ = worldZ;
+                GridIndex = gridIndex;
+                WaterTopUnits = waterTopUnits;
+                Kind = kind;
+                Role = role;
+                OwnedByPlan = ownedByPlan;
             }
 
-            public bool TrySample(
-                double worldX,
-                double worldZ,
-                out RiverPathSample nearest)
+            public int ComponentId { get; }
+            public int WorldX { get; }
+            public int WorldZ { get; }
+            public int GridIndex { get; }
+            public int WaterTopUnits { get; }
+            public HydrologyEndpointKind Kind { get; }
+            public HydrologyEndpointRole Role { get; }
+            public bool OwnedByPlan { get; }
+        }
+
+        private readonly struct GraphEdge
+        {
+            public GraphEdge(
+                int componentId,
+                in PlannedEndpoint head,
+                in PlannedEndpoint end)
             {
-                nearest = default;
-                var found = false;
-                for (var index = 0; index < segments.Length; index++)
+                ComponentId = componentId;
+                Head = head;
+                End = end;
+            }
+
+            public int ComponentId { get; }
+            public PlannedEndpoint Head { get; }
+            public PlannedEndpoint End { get; }
+        }
+
+        private readonly struct EndpointMatch
+        {
+            public EndpointMatch(
+                in PlannedEndpoint endpoint,
+                float score)
+            {
+                Endpoint = endpoint;
+                Score = score;
+            }
+
+            public PlannedEndpoint Endpoint { get; }
+            public float Score { get; }
+        }
+
+        internal sealed class RiverRegionPlan
+        {
+            internal static readonly RiverRegionPlan Empty = new(
+                Array.Empty<RiverEdge>());
+            internal readonly RiverEdge[] Edges;
+
+            internal RiverRegionPlan(
+                RiverEdge[] edges)
+            {
+                Edges = edges;
+            }
+        }
+
+        internal readonly struct RiverEdgeId : IEquatable<RiverEdgeId>
+        {
+            public RiverEdgeId(int ownerRegionX, int ownerRegionZ, int value)
+            {
+                OwnerRegionX = ownerRegionX;
+                OwnerRegionZ = ownerRegionZ;
+                Value = value;
+            }
+
+            public int OwnerRegionX { get; }
+            public int OwnerRegionZ { get; }
+            public int Value { get; }
+
+            public bool Equals(RiverEdgeId other) => OwnerRegionX == other.OwnerRegionX
+                && OwnerRegionZ == other.OwnerRegionZ
+                && Value == other.Value;
+
+            public override bool Equals(object obj) => obj is RiverEdgeId other
+                && Equals(other);
+
+            public override int GetHashCode() => unchecked(
+                ((OwnerRegionX * 397) ^ OwnerRegionZ) * 397 ^ Value);
+        }
+
+        internal readonly struct RiverEdge
+        {
+            public RiverEdge(RiverEdgeId id, RiverSegment[] segments)
+            {
+                Id = id;
+                Segments = segments ?? throw new ArgumentNullException(
+                    nameof(segments));
+            }
+
+            public RiverEdgeId Id { get; }
+            public RiverSegment[] Segments { get; }
+            public double MinimumX => GetMinimum(segment => segment.MinimumX);
+            public double MaximumX => GetMaximum(segment => segment.MaximumX);
+            public double MinimumZ => GetMinimum(segment => segment.MinimumZ);
+            public double MaximumZ => GetMaximum(segment => segment.MaximumZ);
+
+            private double GetMinimum(Func<RiverSegment, double> select)
+            {
+                var value = double.PositiveInfinity;
+                for (var index = 0; index < Segments.Length; index++)
                 {
-                    var sample = segments[index].Sample(worldX, worldZ);
-                    if (found && !sample.IsCloserThan(nearest))
-                    {
-                        continue;
-                    }
-
-                    nearest = sample;
-                    found = true;
+                    value = Math.Min(value, select(Segments[index]));
                 }
+                return value;
+            }
 
-                return found;
+            private double GetMaximum(Func<RiverSegment, double> select)
+            {
+                var value = double.NegativeInfinity;
+                for (var index = 0; index < Segments.Length; index++)
+                {
+                    value = Math.Max(value, select(Segments[index]));
+                }
+                return value;
             }
         }
 
@@ -1166,9 +1995,10 @@ namespace MiniCivilization.World.Generation
                     from.Z + (to.Z - from.Z) * amount);
         }
 
-        private readonly struct RiverProfilePoint
+        internal readonly struct RiverProfilePoint
         {
-            public RiverProfilePoint(
+            internal RiverProfilePoint(
+                int componentId,
                 double x,
                 double z,
                 float waterTopUnits,
@@ -1176,6 +2006,7 @@ namespace MiniCivilization.World.Generation
                 float bedDepthUnits,
                 float waterDepthBaseUnits)
             {
+                ComponentId = componentId;
                 X = x;
                 Z = z;
                 WaterTopUnits = waterTopUnits;
@@ -1184,6 +2015,7 @@ namespace MiniCivilization.World.Generation
                 WaterDepthBaseUnits = waterDepthBaseUnits;
             }
 
+            public int ComponentId { get; }
             public double X { get; }
             public double Z { get; }
             public float WaterTopUnits { get; }
@@ -1192,32 +2024,17 @@ namespace MiniCivilization.World.Generation
             public float WaterDepthBaseUnits { get; }
         }
 
-        private readonly struct RiverTerrainSample
+        internal readonly struct RiverPathSample
         {
-            public RiverTerrainSample(
-                float surfaceUnits,
-                bool hasSeaWater,
-                int waterTopUnits)
-            {
-                SurfaceUnits = surfaceUnits;
-                HasSeaWater = hasSeaWater;
-                WaterTopUnits = waterTopUnits;
-            }
-
-            public float SurfaceUnits { get; }
-            public bool HasSeaWater { get; }
-            public int WaterTopUnits { get; }
-        }
-
-        private readonly struct RiverPathSample
-        {
-            public RiverPathSample(
+            internal RiverPathSample(
+                int componentId,
                 double distanceSquared,
                 float waterTopUnits,
                 float widthCells,
                 float bedDepthUnits,
                 float waterDepthBaseUnits)
             {
+                ComponentId = componentId;
                 DistanceSquared = distanceSquared;
                 WaterTopUnits = waterTopUnits;
                 WidthCells = widthCells;
@@ -1225,6 +2042,7 @@ namespace MiniCivilization.World.Generation
                 WaterDepthBaseUnits = waterDepthBaseUnits;
             }
 
+            public int ComponentId { get; }
             public double DistanceSquared { get; }
             public double Distance => Math.Sqrt(DistanceSquared);
             public float WaterTopUnits { get; }
@@ -1241,12 +2059,12 @@ namespace MiniCivilization.World.Generation
             }
         }
 
-        private readonly struct RiverSegment
+        internal readonly struct RiverSegment
         {
             private readonly RiverProfilePoint from;
             private readonly RiverProfilePoint to;
 
-            public RiverSegment(
+            internal RiverSegment(
                 in RiverProfilePoint from,
                 in RiverProfilePoint to)
             {
@@ -1254,7 +2072,11 @@ namespace MiniCivilization.World.Generation
                 this.to = to;
             }
 
-            public RiverPathSample Sample(double x, double z)
+            public double MinimumX => Math.Min(from.X, to.X);
+            public double MaximumX => Math.Max(from.X, to.X);
+            public double MinimumZ => Math.Min(from.Z, to.Z);
+            public double MaximumZ => Math.Max(from.Z, to.Z);
+            internal RiverPathSample Sample(double x, double z)
             {
                 var deltaX = to.X - from.X;
                 var deltaZ = to.Z - from.Z;
@@ -1264,6 +2086,7 @@ namespace MiniCivilization.World.Generation
                     var pointX = x - from.X;
                     var pointZ = z - from.Z;
                     return new RiverPathSample(
+                        from.ComponentId,
                         pointX * pointX + pointZ * pointZ,
                         from.WaterTopUnits,
                         from.WidthCells,
@@ -1281,6 +2104,7 @@ namespace MiniCivilization.World.Generation
                 var distanceX = x - nearestX;
                 var distanceZ = z - nearestZ;
                 return new RiverPathSample(
+                    from.ComponentId,
                     distanceX * distanceX + distanceZ * distanceZ,
                     from.WaterTopUnits
                     + (to.WaterTopUnits - from.WaterTopUnits)

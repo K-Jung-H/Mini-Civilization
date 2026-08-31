@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Generation
@@ -14,6 +15,8 @@ namespace MiniCivilization.World.Generation
 
             var world = WorldDataBuilder.CreateWorld(input);
             var settings = input.Settings;
+            var generationTimer = Stopwatch.StartNew();
+            using var planScope = input.Hydrology.BeginPlanScope();
             for (var z = settings.MinimumChunkCoordinate;
                  z <= settings.MaximumChunkCoordinate;
                  z++)
@@ -22,10 +25,18 @@ namespace MiniCivilization.World.Generation
                  x++)
             {
                 var chunk = WorldChunkGenerator.Build(
-                    input.CreateChunkInput(new ChunkCoordinate(x, z)));
+                    input.CreateChunkInput(
+                        new ChunkCoordinate(x, z),
+                        planScope));
+                input.GenerationTiming.Add(chunk.Timing);
+                var applyTimer = Stopwatch.StartNew();
                 WorldDataBuilder.ApplyChunk(world, chunk);
+                input.GenerationTiming.AddWorldApply(
+                    applyTimer.ElapsedMilliseconds);
             }
 
+            input.GenerationTiming.SetPipelineTotal(
+                generationTimer.ElapsedMilliseconds);
             return world;
         }
     }
