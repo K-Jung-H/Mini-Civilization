@@ -67,12 +67,17 @@ namespace MiniCivilization.World.Presentation
 
             if (stageText != null)
             {
-                stageText.text = $"{GetOperationName(progress.Kind)} · {GetStageName(progress.Stage)}";
+                stageText.text = $"{GetOperationName(progress.Kind)} · "
+                    + $"{progress.CompletedStageCount + 1} / {progress.StageCount} · "
+                    + GetStageName(progress.Stage);
             }
 
             if (completedText != null)
             {
-                completedText.text = $"완료 단계: {progress.CompletedStageCount} / {progress.StageCount}";
+                completedText.text = progress.WorkCount > 0
+                    ? $"{progress.CompletedWorkCount} / {progress.WorkCount} "
+                        + $"({GetWorkPercent(progress)}%)"
+                    : string.Empty;
             }
         }
 
@@ -90,8 +95,13 @@ namespace MiniCivilization.World.Presentation
                 WorldOperationStage.PrepareRuntime => "런타임 준비",
                 WorldOperationStage.ReadSave => "저장 파일 읽기",
                 WorldOperationStage.Mesh => "Mesh 생성 중",
+                WorldOperationStage.ChunkData => "Chunk 데이터 생성 중",
                 _ => string.Empty
             };
         }
+
+        private static int GetWorkPercent(WorldOperationProgress progress) =>
+            Mathf.FloorToInt(100f * progress.CompletedWorkCount
+                / progress.WorkCount);
     }
 }

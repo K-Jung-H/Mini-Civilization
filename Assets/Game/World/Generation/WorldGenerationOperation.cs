@@ -38,7 +38,7 @@ namespace MiniCivilization.World.Generation
                 switch (phase)
                 {
                     case Phase.NotStarted:
-                        BeginStage(WorldOperationStage.Terrain);
+                        BeginStage(WorldOperationStage.BuildWorldData);
                         generationTask = Task.Run(
                             () => WorldGenerationPipeline.Build(input));
                         phase = Phase.GenerateTerrain;
@@ -69,13 +69,10 @@ namespace MiniCivilization.World.Generation
             }
 
             var world = generationTask.GetAwaiter().GetResult();
-            WorldGenerationDiagnostics.LogInitial(input.GenerationTiming);
             CompleteCurrentStage();
             BeginStage(WorldOperationStage.PrepareRuntime);
             prepareRuntimeTask = Task.Run(
-                () => WorldRuntime.CreatePrepared(
-                    world,
-                    input.Hydrology));
+                () => WorldRuntime.CreatePrepared(world));
             phase = Phase.PrepareRuntime;
         }
 

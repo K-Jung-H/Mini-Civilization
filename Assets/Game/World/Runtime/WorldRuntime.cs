@@ -1,7 +1,5 @@
 using System;
-using System.Diagnostics;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using MiniCivilization.World.Generation;
@@ -13,45 +11,23 @@ namespace MiniCivilization.World.Runtime
     {
         private readonly Dictionary<ChunkCoordinate, ChunkRuntime>
             chunkRuntimes = new();
-        private readonly List<HydrologyPlanScope> retiredHydrologyScopes = new();
-        private readonly HashSet<ChunkCoordinate> desiredPreparedChunks = new();
-        private readonly HashSet<ChunkCoordinate> scopedPreparedChunks = new();
-        private readonly HashSet<ChunkCoordinate> desiredTerrainRenderChunks = new();
-        private readonly HashSet<ChunkCoordinate> desiredEntityRenderChunks = new();
-        private readonly HashSet<ChunkCoordinate> desiredActiveChunks = new();
         private readonly List<ChunkCoordinate> removedChunks = new();
         private readonly List<CellCoordinate> generatedWaterSources = new();
-        private readonly Queue<ChunkCoordinate> pendingChunkBuilds = new();
-        private readonly HashSet<ChunkCoordinate> pendingChunkBuildSet = new();
-        private readonly List<ChunkCoordinate> chunkBuildCandidates = new();
-        private Task<WorldChunkBuildData> activeChunkBuild;
-        private HydrologyPlanScope streamingHydrologyScope;
-        private HydrologyPlanScope activeChunkBuildScope;
-        private ChunkCoordinate activeChunkBuildCoordinate;
-        private bool hasActiveChunkBuild;
+        private readonly ChunkStreamingCoordinator streamingCoordinator;
+        private StreamingChunkDemand streamingDemand = StreamingChunkDemand.Empty;
         private bool derivedDataRefreshPending;
         private bool simulationStateChangedPending;
 
-        private WorldRuntime(
-            WorldData data,
-            WorldHydrology hydrology)
+        private WorldRuntime(WorldData data)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
-            Hydrology = hydrology
-                ?? throw new ArgumentNullException(nameof(hydrology));
-            if (!ReferenceEquals(Hydrology.Settings, data.Settings))
-            {
-                throw new ArgumentException(
-                    "The Hydrology service must use the Runtime world settings.",
-                    nameof(hydrology));
-            }
             SurfaceCache = new SurfaceCache(data);
             NavigationCache = new NavigationCache(data, SurfaceCache);
+            streamingCoordinator = new ChunkStreamingCoordinator(data);
             Context = new WorldContext(this);
         }
 
         public WorldData Data { get; }
-        internal WorldHydrology Hydrology { get; }
         public SurfaceCache SurfaceCache { get; }
         public NavigationCache NavigationCache { get; }
         public WorldContext Context { get; }
@@ -76,22 +52,8 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(nameof(data));
             }
 
-            return CreatePrepared(
-                data,
-                new WorldHydrology(data.Settings));
-        }
-
-        internal static WorldRuntime CreatePrepared(
-            WorldData data,
-            WorldHydrology hydrology)
-        {
-            if (data == null)
-            {
-                throw new ArgumentNullException(nameof(data));
-            }
-
             WorldDataValidator.Validate(data);
-            var runtime = new WorldRuntime(data, hydrology);
+            var runtime = new WorldRuntime(data);
             runtime.WaterFlowState = new WaterFlowState(
                 data,
                 Array.Empty<WaterBody>());
@@ -251,6 +213,29 @@ namespace MiniCivilization.World.Runtime
             SurfaceCache.IsPrepared(coordinate)
             && NavigationCache.IsPrepared(coordinate);
 
+        internal bool IsTerrainRenderDemandComplete(
+            out int completedChunkCount,
+            out int chunkCount)
+        {
+            completedChunkCount = 0;
+            var terrainRenderChunks = streamingDemand.TerrainRenderChunks;
+            chunkCount = terrainRenderChunks.Count;
+            if (chunkCount == 0)
+            {
+                return false;
+            }
+
+            foreach (var coordinate in terrainRenderChunks)
+            {
+                if (Data.IsChunkLoaded(coordinate))
+                {
+                    completedChunkCount++;
+                }
+            }
+
+            return completedChunkCount == chunkCount;
+        }
+
         internal bool IsChunkPrepared(int cellX, int cellZ) =>
             Data.IsColumnLoaded(cellX, cellZ)
             && IsChunkPrepared(WorldCoordinateUtility.ToChunk(
@@ -279,95 +264,18 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentOutOfRangeException(nameof(simulationRadius));
             }
 
-            desiredPreparedChunks.Clear();
-            desiredTerrainRenderChunks.Clear();
-            desiredEntityRenderChunks.Clear();
-            desiredActiveChunks.Clear();
-            var chunksPerPatch = Data.Settings.RenderChunksPerPatch;
-            var preparationRadius = Math.Max(
-                renderRadius,
-                Math.Max(entityRenderRadius, simulationRadius));
-            for (var z = center.Z - preparationRadius;
-                 z <= center.Z + preparationRadius;
-                 z++)
-            for (var x = center.X - preparationRadius;
-                 x <= center.X + preparationRadius;
-                 x++)
-            {
-                if (!Data.IsChunkWithinBounds(new ChunkCoordinate(x, z)))
-                {
-                    continue;
-                }
-
-                if (Math.Abs(x - center.X) <= renderRadius
-                    && Math.Abs(z - center.Z) <= renderRadius)
-                {
-                    var patchX = WorldCoordinateUtility.FloorDivide(
-                        x,
-                        chunksPerPatch);
-                    var patchZ = WorldCoordinateUtility.FloorDivide(
-                        z,
-                        chunksPerPatch);
-                    var patchStartX = patchX * chunksPerPatch;
-                    var patchStartZ = patchZ * chunksPerPatch;
-                    var patchEndX = patchStartX + chunksPerPatch;
-                    var patchEndZ = patchStartZ + chunksPerPatch;
-                    for (var patchChunkZ = patchStartZ;
-                         patchChunkZ < patchEndZ;
-                         patchChunkZ++)
-                    for (var patchChunkX = patchStartX;
-                         patchChunkX < patchEndX;
-                         patchChunkX++)
-                    {
-                        var patchChunk = new ChunkCoordinate(
-                            patchChunkX,
-                            patchChunkZ);
-                        if (Data.IsChunkWithinBounds(patchChunk))
-                        {
-                            desiredTerrainRenderChunks.Add(patchChunk);
-                            for (var topologyZ = patchChunkZ - 1;
-                                 topologyZ <= patchChunkZ + 1;
-                                 topologyZ++)
-                            for (var topologyX = patchChunkX - 1;
-                                 topologyX <= patchChunkX + 1;
-                                 topologyX++)
-                            {
-                                var topologyChunk = new ChunkCoordinate(
-                                    topologyX,
-                                    topologyZ);
-                                if (Data.IsChunkWithinBounds(topologyChunk))
-                                {
-                                    desiredPreparedChunks.Add(topologyChunk);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (Math.Abs(x - center.X) <= entityRenderRadius
-                    && Math.Abs(z - center.Z) <= entityRenderRadius)
-                {
-                    desiredEntityRenderChunks.Add(
-                        new ChunkCoordinate(x, z));
-                }
-
-                if (Math.Abs(x - center.X) <= simulationRadius
-                    && Math.Abs(z - center.Z) <= simulationRadius)
-                {
-                    desiredActiveChunks.Add(
-                        new ChunkCoordinate(x, z));
-                }
-            }
-
-            desiredPreparedChunks.UnionWith(desiredTerrainRenderChunks);
-            desiredPreparedChunks.UnionWith(desiredEntityRenderChunks);
-            desiredPreparedChunks.UnionWith(desiredActiveChunks);
-            RefreshStreamingHydrologyScope();
+            streamingDemand = StreamingChunkDemandBuilder.Build(
+                Data,
+                new StreamingRequest(
+                    center,
+                    renderRadius,
+                    entityRenderRadius,
+                    simulationRadius));
 
             removedChunks.Clear();
             foreach (var pair in chunkRuntimes)
             {
-                if (!desiredPreparedChunks.Contains(pair.Key))
+                if (!streamingDemand.IsPrepared(pair.Key))
                 {
                     removedChunks.Add(pair.Key);
                 }
@@ -381,8 +289,7 @@ namespace MiniCivilization.World.Runtime
                     rebuildWaterDistances: false);
             }
 
-            chunkBuildCandidates.Clear();
-            foreach (var coordinate in desiredPreparedChunks)
+            foreach (var coordinate in streamingDemand.PreparedChunks)
             {
                 if (!chunkRuntimes.TryGetValue(
                         coordinate,
@@ -390,7 +297,6 @@ namespace MiniCivilization.World.Runtime
                 {
                     if (!Data.IsChunkLoaded(coordinate))
                     {
-                        chunkBuildCandidates.Add(coordinate);
                         continue;
                     }
 
@@ -401,26 +307,12 @@ namespace MiniCivilization.World.Runtime
                 ApplyDesiredChunkState(chunkRuntime);
             }
 
-            chunkBuildCandidates.Sort((left, right) =>
-                DistanceSquared(left, center).CompareTo(
-                    DistanceSquared(right, center)));
-            for (var index = 0; index < chunkBuildCandidates.Count; index++)
-            {
-                var coordinate = chunkBuildCandidates[index];
-                if ((!hasActiveChunkBuild
-                     || !coordinate.Equals(activeChunkBuildCoordinate))
-                    && pendingChunkBuildSet.Add(coordinate))
-                {
-                    pendingChunkBuilds.Enqueue(coordinate);
-                }
-            }
-
             if (cacheSetChanged)
             {
                 RefreshDerivedData();
             }
 
-            StartNextChunkBuild();
+            streamingCoordinator.SetDemand(streamingDemand);
             RefreshDerivedDataWhenReady();
             FlushSimulationStateChanged();
         }
@@ -434,43 +326,19 @@ namespace MiniCivilization.World.Runtime
             }
 
             var applied = 0;
-            while (activeChunkBuild != null
-                   && activeChunkBuild.IsCompleted
-                   && applied < maximumChunkApplications)
+            while (applied < maximumChunkApplications
+                   && streamingCoordinator.TryTakeCompleted(out var build))
             {
-                var completed = activeChunkBuild;
-                activeChunkBuild = null;
-                hasActiveChunkBuild = false;
-                try
+                if (streamingCoordinator.IsPrepared(build.Coordinate)
+                    && !Data.IsChunkLoaded(build.Coordinate))
                 {
-                    var build = completed.GetAwaiter().GetResult();
-                    var applyTimer = Stopwatch.StartNew();
-                    var wasApplied = false;
-                    if (desiredPreparedChunks.Contains(build.Coordinate)
-                        && !Data.IsChunkLoaded(build.Coordinate))
-                    {
-                        WorldDataBuilder.ApplyChunk(Data, build);
-                        EnqueueGeneratedWaterSources(build.Coordinate);
-                        var chunkRuntime = PrepareChunkRuntime(build.Coordinate);
-                        ApplyDesiredChunkState(chunkRuntime);
-                        derivedDataRefreshPending = true;
-                        applied++;
-                        wasApplied = true;
-                    }
-
-                    WorldGenerationDiagnostics.LogStreaming(
-                        build.Coordinate,
-                        build.Timing,
-                        applyTimer.ElapsedMilliseconds,
-                        wasApplied);
+                    WorldDataBuilder.ApplyChunk(Data, build);
+                    EnqueueGeneratedWaterSources(build.Coordinate);
+                    var chunkRuntime = PrepareChunkRuntime(build.Coordinate);
+                    ApplyDesiredChunkState(chunkRuntime);
+                    derivedDataRefreshPending = true;
+                    applied++;
                 }
-                finally
-                {
-                    ReleaseRetiredHydrologyScope(activeChunkBuildScope);
-                    activeChunkBuildScope = null;
-                }
-
-                StartNextChunkBuild();
             }
 
             ApplyAllDesiredChunkStates();
@@ -498,7 +366,7 @@ namespace MiniCivilization.World.Runtime
 
         private void ApplyAllDesiredChunkStates()
         {
-            foreach (var coordinate in desiredPreparedChunks)
+            foreach (var coordinate in streamingDemand.PreparedChunks)
             {
                 if (chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime))
                 {
@@ -510,7 +378,7 @@ namespace MiniCivilization.World.Runtime
         private void ApplyDesiredChunkState(ChunkRuntime chunkRuntime)
         {
             var coordinate = chunkRuntime.Coordinate;
-            var shouldBeActive = desiredActiveChunks.Contains(coordinate);
+            var shouldBeActive = streamingDemand.IsActive(coordinate);
             if (chunkRuntime.State == ChunkState.Ready && shouldBeActive)
             {
                 ChangeChunkState(chunkRuntime, ChunkState.Active);
@@ -522,11 +390,11 @@ namespace MiniCivilization.World.Runtime
 
             ChangeTerrainRenderState(
                 chunkRuntime,
-                desiredTerrainRenderChunks.Contains(coordinate)
+                streamingDemand.IsTerrainRendering(coordinate)
                 && HasPreparedTerrainTopology(coordinate));
             ChangeEntityRenderState(
                 chunkRuntime,
-                desiredEntityRenderChunks.Contains(coordinate));
+                streamingDemand.IsEntityRendering(coordinate));
         }
 
         private bool HasPreparedTerrainTopology(ChunkCoordinate coordinate)
@@ -545,44 +413,10 @@ namespace MiniCivilization.World.Runtime
             return true;
         }
 
-        private void StartNextChunkBuild()
-        {
-            if (activeChunkBuild != null)
-            {
-                return;
-            }
-
-            while (pendingChunkBuilds.Count > 0)
-            {
-                var coordinate = pendingChunkBuilds.Dequeue();
-                pendingChunkBuildSet.Remove(coordinate);
-                if (!desiredPreparedChunks.Contains(coordinate)
-                    || Data.IsChunkLoaded(coordinate))
-                {
-                    continue;
-                }
-
-                activeChunkBuildCoordinate = coordinate;
-                hasActiveChunkBuild = true;
-                activeChunkBuildScope = streamingHydrologyScope
-                    ?? throw new InvalidOperationException(
-                        "Streaming Hydrology Scope must be prepared before a Chunk Build starts.");
-                activeChunkBuild = Task.Run(
-                    () => WorldChunkGenerator.Build(
-                        WorldChunkBuildInput.Create(
-                            Data.Settings,
-                            coordinate,
-                            Hydrology,
-                            activeChunkBuildScope)));
-                return;
-            }
-        }
-
         private void RefreshDerivedDataWhenReady()
         {
             if (!derivedDataRefreshPending
-                || activeChunkBuild != null
-                || pendingChunkBuilds.Count > 0)
+                || streamingCoordinator.HasWork)
             {
                 return;
             }
@@ -597,15 +431,6 @@ namespace MiniCivilization.World.Runtime
             WaterFlowState.ReplaceWaterBodies(
                 WaterBodyResolver.ResolvePrepared(this));
             derivedDataRefreshPending = false;
-        }
-
-        private static long DistanceSquared(
-            ChunkCoordinate coordinate,
-            ChunkCoordinate center)
-        {
-            var x = (long)coordinate.X - center.X;
-            var z = (long)coordinate.Z - center.Z;
-            return x * x + z * z;
         }
 
         private void EnqueueGeneratedWaterSources(ChunkCoordinate coordinate)
@@ -667,9 +492,7 @@ namespace MiniCivilization.World.Runtime
 
         internal void ClearStreamingChunks()
         {
-            pendingChunkBuilds.Clear();
-            pendingChunkBuildSet.Clear();
-            chunkBuildCandidates.Clear();
+            streamingCoordinator.Clear();
             removedChunks.Clear();
             foreach (var coordinate in chunkRuntimes.Keys)
             {
@@ -692,11 +515,7 @@ namespace MiniCivilization.World.Runtime
                     WaterBodyResolver.ResolvePrepared(this));
             }
 
-            desiredPreparedChunks.Clear();
-            desiredTerrainRenderChunks.Clear();
-            desiredEntityRenderChunks.Clear();
-            desiredActiveChunks.Clear();
-            ReleaseStreamingHydrologyScope();
+            streamingDemand = StreamingChunkDemand.Empty;
             derivedDataRefreshPending = false;
             FlushSimulationStateChanged();
         }
@@ -727,65 +546,6 @@ namespace MiniCivilization.World.Runtime
             ChangeChunkState(chunkRuntime, ChunkState.Unloaded);
             chunkRuntimes.Remove(coordinate);
             return true;
-        }
-
-        private void RefreshStreamingHydrologyScope()
-        {
-            if (streamingHydrologyScope != null
-                && scopedPreparedChunks.SetEquals(desiredPreparedChunks))
-            {
-                return;
-            }
-
-            RetireStreamingHydrologyScope();
-            streamingHydrologyScope = Hydrology.BeginPlanScope();
-            scopedPreparedChunks.Clear();
-            scopedPreparedChunks.UnionWith(desiredPreparedChunks);
-        }
-
-        private void ReleaseStreamingHydrologyScope()
-        {
-            RetireStreamingHydrologyScope();
-            scopedPreparedChunks.Clear();
-        }
-
-        private void RetireStreamingHydrologyScope()
-        {
-            if (streamingHydrologyScope == null)
-            {
-                return;
-            }
-
-            if (ReferenceEquals(streamingHydrologyScope, activeChunkBuildScope))
-            {
-                retiredHydrologyScopes.Add(streamingHydrologyScope);
-            }
-            else
-            {
-                streamingHydrologyScope.Dispose();
-            }
-
-            streamingHydrologyScope = null;
-        }
-
-        private void ReleaseRetiredHydrologyScope(HydrologyPlanScope scope)
-        {
-            if (scope == null || ReferenceEquals(scope, streamingHydrologyScope))
-            {
-                return;
-            }
-
-            for (var index = 0; index < retiredHydrologyScopes.Count; index++)
-            {
-                if (!ReferenceEquals(retiredHydrologyScopes[index], scope))
-                {
-                    continue;
-                }
-
-                retiredHydrologyScopes.RemoveAt(index);
-                scope.Dispose();
-                return;
-            }
         }
 
         private void ChangeChunkState(

@@ -3,6 +3,10 @@
 ## 문서 우선순위
 
 이 디렉터리의 문서는 2026-08-31에 합의된 Hydrology 재설계의 단일 기준이다.
+현재 활성 코드의 소유권과 제거 완료 경계는
+`17-active-streaming-ownership-cleanup.md`가 최우선이다. 이전 문서의
+`PlanningSnapshot`, `Plan Scope`, `HydrologyBatchBuilder` 설명은 구현 이력으로만
+취급한다.
 `../InfiniteWorldStreamingDesign.md`의 청크 좌표, 스트리밍 상태, 절대 좌표
 생성 계약은 유지한다. 다만 River/Lake/Pond Water Pattern과 관련된 기존 설명은
 이 문서와 충돌할 경우 이 문서를 우선한다.
@@ -70,6 +74,24 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
 3. [03-river-graph.md](03-river-graph.md) — 무방향 Endpoint Graph, Junction, 경로 실패 처리
 4. [04-batch-streaming.md](04-batch-streaming.md) — Batch, 초기 생성, 스트리밍, 디버거 결합
 5. [05-water-validation.md](05-water-validation.md) — WaterSystem 경계, 이전 경로 제거, 최종 검증
+6. [06-generation-backbone.md](06-generation-backbone.md) — 스트리밍 생성 백본 교체 전 호환성 감사와 고정 계약
+7. [07-streaming-generation-backbone.md](07-streaming-generation-backbone.md) — 고정맵/무한 월드 공통 생성 백본의 최종 설계와 이관 단계
+8. [08-implementation-gates.md](08-implementation-gates.md) — 기존 구조 보수로 회귀하지 않기 위한 구현 Gate와 인계 규약
+9. [09-streaming-backbone-stages-1-2.md](09-streaming-backbone-stages-1-2.md) — 새 생성 백본 1·2단계 구현 사실과 다음 인계
+10. [10-streaming-backbone-stages-3-4.md](10-streaming-backbone-stages-3-4.md) — 새 생성 백본 3·4단계 River 계획 사실과 다음 인계
+11. [11-streaming-backbone-stage-5.md](11-streaming-backbone-stage-5.md) — sealed Raster와 Chunk materializer 구현 사실 및 실행 전환 경계
+12. [12-streaming-backbone-stage-6.md](12-streaming-backbone-stage-6.md) — Runtime·Debugger 전환 사실과 7단계 실제 검증 기준
+13. [13-command-stage-7-pattern-debugger.md](13-command-stage-7-pattern-debugger.md) — 최종 진행 명령 7단계 Pattern Debugger 전환 구현 기록
+14. [14-command-stage-8-verification-and-cleanup.md](14-command-stage-8-verification-and-cleanup.md) — 최종 진행 명령 8단계 실제 검증과 기존 구조 정리 Gate
+15. [15-feature-owned-streaming-replacement.md](15-feature-owned-streaming-replacement.md) — request-wide Snapshot을 Feature 소유 Tile/Edge 생성으로 교체한 활성 구조와 검증 범위
+16. [16-incremental-feature-tile-retention.md](16-incremental-feature-tile-retention.md) — Target 이동 시 활성 Chunk의 실제 Feature Tile 참조를 유지하는 증분 streaming 수정 기록
+17. [17-active-streaming-ownership-cleanup.md](17-active-streaming-ownership-cleanup.md) — 활성 coordinator/Feature 경로, 제거 완료 계열, UI 연결 전 상태 기준
+
+## 최종 진행 명령 단계와 이관 기록의 관계
+
+최종 진행 명령의 6단계는 Runtime streaming 전환, 7단계는 Pattern Debugger 전환,
+8단계는 실제 검증 뒤의 보완·정리다. `06`~`12`의 파일 번호는 생성 백본 재설계와
+이관 작업의 상세 기록이며, 최종 진행 명령 번호를 다시 정의하지 않는다.
 
 테스트 전용 코드나 fixture 환경은 만들지 않는다. 에이전트는 코드 컴파일만
 확인하며, 기능·성능·결정성은 사용자가 실제 월드 생성·스트리밍·패턴맵 디버거

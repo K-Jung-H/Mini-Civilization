@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Generation;
+using MiniCivilization.World.Generation.Streaming;
 using MiniCivilization.World.Runtime;
 using UnityEditor;
 using UnityEngine;
@@ -91,7 +93,7 @@ namespace MiniCivilization.World.Editor
         private Vector2Int[] sampleCells;
         private PatternDebugSample[] detailSamples;
         private WorldSettingsData previewSettings;
-        private WorldHydrology previewHydrology;
+        private StreamingFeatureWorld previewFeatures;
         private Texture2D previewTexture;
         private Texture2D detailTexture;
         private Mesh worldOverlayMesh;
@@ -289,11 +291,11 @@ namespace MiniCivilization.World.Editor
         {
             var settings = ResolveSettings(controller);
             previewSettings = settings;
-            previewHydrology = ResolveHydrology(settings);
             var router = new WorldNoiseRouter(settings);
             var resolution = previewResolution;
             samples = new PatternDebugSample[resolution * resolution];
             sampleCells = new Vector2Int[resolution * resolution];
+            var tileKeys = new SortedSet<PlanningTileKey>();
             var dominantCounts = new int[5];
             var strongCounts = new int[5];
             var maximumWeights = new float[5];
@@ -306,41 +308,51 @@ namespace MiniCivilization.World.Editor
             var unitsPerPixel = previewAreaCells / (double)resolution;
             selectedCell = null;
             selectedCellDetails = string.Empty;
-            HydrologyPlanScope scope = RequiresHydrologyPlan(patternView)
-                ? previewHydrology.BeginPlanScope()
-                : null;
+            for (var z = 0; z < resolution; z++)
+            for (var x = 0; x < resolution; x++)
+            {
+                var worldX = checked((int)Math.Floor(
+                    previewCenter.x - halfArea
+                    + (x + 0.5) * unitsPerPixel));
+                var worldZ = checked((int)Math.Floor(
+                    previewCenter.y - halfArea
+                    + (z + 0.5) * unitsPerPixel));
+                var sampleIndex = x + resolution * z;
+                sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
+                tileKeys.Add(PlanningTileKey.FromCell(
+                    worldX,
+                    worldZ,
+                    settings.Hydrology.Map.PlanningRegionSizeCells));
+            }
+
+            var rasters = CreateDebuggerRasters(
+                ResolvePreviewFeatures(settings),
+                tileKeys);
             try
             {
-                for (var z = 0; z < resolution; z++)
-                for (var x = 0; x < resolution; x++)
+                for (var sampleIndex = 0;
+                     sampleIndex < sampleCells.Length;
+                     sampleIndex++)
                 {
-                    var worldX = checked((int)Math.Floor(
-                        previewCenter.x - halfArea
-                        + (x + 0.5) * unitsPerPixel));
-                    var worldZ = checked((int)Math.Floor(
-                        previewCenter.y - halfArea
-                        + (z + 0.5) * unitsPerPixel));
-                    var terrain = previewHydrology.SampleBaseTerrain(worldX, worldZ);
-                    var profile = scope == null
-                        ? terrain.Terrain
-                        : HydrologyPatternResolver.Resolve(
-                            settings,
-                            HydrologyBatchBuilder.Sample(
-                                previewHydrology,
-                                scope,
-                                worldX,
-                                worldZ),
-                            terrain.Terrain);
+                    var cell = sampleCells[sampleIndex];
+                    var raster = rasters[PlanningTileKey.FromCell(
+                        cell.x,
+                        cell.y,
+                        settings.Hydrology.Map.PlanningRegionSizeCells)];
+                    var terrain = raster.SampleBaseTerrain(cell.x, cell.y);
+                    var profile = raster.Compose(
+                        settings,
+                        cell.x,
+                        cell.y,
+                        terrain.Terrain);
                     var weights = WorldPatternResolver.SampleWeights(
                         router,
-                        worldX,
-                        worldZ);
-                    var sampleIndex = x + resolution * z;
+                        cell.x,
+                        cell.y);
                     samples[sampleIndex] = new PatternDebugSample(
                         weights,
                         profile,
                         settings.Hydrology.RiverCorridor.DepthUnits.Maximum);
-                    sampleCells[sampleIndex] = new Vector2Int(worldX, worldZ);
                     for (var index = 0; index < 5; index++)
                     {
                         var weight = GetWeight(weights, index);
@@ -367,7 +379,10 @@ namespace MiniCivilization.World.Editor
             }
             finally
             {
-                scope?.Dispose();
+                foreach (var raster in rasters.Values)
+                {
+                    raster.Dispose();
+                }
             }
 
             var count = samples.Length;
@@ -473,15 +488,19 @@ namespace MiniCivilization.World.Editor
             var cell = selectedCell.Value;
             var settings = ResolvePreviewSettings(controller);
             var router = new WorldNoiseRouter(settings);
-            var hydrology = ResolvePreviewHydrology(settings)
-                ?? throw new InvalidOperationException(
-                    "Preview Hydrology is not ready.");
-            using var scope = hydrology.BeginPlanScope();
-            var terrain = hydrology.SampleBaseTerrain(cell.x, cell.y);
+            using var raster = CreateDebuggerRaster(
+                ResolvePreviewFeatures(settings),
+                new WorldCellRectangle(
+                    cell.x,
+                    cell.y,
+                    checked(cell.x + 1),
+                    checked(cell.y + 1)));
+            var terrain = raster.SampleBaseTerrain(cell.x, cell.y);
             var field = terrain.Field;
-            var profile = HydrologyPatternResolver.Resolve(
+            var profile = raster.Compose(
                 settings,
-                HydrologyBatchBuilder.Sample(hydrology, scope, cell.x, cell.y),
+                cell.x,
+                cell.y,
                 terrain.Terrain);
             var weights = WorldPatternResolver.SampleWeights(
                 router,
@@ -759,33 +778,53 @@ namespace MiniCivilization.World.Editor
             WorldGenerationController controller) =>
             previewSettings ?? ResolveSettings(controller);
 
-        private WorldHydrology ResolveHydrology(
+        private StreamingFeatureWorld ResolvePreviewFeatures(
             WorldSettingsData settings)
         {
-            if (TryResolveWorldManager()
-                && worldManager.CurrentWorldRuntime != null
-                && ReferenceEquals(
-                    worldManager.CurrentWorldRuntime.Data.Settings,
-                    settings))
+            if (previewFeatures == null
+                || !ReferenceEquals(previewFeatures.Settings, settings))
             {
-                return worldManager.CurrentWorldRuntime.Hydrology;
+                previewFeatures = new StreamingFeatureWorld(settings);
             }
 
-            return new WorldHydrology(settings);
+            return previewFeatures;
         }
 
-        private WorldHydrology ResolvePreviewHydrology(
-            WorldSettingsData settings)
+        private static Dictionary<PlanningTileKey, StreamingHydrologyRaster>
+            CreateDebuggerRasters(
+                StreamingFeatureWorld featureWorld,
+                IEnumerable<PlanningTileKey> tileKeys)
         {
-            if (previewHydrology == null
-                || !ReferenceEquals(
-                    previewHydrology.Settings,
-                    settings))
+            var settings = featureWorld.Settings;
+            var keys = new List<PlanningTileKey>(tileKeys);
+            var rectangles = new List<WorldCellRectangle>(keys.Count);
+            for (var index = 0; index < keys.Count; index++)
             {
-                previewHydrology = ResolveHydrology(settings);
+                rectangles.Add(keys[index].ToCore(
+                    settings.Hydrology.Map.PlanningRegionSizeCells));
             }
 
-            return previewHydrology;
+            featureWorld.SetLeaseRectangles(rectangles);
+            var rasters = new Dictionary<PlanningTileKey,
+                StreamingHydrologyRaster>();
+            for (var index = 0; index < keys.Count; index++)
+            {
+                var key = keys[index];
+                rasters.Add(
+                    key,
+                    featureWorld.BuildRaster(
+                        key.ToCore(settings.Hydrology.Map.PlanningRegionSizeCells)));
+            }
+
+            return rasters;
+        }
+
+        private static StreamingHydrologyRaster CreateDebuggerRaster(
+            StreamingFeatureWorld featureWorld,
+            WorldCellRectangle rectangle)
+        {
+            featureWorld.SetLeaseRectangles(new[] { rectangle });
+            return featureWorld.BuildRaster(rectangle);
         }
 
         private bool IsColumnLoaded(Vector2Int cell) =>
@@ -885,17 +924,6 @@ namespace MiniCivilization.World.Editor
         private static bool RequiresFinalSurface(PatternView view) =>
             view is PatternView.SeaWater or PatternView.RiverWater;
 
-        private static bool RequiresHydrologyPlan(PatternView view) =>
-            view is PatternView.Dominant
-                or PatternView.BasinArea
-                or PatternView.BasinDepth
-                or PatternView.LakeWater
-                or PatternView.PondWater
-                or PatternView.HydrologyComponent
-                or PatternView.RiverArea
-                or PatternView.RiverDepth
-                or PatternView.RiverWater;
-
         private static bool RequiresFinalSurface(
             in PatternDebugSample sample,
             PatternView view) =>
@@ -912,7 +940,7 @@ namespace MiniCivilization.World.Editor
             }
 
             var settings = previewSettings;
-            var hydrology = ResolvePreviewHydrology(settings);
+            var baseTerrain = new StreamingBaseTerrainEvaluator(settings);
             var density = new WorldDensityField(settings);
             for (var index = 0; index < samples.Length; index++)
             {
@@ -926,7 +954,7 @@ namespace MiniCivilization.World.Editor
                 var cell = sampleCells[index];
                 samples[index] = ResolveFinalSurface(
                     sample,
-                    hydrology,
+                    baseTerrain.Sample(cell.x, cell.y),
                     density,
                     settings,
                     cell.x,
@@ -947,7 +975,7 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            var hydrology = ResolvePreviewHydrology(settings);
+            var baseTerrain = new StreamingBaseTerrainEvaluator(settings);
             var density = new WorldDensityField(settings);
             var resolution = worldOverlayRadius * 2 + 1;
             var center = selectedCell.Value;
@@ -964,7 +992,9 @@ namespace MiniCivilization.World.Editor
 
                 detailSamples[index] = ResolveFinalSurface(
                     sample,
-                    hydrology,
+                    baseTerrain.Sample(
+                        center.x - worldOverlayRadius + x,
+                        center.y - worldOverlayRadius + z),
                     density,
                     settings,
                     center.x - worldOverlayRadius + x,
@@ -974,15 +1004,12 @@ namespace MiniCivilization.World.Editor
 
         private static PatternDebugSample ResolveFinalSurface(
             in PatternDebugSample sample,
-            WorldHydrology hydrology,
+            in StreamingBaseTerrainFact terrain,
             in WorldDensityField density,
             WorldSettingsData settings,
             int worldX,
             int worldZ)
         {
-            var terrain = hydrology.SampleBaseTerrain(
-                worldX,
-                worldZ);
             return sample.WithFinalSurface(
                 TerrainSurfaceSampler.SampleResolved(
                     density,
@@ -1004,33 +1031,30 @@ namespace MiniCivilization.World.Editor
             }
 
             var settings = ResolvePreviewSettings(controller);
-            var hydrology = ResolvePreviewHydrology(settings);
             var router = new WorldNoiseRouter(settings);
             var resolution = worldOverlayRadius * 2 + 1;
             detailSamples = new PatternDebugSample[
                 resolution * resolution];
             var center = selectedCell.Value;
-            using var scope = hydrology.BeginPlanScope();
-            using var hydrologyBatch = HydrologyBatchBuilder.Build(
-                hydrology,
-                scope,
-                center.x - worldOverlayRadius,
-                center.y - worldOverlayRadius,
-                resolution,
-                resolution);
+            using var raster = CreateDebuggerRaster(
+                ResolvePreviewFeatures(settings),
+                new WorldCellRectangle(
+                    center.x - worldOverlayRadius,
+                    center.y - worldOverlayRadius,
+                    checked(center.x + worldOverlayRadius + 1),
+                    checked(center.y + worldOverlayRadius + 1)));
             for (var z = 0; z < resolution; z++)
             for (var x = 0; x < resolution; x++)
             {
                 var worldX = center.x - worldOverlayRadius + x;
                 var worldZ = center.y - worldOverlayRadius + z;
-                var terrain = hydrologyBatch.SampleBaseTerrainState(
+                var terrain = raster.SampleBaseTerrain(
                     worldX,
                     worldZ);
-                var profile = HydrologyPatternResolver.Resolve(
+                var profile = raster.Compose(
+                    settings,
                     worldX,
                     worldZ,
-                    settings,
-                    hydrologyBatch,
                     terrain.Terrain);
                 var weights = WorldPatternResolver.SampleWeights(
                     router,
@@ -1281,7 +1305,7 @@ namespace MiniCivilization.World.Editor
             sampleCells = null;
             detailSamples = null;
             previewSettings = null;
-            previewHydrology = null;
+            previewFeatures = null;
             statistics = string.Empty;
             selectedCell = null;
             selectedCellDetails = string.Empty;

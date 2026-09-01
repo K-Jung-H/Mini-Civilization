@@ -335,9 +335,12 @@ namespace MiniCivilization.World.Runtime
                 return;
             }
 
-            if (!operation.IsMeshStageStarted)
+            if (!operation.IsPresentationStageStarted)
             {
-                operation.BeginMeshStage();
+                operation.BeginPresentationStage(
+                    operation.Kind == WorldOperationKind.Generate
+                        ? WorldOperationStage.ChunkData
+                        : WorldOperationStage.Mesh);
                 PublishOperationProgress(operation);
                 return;
             }
@@ -345,20 +348,42 @@ namespace MiniCivilization.World.Runtime
             try
             {
                 var runtime = operation.PreparedRuntime;
-                var asset = CreateRuntimeAsset(
-                    runtime.Data,
-                    operation.Kind == WorldOperationKind.Load
-                        ? Path.GetFileNameWithoutExtension(
-                            ((WorldLoadOperation)operation).Path)
-                        : $"World {runtime.Data.Seed}");
-                ActivatePreparedWorldAsset(
-                    asset,
-                    runtime,
-                    markDirty: operation.Kind == WorldOperationKind.Generate);
+                if (!operation.IsActivated)
+                {
+                    var asset = CreateRuntimeAsset(
+                        runtime.Data,
+                        operation.Kind == WorldOperationKind.Load
+                            ? Path.GetFileNameWithoutExtension(
+                                ((WorldLoadOperation)operation).Path)
+                            : $"World {runtime.Data.Seed}");
+                    ActivatePreparedWorldAsset(
+                        asset,
+                        runtime,
+                        markDirty: operation.Kind == WorldOperationKind.Generate);
+                    operation.MarkActivated();
+                    PublishOperationProgress(operation);
+                    return;
+                }
+
+                if (operation.Kind == WorldOperationKind.Generate
+                    && !runtime.IsTerrainRenderDemandComplete(
+                        out var completedChunkCount,
+                        out var chunkCount))
+                {
+                    if (chunkCount > 0)
+                    {
+                        operation.ReportChunkDataProgress(
+                            completedChunkCount,
+                            chunkCount);
+                        PublishOperationProgress(operation);
+                    }
+                    return;
+                }
+
                 if (operation.Kind == WorldOperationKind.Generate)
                 {
                     saveController.ClearActiveSavePath();
-                    Debug.Log("[WorldStartup] Generation complete", this);
+                    Debug.Log("[WorldStartup] Initial terrain streaming complete", this);
                 }
                 else
                 {
