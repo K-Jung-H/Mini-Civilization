@@ -2,20 +2,47 @@
 
 ## 문서 우선순위
 
-이 디렉터리의 문서는 2026-08-31에 합의된 Hydrology 재설계의 단일 기준이다.
-현재 활성 코드의 소유권과 제거 완료 경계는
-`17-active-streaming-ownership-cleanup.md`가 최우선이다. 이전 문서의
-`PlanningSnapshot`, `Plan Scope`, `HydrologyBatchBuilder` 설명은 구현 이력으로만
-취급한다.
-`../InfiniteWorldStreamingDesign.md`의 청크 좌표, 스트리밍 상태, 절대 좌표
-생성 계약은 유지한다. 다만 River/Lake/Pond Water Pattern과 관련된 기존 설명은
-이 문서와 충돌할 경우 이 문서를 우선한다.
+`26-water-map-direct-drawing-contract.md`가 TerrainMap을 읽어 WaterMap을 직접
+그리는 생성 원본의 최우선 계약이다. `18`, `19`, `21`, `22`의 Feature 평가,
+Geometry, 경로 회피, Basin 경쟁·성장 설명과 충돌하면 `26`을 따른다.
+
+`25-pattern-map-store-streaming-contract.md`가 Pattern Map 수명, 세 Range와
+Debugger 수요에 관한 최우선 계약이다. `26`의 WaterMap을 Runtime Store에
+보존·소비하는 범위에서 `18`, `23`, `24`의 이전 표현과 충돌하면 `25`를 따른다.
+
+`19-stage-2-semantic-contract.md`는 위 최종 설계의 2단계 완료 기록과 Pattern 디자인
+이관 기준이다. 구현 범위는 `18`의 단계 정의를, 실제 완료 사실과 다음 단계 입력은
+`19`를 함께 따른다.
+
+`20-stage-3-terrain-pattern-tile.md`는 Terrain evaluator와 Tile builder의 완료 기록이다.
+Sea는 Terrain 결과가 아니라 Hydrology Feature라는 경계도 이 문서 기준으로 유지한다.
+
+`21-stage-4-hydrology-feature-contract.md`는 이력이다. 직접 Feature 평가·Geometry
+계약은 `26`의 Tile-local Drawing으로 대체됐다.
+
+`22-stage-5-hydrology-pattern-tile.md`는 이력이다. WaterMap Tile 생성은 `26`의 직접
+Drawing 계약을 따른다.
+
+`23-stage-6-chunk-streaming.md`는 Pattern Tile 소비 ChunkData와 Runtime 연결의 초기
+구현 기록이다. Tile cache 수명과 streaming 수요 설명은 `25`로 대체됐다.
+
+`24-stage-7-semantic-pattern-debugger.md`는 256 Pixel Terrain/Hydrology/Combined Pattern Map,
+선택 영역과 Streaming Target 재배치의 초기 구현 기록이다. 독립 Tile reader 설명은
+`25`로 대체됐다.
+
+`00`~`17`과 `../InfiniteWorldStreamingDesign.md`의 기존 생성·수문·스트리밍 구현
+설명은 이력으로만 취급한다. 새 구현은 이들 구조를 보존·Adapter·fallback으로
+연결하지 않는다. Renderer, WorldData, WaterSystem처럼 새 ChunkData를 소비하는
+하위 기능만 별도 보존 대상이다.
 
 구현자는 각 단계 문서의 범위와 완료 기준을 충족한 뒤 다음 단계로 이동한다.
 다음 단계의 기능, 임시 호환 계층, 임의 상수, 숨은 재시도 횟수를 앞 단계에
 추가하지 않는다.
 
-## 확정 목표
+새 설계의 저장/로드는 기존 형식과 호환하지 않으며, Semantic Pattern Tile 기반
+ChunkData와 Runtime 상태가 검증된 뒤 최종 8단계에서만 다시 구현한다.
+
+## 이전 설계 이력
 
 ```text
 BaseTerrainField
@@ -34,7 +61,7 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
 확정한다. 계획 결과는 접근·청크 생성·스트리밍·디버거의 순서에 영향을 받지
 않는다.
 
-## 변하지 않는 계약
+## 이전 설계의 과거 계약
 
 - Hydrology는 기초 Terrain Field를 입력으로 하고, 최종 지형 목표 높이와 Water
   Source를 함께 결정한다.
@@ -53,7 +80,7 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
   산출된 의존 범위로 결정한다. 청크나 디버거 Batch가 캐시 수명을 소유하지
   않는다.
 
-## 용어
+## 이전 설계의 과거 용어
 
 | 용어 | 의미 |
 |---|---|
@@ -66,7 +93,7 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
 | HydrologyBatch | 요청한 사각 범위의 `HydrologyCellPlan` 결과. 전역 계획의 소유자가 아님 |
 | Plan Scope | 생성 작업, 스트리밍 준비 범위, 디버거 질의가 명시적으로 요청한 Region 보존 범위 |
 
-## 단계
+## 이전 설계의 단계 이력
 
 0. [00-cleanup.md](00-cleanup.md) — 이전 Hydrology 구조와 직렬화 흔적 정리, 기준 결과 확보
 1. [01-foundation.md](01-foundation.md) — 계약, 설정 의미, 명시적 계획 소유권
@@ -87,7 +114,7 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
 16. [16-incremental-feature-tile-retention.md](16-incremental-feature-tile-retention.md) — Target 이동 시 활성 Chunk의 실제 Feature Tile 참조를 유지하는 증분 streaming 수정 기록
 17. [17-active-streaming-ownership-cleanup.md](17-active-streaming-ownership-cleanup.md) — 활성 coordinator/Feature 경로, 제거 완료 계열, UI 연결 전 상태 기준
 
-## 최종 진행 명령 단계와 이관 기록의 관계
+## 이전 진행 명령과 이관 기록의 관계
 
 최종 진행 명령의 6단계는 Runtime streaming 전환, 7단계는 Pattern Debugger 전환,
 8단계는 실제 검증 뒤의 보완·정리다. `06`~`12`의 파일 번호는 생성 백본 재설계와
@@ -97,7 +124,7 @@ Sea, Lake, Pond, River는 순서대로 덧씌우는 효과가 아니다. 동일�
 확인하며, 기능·성능·결정성은 사용자가 실제 월드 생성·스트리밍·패턴맵 디버거
 환경에서 확인한다. 실제 성능 수치는 5단계의 측정에서만 비교한다.
 
-## 공통 진행 규칙
+## 이전 구현의 공통 규칙
 
 - 합의되지 않은 Black Box, 예외 조건, 상수, 생성 차단 규칙을 추가하지 않는다.
 - 설정이 필요한 정책은 목적·단위·결정 범위를 문서와 Inspector에 함께 기록한다.

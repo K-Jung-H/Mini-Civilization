@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Generation;
-using MiniCivilization.World.Generation.Streaming;
-using MiniCivilization.World.Runtime;
+using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Presentation;
 using UnityEditor;
 using UnityEngine;
 
@@ -20,162 +18,25 @@ namespace MiniCivilization.World.Editor
             Combined
         }
 
-        private readonly struct PatternMapRow
+        private readonly struct PatternMapPixel
         {
-            public PatternMapRow(
-                int row,
-                StreamingPatternMapSample[] samples)
+            public PatternMapPixel(int x, int z, int worldX, int worldZ)
             {
-                Row = row;
-                Samples = samples;
+                X = x;
+                Z = z;
+                WorldX = worldX;
+                WorldZ = worldZ;
             }
 
-            public int Row { get; }
-            public StreamingPatternMapSample[] Samples { get; }
-        }
-
-        private sealed class PatternMapBuildOperation : IDisposable
-        {
-            private readonly StreamingPatternMapSession session;
-            private readonly WorldCellRectangle viewport;
-            private readonly WorldCellRectangle plannedRectangle;
-            private Task<PatternMapRow> activeRow;
-            private int nextRow;
-            private bool isCancelled;
-            private bool isDisposed;
-
-            public PatternMapBuildOperation(
-                StreamingPatternMapSession session,
-                in WorldCellRectangle viewport,
-                in WorldCellRectangle plannedRectangle,
-                int width,
-                int height)
-            {
-                this.session = session ?? throw new ArgumentNullException(
-                    nameof(session));
-                if (width <= 0 || height <= 0)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(width));
-                }
-
-                this.viewport = viewport;
-                this.plannedRectangle = plannedRectangle;
-                Width = width;
-                Height = height;
-            }
-
-            public int Width { get; }
-            public int Height { get; }
-            public bool IsCancelled => isCancelled;
-            public bool HasActiveRow => activeRow != null;
-            public bool IsComplete => !isCancelled
-                && nextRow >= Height
-                && activeRow == null;
-
-            public void StartNextRow()
-            {
-                if (isDisposed || isCancelled || activeRow != null
-                    || nextRow >= Height)
-                {
-                    return;
-                }
-
-                var row = ResolveRowIndex(nextRow, Height);
-                nextRow++;
-                activeRow = Task.Run(() => BuildRow(row));
-            }
-
-            public bool TryTakeCompleted(
-                out PatternMapRow row,
-                out Exception error)
-            {
-                row = default;
-                error = null;
-                if (activeRow == null || !activeRow.IsCompleted)
-                {
-                    return false;
-                }
-
-                var completed = activeRow;
-                activeRow = null;
-                try
-                {
-                    row = completed.GetAwaiter().GetResult();
-                }
-                catch (Exception exception)
-                {
-                    error = exception;
-                }
-
-                return true;
-            }
-
-            public void Cancel() => isCancelled = true;
-
-            public void Dispose()
-            {
-                if (isDisposed)
-                {
-                    return;
-                }
-
-                isDisposed = true;
-                isCancelled = true;
-                if (activeRow != null && !activeRow.IsCompleted)
-                {
-                    activeRow.ContinueWith(_ => session.Dispose());
-                    return;
-                }
-
-                session.Dispose();
-            }
-
-            private PatternMapRow BuildRow(int row)
-            {
-                var result = new StreamingPatternMapSample[Width];
-                var worldZ = ResolveSampleCoordinate(
-                    viewport.MinimumZ,
-                    viewport.MaximumZExclusive,
-                    row,
-                    Height);
-                for (var ordinal = 0; ordinal < Width; ordinal++)
-                {
-                    var x = ResolveCenterFirstIndex(ordinal, Width);
-                    var worldX = ResolveSampleCoordinate(
-                        viewport.MinimumX,
-                        viewport.MaximumXExclusive,
-                        x,
-                        Width);
-                    if (plannedRectangle.Contains(worldX, worldZ))
-                    {
-                        result[x] = session.Sample(worldX, worldZ);
-                    }
-                }
-
-                return new PatternMapRow(row, result);
-            }
-
-            private static int ResolveRowIndex(int ordinal, int height) =>
-                ResolveCenterFirstIndex(ordinal, height);
-
-            private static int ResolveCenterFirstIndex(int ordinal, int length)
-            {
-                var center = length / 2;
-                if (ordinal == 0)
-                {
-                    return center;
-                }
-
-                var distance = (ordinal + 1) / 2;
-                return ordinal % 2 == 1
-                    ? center - distance
-                    : center + distance;
-            }
+            public int X { get; }
+            public int Z { get; }
+            public int WorldX { get; }
+            public int WorldZ { get; }
         }
 
         private const int MapResolution = 256;
         private const int MinimumPixelsPerChunk = 2;
-        private static readonly Vector2Int[] targetCrossOffsets =
+        private static readonly Vector2Int[] TargetCrossOffsets =
         {
             Vector2Int.zero,
             Vector2Int.left,
@@ -185,40 +46,37 @@ namespace MiniCivilization.World.Editor
         };
 
         private WorldTerrainPatternDebugger debugger;
-        private readonly List<PatternMapBuildOperation> retiredOperations = new();
-        private PatternMapBuildOperation mapOperation;
-        private StreamingPatternMapSample[] samples;
-        private bool[] completedMapRows;
+        private Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile;
+        private TerrainPatternCell[] terrainSamples;
+        private HydrologyPatternCell[] hydrologySamples;
+        private bool[] terrainAvailable;
+        private bool[] hydrologyAvailable;
+        private Color[] mapColors;
         private Texture2D mapTexture;
-        private WorldCellRectangle mapViewport;
-        private int mapPixelsPerChunk;
+        private PatternTileBounds viewport;
+        private int pixelsPerChunk;
         private int mapLevel;
-        private int completedRows;
         private Vector2Int selectedCenterChunk;
         private bool hasSelectedCenter;
         private PatternMapLayer layer;
-        private string buildError;
+        private string mapError;
+        private long observedRevision = -1;
+        private int terrainTileCount;
+        private int hydrologyTileCount;
+        private int combinedTileCount;
 
         private void OnEnable()
         {
             debugger = (WorldTerrainPatternDebugger)target;
-            EditorApplication.update += AdvanceMapBuild;
+            EditorApplication.update += RefreshPatternMap;
         }
 
         private void OnDisable()
         {
-            EditorApplication.update -= AdvanceMapBuild;
-            RetireCurrentOperation();
-            for (var index = 0; index < retiredOperations.Count; index++)
-            {
-                retiredOperations[index].Dispose();
-            }
-
-            retiredOperations.Clear();
+            EditorApplication.update -= RefreshPatternMap;
+            debugger?.WorldManager?.ClearDebuggerPatternMapDemand();
             DestroyMapTexture();
         }
-
-        public override bool RequiresConstantRepaint() => Application.isPlaying;
 
         public override void OnInspectorGUI()
         {
@@ -229,72 +87,58 @@ namespace MiniCivilization.World.Editor
                 ClearMap();
             }
 
-            var controller = debugger.GenerationController;
-            var runtime = debugger.WorldManager != null
-                ? debugger.WorldManager.CurrentWorldRuntime
-                : null;
-            if (controller == null || runtime == null)
+            if (!debugger.TryCreateConfiguration(
+                    out var configuration,
+                    out var configurationError))
             {
-                EditorGUILayout.HelpBox(
-                    controller == null
-                        ? "WorldGenerationController is not assigned."
-                        : "A prepared WorldRuntime is required.",
-                    MessageType.Error);
-                return;
-            }
-
-            var settingsError = string.Empty;
-            if (controller.Settings == null
-                || !controller.Settings.TryValidate(out settingsError))
-            {
-                EditorGUILayout.HelpBox(
-                    controller.Settings == null
-                        ? "WorldGenerationSettings is not assigned."
-                        : settingsError,
-                    MessageType.Error);
+                EditorGUILayout.HelpBox(configurationError, MessageType.Info);
                 return;
             }
 
             if (debugger.PatternMapPalette == null)
             {
                 EditorGUILayout.HelpBox(
-                    "WorldPatternMapPalette is not assigned.",
+                    "Semantic Pattern Map Palette is not assigned.",
                     MessageType.Error);
                 return;
             }
 
-            var settings = runtime.Data.Settings;
-            var levels = BuildMapLevels(settings.ChunkCellCountXZ);
+            var levels = BuildMapLevels(
+                configuration.World.ChunkCellCountXZ);
             if (levels.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    "No Map Level can represent the current Chunk XZ Cell count.",
+                    "Chunk XZ Cell count must support a 2 Pixel minimum Map Level.",
                     MessageType.Error);
                 return;
             }
 
-            EnsureSelectedCenter(settings);
+            EnsureSelectedCenter(configuration);
             mapLevel = Math.Clamp(mapLevel, 0, levels.Count - 1);
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(
-                "Pattern Map Inspector",
+                "Semantic Pattern Map",
                 EditorStyles.boldLabel);
             EditorGUILayout.LabelField(
-                "고정 출력",
-                $"{MapResolution} x {MapResolution} Pixel");
+                "출력 해상도",
+                $"{MapResolution} × {MapResolution} Pixel");
 
             EditorGUI.BeginChangeCheck();
-            selectedCenterChunk = EditorGUILayout.Vector2IntField(
-                "중앙 선택 Chunk XZ",
+            var nextCenter = EditorGUILayout.Vector2IntField(
+                "선택 중심 Chunk XZ",
                 selectedCenterChunk);
-            var nextLevel = GUILayout.Toolbar(mapLevel, BuildLevelLabels(levels));
+            var nextLevel = GUILayout.Toolbar(
+                mapLevel,
+                BuildLevelLabels(levels));
             if (EditorGUI.EndChangeCheck())
             {
+                selectedCenterChunk = nextCenter;
                 mapLevel = nextLevel;
-                ClearMap();
+                hasSelectedCenter = true;
+                StartMapPreparation(configuration, levels[mapLevel]);
             }
 
-            if (!IsSelectedCenterValid(settings))
+            if (!IsSelectedCenterValid(configuration.World))
             {
                 EditorGUILayout.HelpBox(
                     "Finite 월드에서는 월드 경계 안의 Chunk를 선택해야 합니다.",
@@ -302,45 +146,27 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            if (GUILayout.Button("현재 Streaming Target을 중앙 선택으로"))
+            if (GUILayout.Button("현재 Streaming Target을 선택 중심으로"))
             {
-                SelectCurrentStreamingTarget(settings);
-            }
-
-            if (!TryResolveViewport(
-                    settings,
-                    levels[mapLevel],
-                    out var viewport,
-                    out var plannedRectangle,
-                    out var viewportError))
-            {
-                EditorGUILayout.HelpBox(viewportError, MessageType.Error);
-                return;
+                SelectCurrentStreamingTarget(configuration, levels[mapLevel]);
             }
 
             EditorGUILayout.LabelField(
                 "현재 Level",
                 $"Chunk 한 변 {levels[mapLevel]} Pixel");
-            if (mapOperation == null || mapOperation.IsCancelled
-                || mapOperation.IsComplete)
+            if (GUILayout.Button("패턴 맵 준비"))
             {
-                if (GUILayout.Button("패턴 맵 생성"))
-                {
-                    StartMapBuild(runtime, viewport, plannedRectangle,
-                        levels[mapLevel]);
-                }
-            }
-            else if (GUILayout.Button("생성 취소"))
-            {
-                mapOperation.Cancel();
+                StartMapPreparation(configuration, levels[mapLevel]);
             }
 
-            if (!string.IsNullOrEmpty(buildError))
+            if (!string.IsNullOrEmpty(mapError))
             {
-                EditorGUILayout.HelpBox(buildError, MessageType.Error);
+                EditorGUILayout.HelpBox(mapError, MessageType.Error);
             }
 
-            if (mapTexture == null || samples == null)
+            if (mapTexture == null || terrainSamples == null
+                || hydrologySamples == null || terrainAvailable == null
+                || hydrologyAvailable == null || mapColors == null)
             {
                 return;
             }
@@ -351,19 +177,13 @@ namespace MiniCivilization.World.Editor
             if (selectedLayer != (int)layer)
             {
                 layer = (PatternMapLayer)selectedLayer;
-                RenderCompletedRows();
+                RenderEntireMap();
             }
 
-            var completePixels = completedRows * MapResolution;
-            var status = mapOperation != null && !mapOperation.IsCancelled
-                && !mapOperation.IsComplete
-                ? "생성 중"
-                : mapOperation != null && mapOperation.IsCancelled
-                    ? "생성 취소"
-                    : "생성 완료";
             EditorGUILayout.LabelField(
-                $"{status} · {completePixels:N0} / "
-                + $"{MapResolution * MapResolution:N0} Pixel");
+                $"Terrain {terrainTileCount:N0} · Hydrology "
+                + $"{hydrologyTileCount:N0} · Combined "
+                + $"{combinedTileCount:N0} / {pixelsByTile.Count:N0} Tile");
 
             var width = Mathf.Clamp(
                 EditorGUIUtility.currentViewWidth - 40f,
@@ -376,182 +196,310 @@ namespace MiniCivilization.World.Editor
                 null,
                 ScaleMode.ScaleToFit);
             DrawChunkGrid(rect);
-            DrawSelectionOverlay(rect, runtime);
-            DrawStreamingTargetCross(rect);
-            HandleMapSelection(rect, settings, runtime);
+            DrawSelectionOverlay(rect, configuration);
+            DrawStreamingRenderRangeOverlay(rect, configuration);
+            DrawStreamingTargetCross(rect, configuration);
+            HandleMapSelection(rect, configuration, levels[mapLevel]);
 
-            if (GUILayout.Button("중앙 선택 영역으로 Streaming Target 이동"))
+            if (GUILayout.Button("선택 영역으로 Streaming Target 이동"))
             {
-                MoveStreamingTarget(settings);
+                MoveStreamingTarget(configuration);
             }
         }
 
-        private void AdvanceMapBuild()
+        private void RefreshPatternMap()
         {
-            AdvanceRetiredOperations();
-            if (mapOperation == null)
+            if (pixelsByTile == null)
             {
                 return;
             }
 
-            if (mapOperation.TryTakeCompleted(out var row, out var error))
+            var revision = debugger.PatternMapRevision;
+            if (revision == observedRevision)
             {
-                if (error != null)
-                {
-                    buildError = error.Message;
-                    mapOperation.Cancel();
-                }
-                else if (!mapOperation.IsCancelled)
-                {
-                    ApplyRow(row);
-                }
+                return;
             }
 
-            if (!mapOperation.IsCancelled
-                && !mapOperation.IsComplete
-                && !mapOperation.HasActiveRow)
-            {
-                mapOperation.StartNextRow();
-            }
-
+            observedRevision = revision;
+            RefreshStoredTiles();
             Repaint();
         }
 
-        private void StartMapBuild(
-            WorldRuntime runtime,
-            in WorldCellRectangle viewport,
-            in WorldCellRectangle plannedRectangle,
-            int pixelsPerChunk)
+        private void StartMapPreparation(
+            SemanticWorldConfigurationData configuration,
+            int nextPixelsPerChunk)
         {
-            try
+            if (!TryResolveViewport(
+                    configuration.World,
+                    nextPixelsPerChunk,
+                    out var nextViewport,
+                    out var nextPixels,
+                    out var error))
             {
-                var nextOperation = new PatternMapBuildOperation(
-                    runtime.OpenPatternMapSession(plannedRectangle),
-                    viewport,
-                    plannedRectangle,
-                    MapResolution,
-                    MapResolution);
-                RetireCurrentOperation();
-                DestroyMapTexture();
-                samples = new StreamingPatternMapSample[
-                    MapResolution * MapResolution];
-                completedMapRows = new bool[MapResolution];
-                mapTexture = new Texture2D(
-                    MapResolution,
-                    MapResolution,
-                    TextureFormat.RGBA32,
-                    false)
-                {
-                    hideFlags = HideFlags.HideAndDontSave,
-                    filterMode = FilterMode.Point,
-                    wrapMode = TextureWrapMode.Clamp
-                };
-                mapTexture.SetPixels(new Color[MapResolution * MapResolution]);
-                mapTexture.Apply(false, false);
-                mapOperation = nextOperation;
-                mapViewport = viewport;
-                mapPixelsPerChunk = pixelsPerChunk;
-                completedRows = 0;
-                buildError = string.Empty;
-                mapOperation.StartNextRow();
-            }
-            catch (Exception exception)
-            {
-                buildError = exception.Message;
-            }
-        }
-
-        private void ApplyRow(in PatternMapRow row)
-        {
-            if (samples == null || mapTexture == null
-                || completedMapRows == null
-                || completedMapRows[row.Row])
-            {
+                mapError = error;
                 return;
             }
 
-            var colors = new Color[MapResolution];
-            var start = row.Row * MapResolution;
-            for (var x = 0; x < MapResolution; x++)
+            var nextGroups = BuildPixelGroups(configuration, nextPixels);
+            if (!debugger.TryRequestMapPreparation(nextViewport, out error))
             {
-                var sample = row.Samples[x];
-                samples[start + x] = sample;
-                colors[x] = ResolveColor(sample);
+                mapError = error;
+                return;
             }
 
-            mapTexture.SetPixels(0, row.Row, MapResolution, 1, colors);
+            DestroyMapTexture();
+            terrainSamples = new TerrainPatternCell[MapResolution * MapResolution];
+            hydrologySamples = new HydrologyPatternCell[MapResolution * MapResolution];
+            terrainAvailable = new bool[MapResolution * MapResolution];
+            hydrologyAvailable = new bool[MapResolution * MapResolution];
+            mapColors = new Color[MapResolution * MapResolution];
+            mapTexture = new Texture2D(
+                MapResolution,
+                MapResolution,
+                TextureFormat.RGBA32,
+                false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            mapTexture.SetPixels(mapColors);
             mapTexture.Apply(false, false);
-            completedMapRows[row.Row] = true;
-            completedRows++;
+            pixelsByTile = nextGroups;
+            viewport = nextViewport;
+            pixelsPerChunk = nextPixelsPerChunk;
+            observedRevision = -1;
+            terrainTileCount = 0;
+            hydrologyTileCount = 0;
+            combinedTileCount = 0;
+            mapError = string.Empty;
+            RefreshStoredTiles();
         }
 
-        private void RenderCompletedRows()
+        private Dictionary<PatternTileKey, List<PatternMapPixel>>
+            BuildPixelGroups(
+                SemanticWorldConfigurationData configuration,
+                IReadOnlyList<PatternMapPixel> pixels)
         {
-            if (samples == null || mapTexture == null)
+            var result = new Dictionary<PatternTileKey, List<PatternMapPixel>>();
+            for (var index = 0; index < pixels.Count; index++)
             {
-                return;
-            }
-
-            if (completedMapRows == null)
-            {
-                return;
-            }
-
-            for (var z = 0; z < MapResolution; z++)
-            {
-                if (!completedMapRows[z])
+                var pixel = pixels[index];
+                var key = configuration.PatternTiles.GetKeyForCell(
+                    pixel.WorldX,
+                    pixel.WorldZ);
+                if (!configuration.PatternTiles.IsOutputAllowed(key))
                 {
                     continue;
                 }
 
-                var colors = new Color[MapResolution];
-                var start = z * MapResolution;
-                for (var x = 0; x < MapResolution; x++)
+                if (!result.TryGetValue(key, out var group))
                 {
-                    colors[x] = ResolveColor(samples[start + x]);
+                    group = new List<PatternMapPixel>();
+                    result.Add(key, group);
                 }
 
-                mapTexture.SetPixels(0, z, MapResolution, 1, colors);
+                group.Add(pixel);
+            }
+
+            return result;
+        }
+
+        private void RefreshStoredTiles()
+        {
+            if (pixelsByTile == null || terrainSamples == null
+                || hydrologySamples == null || terrainAvailable == null
+                || hydrologyAvailable == null || mapColors == null)
+            {
+                return;
+            }
+
+            terrainTileCount = 0;
+            hydrologyTileCount = 0;
+            combinedTileCount = 0;
+            var changedGroups = new List<List<PatternMapPixel>>();
+            foreach (var pair in pixelsByTile)
+            {
+                var hasTerrain = debugger.TryGetTerrainPatternTile(
+                    pair.Key,
+                    out var terrain);
+                var hasHydrology = debugger.TryGetHydrologyPatternTile(
+                    pair.Key,
+                    out var hydrology);
+                if (hasTerrain)
+                {
+                    terrainTileCount++;
+                }
+
+                if (hasHydrology)
+                {
+                    hydrologyTileCount++;
+                }
+
+                if (hasTerrain && hasHydrology)
+                {
+                    combinedTileCount++;
+                }
+
+                if (!hasTerrain && !hasHydrology)
+                {
+                    continue;
+                }
+
+                var pixels = pair.Value;
+                var changed = false;
+                for (var index = 0; index < pixels.Count; index++)
+                {
+                    var pixel = pixels[index];
+                    var mapIndex = pixel.X + MapResolution * pixel.Z;
+                    if (hasTerrain && !terrainAvailable[mapIndex])
+                    {
+                        terrainSamples[mapIndex] = terrain.GetCell(
+                            pixel.WorldX,
+                            pixel.WorldZ);
+                        terrainAvailable[mapIndex] = true;
+                        changed = true;
+                    }
+
+                    if (hasHydrology && !hydrologyAvailable[mapIndex])
+                    {
+                        hydrologySamples[mapIndex] = hydrology.GetCell(
+                            pixel.WorldX,
+                            pixel.WorldZ);
+                        hydrologyAvailable[mapIndex] = true;
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    changedGroups.Add(pixels);
+                }
+            }
+
+            RenderChangedGroups(changedGroups);
+        }
+
+        private void RenderChangedGroups(
+            IReadOnlyList<List<PatternMapPixel>> groups)
+        {
+            if (mapTexture == null || terrainSamples == null
+                || hydrologySamples == null || terrainAvailable == null
+                || hydrologyAvailable == null || mapColors == null
+                || groups == null || groups.Count == 0)
+            {
+                return;
+            }
+
+            for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                var group = groups[groupIndex];
+                var minimumX = MapResolution;
+                var minimumZ = MapResolution;
+                var maximumX = -1;
+                var maximumZ = -1;
+                for (var index = 0; index < group.Count; index++)
+                {
+                    var pixel = group[index];
+                    var mapIndex = pixel.X + MapResolution * pixel.Z;
+                    mapColors[mapIndex] = ResolveColor(
+                        terrainSamples[mapIndex],
+                        terrainAvailable[mapIndex],
+                        hydrologySamples[mapIndex],
+                        hydrologyAvailable[mapIndex]);
+                    minimumX = Math.Min(minimumX, pixel.X);
+                    minimumZ = Math.Min(minimumZ, pixel.Z);
+                    maximumX = Math.Max(maximumX, pixel.X);
+                    maximumZ = Math.Max(maximumZ, pixel.Z);
+                }
+
+                var width = maximumX - minimumX + 1;
+                var height = maximumZ - minimumZ + 1;
+                var colors = new Color[width * height];
+                for (var z = 0; z < height; z++)
+                for (var x = 0; x < width; x++)
+                {
+                    var mapIndex = minimumX + x
+                        + MapResolution * (minimumZ + z);
+                    colors[x + width * z] = mapColors[mapIndex];
+                }
+
+                mapTexture.SetPixels(minimumX, minimumZ, width, height, colors);
             }
 
             mapTexture.Apply(false, false);
-            Repaint();
         }
 
-        private Color ResolveColor(in StreamingPatternMapSample sample)
+        private void RenderEntireMap()
         {
-            if (!sample.IsAvailable)
+            if (mapTexture == null || terrainSamples == null
+                || hydrologySamples == null || terrainAvailable == null
+                || hydrologyAvailable == null || mapColors == null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < mapColors.Length; index++)
+            {
+                mapColors[index] = ResolveColor(
+                    terrainSamples[index],
+                    terrainAvailable[index],
+                    hydrologySamples[index],
+                    hydrologyAvailable[index]);
+            }
+
+            mapTexture.SetPixels(mapColors);
+            mapTexture.Apply(false, false);
+        }
+
+        private Color ResolveColor(
+            in TerrainPatternCell terrain,
+            bool hasTerrain,
+            in HydrologyPatternCell hydrology,
+            bool hasHydrology)
+        {
+            if (layer == PatternMapLayer.Terrain)
+            {
+                return hasTerrain
+                    ? debugger.PatternMapPalette.ResolveTerrain(terrain.Type)
+                    : Color.black;
+            }
+
+            if (layer == PatternMapLayer.Hydrology)
+            {
+                if (!hasHydrology)
+                {
+                    return Color.black;
+                }
+
+                var hydrologyColor = debugger.PatternMapPalette.ResolveHydrology(
+                    hydrology.WaterType);
+                hydrologyColor.a = 1f;
+                return hydrologyColor;
+            }
+
+            if (!hasTerrain || !hasHydrology)
             {
                 return Color.black;
             }
 
-            var palette = debugger.PatternMapPalette;
-            var terrain = palette.ResolveTerrain(sample.Terrain.DominantPattern);
-            if (layer == PatternMapLayer.Terrain)
+            var terrainColor = debugger.PatternMapPalette.ResolveTerrain(
+                terrain.Type);
+            if (!hydrology.HasWater)
             {
-                return terrain;
+                return terrainColor;
             }
 
-            var hydrology = palette.ResolveHydrology(sample.HydrologyType);
-            if (layer == PatternMapLayer.Hydrology)
-            {
-                var color = Color.Lerp(
-                    Color.black,
-                    hydrology,
-                    sample.HydrologyMembership);
-                color.a = 1f;
-                return color;
-            }
-
-            return Color.Lerp(
-                terrain,
-                hydrology,
-                hydrology.a * sample.HydrologyMembership);
+            var waterColor = debugger.PatternMapPalette.ResolveHydrology(
+                hydrology.WaterType);
+            var combined = Color.Lerp(terrainColor, waterColor, waterColor.a);
+            combined.a = 1f;
+            return combined;
         }
 
         private void DrawChunkGrid(Rect rect)
         {
-            if (mapPixelsPerChunk <= 0)
+            if (pixelsPerChunk <= 0)
             {
                 return;
             }
@@ -559,44 +507,92 @@ namespace MiniCivilization.World.Editor
             var color = new Color(0f, 0f, 0f, 0.6f);
             for (var pixel = 0;
                  pixel <= MapResolution;
-                 pixel += mapPixelsPerChunk)
+                 pixel += pixelsPerChunk)
             {
                 var position = rect.x + rect.width * pixel / MapResolution;
-                EditorGUI.DrawRect(new Rect(position, rect.y, 1f, rect.height), color);
+                EditorGUI.DrawRect(
+                    new Rect(position, rect.y, 1f, rect.height),
+                    color);
                 position = rect.y + rect.height * pixel / MapResolution;
-                EditorGUI.DrawRect(new Rect(rect.x, position, rect.width, 1f), color);
+                EditorGUI.DrawRect(
+                    new Rect(rect.x, position, rect.width, 1f),
+                    color);
             }
         }
 
-        private void DrawSelectionOverlay(Rect rect, WorldRuntime runtime)
+        private void DrawSelectionOverlay(
+            Rect rect,
+            SemanticWorldConfigurationData configuration)
         {
-            var streaming = debugger.StreamingController;
-            if (streaming == null
-                || !TryGetTerrainRenderRectangle(
-                    runtime.Data,
-                    streaming,
-                    selectedCenterChunk,
-                    out var selection))
+            var selection = ResolveSelectionBounds(configuration);
+            DrawWorldRectangle(rect, selection, new Color(1f, 0.55f, 0f, 1f));
+        }
+
+        private void DrawStreamingRenderRangeOverlay(
+            Rect rect,
+            SemanticWorldConfigurationData configuration)
+        {
+            if (!debugger.TryGetStreamingTargetCell(configuration, out var cell))
             {
                 return;
             }
 
-            DrawWorldRectangle(rect, selection, new Color(1f, 0.85f, 0f, 1f));
+            var world = configuration.World;
+            var targetChunkX = WorldCoordinateUtility.FloorDivide(
+                cell.x,
+                world.ChunkCellCountXZ);
+            var targetChunkZ = WorldCoordinateUtility.FloorDivide(
+                cell.y,
+                world.ChunkCellCountXZ);
+            var minimumChunkX = targetChunkX - configuration.RenderRangeChunks;
+            var maximumChunkX = targetChunkX + configuration.RenderRangeChunks;
+            var minimumChunkZ = targetChunkZ - configuration.RenderRangeChunks;
+            var maximumChunkZ = targetChunkZ + configuration.RenderRangeChunks;
+            if (world.WorldType == WorldType.Finite)
+            {
+                minimumChunkX = Math.Max(
+                    minimumChunkX,
+                    world.MinimumChunkCoordinate);
+                maximumChunkX = Math.Min(
+                    maximumChunkX,
+                    world.MaximumChunkCoordinate);
+                minimumChunkZ = Math.Max(
+                    minimumChunkZ,
+                    world.MinimumChunkCoordinate);
+                maximumChunkZ = Math.Min(
+                    maximumChunkZ,
+                    world.MaximumChunkCoordinate);
+            }
+
+            var size = world.ChunkCellCountXZ;
+            var renderRange = new PatternTileBounds(
+                checked(minimumChunkX * size),
+                checked(minimumChunkZ * size),
+                checked((maximumChunkX + 1) * size),
+                checked((maximumChunkZ + 1) * size));
+            DrawWorldRectangle(rect, renderRange, Color.yellow);
         }
 
-        private void DrawStreamingTargetCross(Rect rect)
+        private void DrawStreamingTargetCross(
+            Rect rect,
+            SemanticWorldConfigurationData configuration)
         {
-            if (!debugger.TryGetStreamingTargetCell(out var cell)
-                || !TryResolveMapPixel(cell.x, cell.y, out var pixelX,
+            if (!debugger.TryGetStreamingTargetCell(
+                    configuration,
+                    out var cell)
+                || !TryResolveMapPixel(
+                    cell.x,
+                    cell.y,
+                    out var pixelX,
                     out var pixelZ))
             {
                 return;
             }
 
-            for (var index = 0; index < targetCrossOffsets.Length; index++)
+            for (var index = 0; index < TargetCrossOffsets.Length; index++)
             {
                 var pixel = new Vector2Int(pixelX, pixelZ)
-                    + targetCrossOffsets[index];
+                    + TargetCrossOffsets[index];
                 if ((uint)pixel.x >= MapResolution
                     || (uint)pixel.y >= MapResolution)
                 {
@@ -609,18 +605,18 @@ namespace MiniCivilization.World.Editor
 
         private void DrawWorldRectangle(
             Rect rect,
-            in WorldCellRectangle worldRectangle,
+            PatternTileBounds worldRectangle,
             Color color)
         {
-            var width = mapViewport.MaximumXExclusive - mapViewport.MinimumX;
-            var height = mapViewport.MaximumZExclusive - mapViewport.MinimumZ;
-            var minimumX = (worldRectangle.MinimumX - mapViewport.MinimumX)
+            var width = viewport.Width;
+            var height = viewport.Height;
+            var minimumX = (worldRectangle.MinimumX - viewport.MinimumX)
                 / (float)width;
-            var maximumX = (worldRectangle.MaximumXExclusive - mapViewport.MinimumX)
+            var maximumX = (worldRectangle.MaximumXExclusive - viewport.MinimumX)
                 / (float)width;
-            var minimumZ = (worldRectangle.MinimumZ - mapViewport.MinimumZ)
+            var minimumZ = (worldRectangle.MinimumZ - viewport.MinimumZ)
                 / (float)height;
-            var maximumZ = (worldRectangle.MaximumZExclusive - mapViewport.MinimumZ)
+            var maximumZ = (worldRectangle.MaximumZExclusive - viewport.MinimumZ)
                 / (float)height;
             if (maximumX <= 0f || minimumX >= 1f
                 || maximumZ <= 0f || minimumZ >= 1f)
@@ -637,10 +633,18 @@ namespace MiniCivilization.World.Editor
                 rect.yMax - rect.height * maximumZ,
                 rect.width * (maximumX - minimumX),
                 rect.height * (maximumZ - minimumZ));
-            EditorGUI.DrawRect(new Rect(overlay.x, overlay.y, overlay.width, 1f), color);
-            EditorGUI.DrawRect(new Rect(overlay.x, overlay.yMax - 1f, overlay.width, 1f), color);
-            EditorGUI.DrawRect(new Rect(overlay.x, overlay.y, 1f, overlay.height), color);
-            EditorGUI.DrawRect(new Rect(overlay.xMax - 1f, overlay.y, 1f, overlay.height), color);
+            EditorGUI.DrawRect(
+                new Rect(overlay.x, overlay.y, overlay.width, 1f),
+                color);
+            EditorGUI.DrawRect(
+                new Rect(overlay.x, overlay.yMax - 1f, overlay.width, 1f),
+                color);
+            EditorGUI.DrawRect(
+                new Rect(overlay.x, overlay.y, 1f, overlay.height),
+                color);
+            EditorGUI.DrawRect(
+                new Rect(overlay.xMax - 1f, overlay.y, 1f, overlay.height),
+                color);
         }
 
         private void DrawMapPixel(Rect rect, int x, int z, Color color)
@@ -656,8 +660,8 @@ namespace MiniCivilization.World.Editor
 
         private void HandleMapSelection(
             Rect rect,
-            WorldSettingsData settings,
-            WorldRuntime runtime)
+            SemanticWorldConfigurationData configuration,
+            int nextPixelsPerChunk)
         {
             var current = Event.current;
             if (current.type != EventType.MouseDown
@@ -680,154 +684,134 @@ namespace MiniCivilization.World.Editor
                 0,
                 MapResolution - 1);
             var cellX = ResolveSampleCoordinate(
-                mapViewport.MinimumX,
-                mapViewport.MaximumXExclusive,
+                viewport.MinimumX,
+                viewport.MaximumXExclusive,
                 pixelX,
                 MapResolution);
             var cellZ = ResolveSampleCoordinate(
-                mapViewport.MinimumZ,
-                mapViewport.MaximumZExclusive,
+                viewport.MinimumZ,
+                viewport.MaximumZExclusive,
                 pixelZ,
                 MapResolution);
             var chunk = new Vector2Int(
                 WorldCoordinateUtility.FloorDivide(
                     cellX,
-                    settings.ChunkCellCountXZ),
+                    configuration.World.ChunkCellCountXZ),
                 WorldCoordinateUtility.FloorDivide(
                     cellZ,
-                    settings.ChunkCellCountXZ));
-            if (settings.WorldType == WorldType.Finite
-                && (chunk.x < settings.MinimumChunkCoordinate
-                    || chunk.x > settings.MaximumChunkCoordinate
-                    || chunk.y < settings.MinimumChunkCoordinate
-                    || chunk.y > settings.MaximumChunkCoordinate))
+                    configuration.World.ChunkCellCountXZ));
+            if (!IsChunkWithinBounds(configuration.World, chunk))
             {
                 return;
             }
 
             selectedCenterChunk = chunk;
             hasSelectedCenter = true;
-            var levels = BuildMapLevels(settings.ChunkCellCountXZ);
-            StartMapBuildForCurrentSelection(runtime, settings, levels[mapLevel]);
+            StartMapPreparation(configuration, nextPixelsPerChunk);
             current.Use();
         }
 
-        private void MoveStreamingTarget(WorldSettingsData settings)
+        private void MoveStreamingTarget(
+            SemanticWorldConfigurationData configuration)
         {
-            var cellX = checked(selectedCenterChunk.x
-                * settings.ChunkCellCountXZ
-                + settings.ChunkCellCountXZ / 2);
-            var cellZ = checked(selectedCenterChunk.y
-                * settings.ChunkCellCountXZ
-                + settings.ChunkCellCountXZ / 2);
-            var targetTransform = debugger.ResolveStreamingTarget();
-            if (targetTransform != null && !Application.isPlaying)
+            var streamingTarget = debugger.WorldManager != null
+                ? debugger.WorldManager.StreamingTarget
+                : null;
+            if (streamingTarget != null && !Application.isPlaying)
             {
                 Undo.RecordObject(
-                    targetTransform,
+                    streamingTarget,
                     "Move Streaming Target To Pattern Map Selection");
             }
 
-            if (!debugger.TryMoveStreamingTargetToCell(cellX, cellZ))
+            if (!debugger.TryMoveStreamingTargetToChunk(
+                    configuration,
+                    selectedCenterChunk))
             {
-                buildError = "Streaming Target을 중앙 선택 영역으로 이동할 수 없습니다.";
+                mapError = "Streaming Target을 선택 영역으로 이동할 수 없습니다.";
             }
         }
 
-        private void SelectCurrentStreamingTarget(WorldSettingsData settings)
+        private void SelectCurrentStreamingTarget(
+            SemanticWorldConfigurationData configuration,
+            int nextPixelsPerChunk)
         {
-            if (!debugger.TryGetStreamingTargetCell(out var cell))
+            if (!debugger.TryGetStreamingTargetCell(configuration, out var cell))
             {
-                buildError = "Streaming Target의 Cell 좌표를 확인할 수 없습니다.";
+                mapError = "Streaming Target의 Cell 좌표를 확인할 수 없습니다.";
                 return;
             }
 
             selectedCenterChunk = new Vector2Int(
                 WorldCoordinateUtility.FloorDivide(
                     cell.x,
-                    settings.ChunkCellCountXZ),
+                    configuration.World.ChunkCellCountXZ),
                 WorldCoordinateUtility.FloorDivide(
                     cell.y,
-                    settings.ChunkCellCountXZ));
+                    configuration.World.ChunkCellCountXZ));
             hasSelectedCenter = true;
-            var runtime = debugger.WorldManager.CurrentWorldRuntime;
-            var levels = BuildMapLevels(settings.ChunkCellCountXZ);
-            StartMapBuildForCurrentSelection(runtime, settings, levels[mapLevel]);
-        }
-
-        private void StartMapBuildForCurrentSelection(
-            WorldRuntime runtime,
-            WorldSettingsData settings,
-            int pixelsPerChunk)
-        {
-            if (!TryResolveViewport(
-                    settings,
-                    pixelsPerChunk,
-                    out var viewport,
-                    out var plannedRectangle,
-                    out var error))
-            {
-                buildError = error;
-                return;
-            }
-
-            StartMapBuild(runtime, viewport, plannedRectangle, pixelsPerChunk);
+            StartMapPreparation(configuration, nextPixelsPerChunk);
         }
 
         private bool TryResolveViewport(
             WorldSettingsData settings,
-            int pixelsPerChunk,
-            out WorldCellRectangle viewport,
-            out WorldCellRectangle plannedRectangle,
+            int nextPixelsPerChunk,
+            out PatternTileBounds nextViewport,
+            out List<PatternMapPixel> pixels,
             out string error)
         {
-            viewport = default;
-            plannedRectangle = default;
-            if (pixelsPerChunk <= 0 || MapResolution % pixelsPerChunk != 0)
+            nextViewport = default;
+            pixels = null;
+            error = string.Empty;
+            if (nextPixelsPerChunk <= 0
+                || MapResolution % nextPixelsPerChunk != 0)
             {
-                error = "Map Level이 고정 출력 해상도를 나누어야 합니다.";
+                error = "Map Level은 고정 출력 해상도를 나누어야 합니다.";
                 return false;
             }
 
             try
             {
-                var chunksPerSide = MapResolution / pixelsPerChunk;
+                var chunksPerSide = MapResolution / nextPixelsPerChunk;
                 var minimumChunkX = checked(selectedCenterChunk.x
                     - chunksPerSide / 2);
                 var minimumChunkZ = checked(selectedCenterChunk.y
                     - chunksPerSide / 2);
-                var size = settings.ChunkCellCountXZ;
-                viewport = new WorldCellRectangle(
-                    checked(minimumChunkX * size),
-                    checked(minimumChunkZ * size),
-                    checked((minimumChunkX + chunksPerSide) * size),
-                    checked((minimumChunkZ + chunksPerSide) * size));
-                var minimumX = viewport.MinimumX;
-                var minimumZ = viewport.MinimumZ;
-                var maximumX = viewport.MaximumXExclusive;
-                var maximumZ = viewport.MaximumZExclusive;
-                if (settings.WorldType == WorldType.Finite)
+                var span = settings.ChunkCellCountXZ;
+                nextViewport = new PatternTileBounds(
+                    checked(minimumChunkX * span),
+                    checked(minimumChunkZ * span),
+                    checked((minimumChunkX + chunksPerSide) * span),
+                    checked((minimumChunkZ + chunksPerSide) * span));
+                pixels = new List<PatternMapPixel>(
+                    MapResolution * MapResolution);
+                for (var z = 0; z < MapResolution; z++)
                 {
-                    minimumX = Math.Max(minimumX, settings.MinimumCellCoordinate);
-                    minimumZ = Math.Max(minimumZ, settings.MinimumCellCoordinate);
-                    maximumX = Math.Min(maximumX,
-                        settings.MaximumCellCoordinateExclusive);
-                    maximumZ = Math.Min(maximumZ,
-                        settings.MaximumCellCoordinateExclusive);
+                    var worldZ = ResolveSampleCoordinate(
+                        nextViewport.MinimumZ,
+                        nextViewport.MaximumZExclusive,
+                        z,
+                        MapResolution);
+                    for (var x = 0; x < MapResolution; x++)
+                    {
+                        var worldX = ResolveSampleCoordinate(
+                            nextViewport.MinimumX,
+                            nextViewport.MaximumXExclusive,
+                            x,
+                            MapResolution);
+                        if (settings.WorldType == WorldType.Finite
+                            && (worldX < settings.MinimumCellCoordinate
+                                || worldX >= settings.MaximumCellCoordinateExclusive
+                                || worldZ < settings.MinimumCellCoordinate
+                                || worldZ >= settings.MaximumCellCoordinateExclusive))
+                        {
+                            continue;
+                        }
+
+                        pixels.Add(new PatternMapPixel(x, z, worldX, worldZ));
+                    }
                 }
 
-                if (maximumX <= minimumX || maximumZ <= minimumZ)
-                {
-                    error = "선택한 Map 영역이 월드 경계와 겹치지 않습니다.";
-                    return false;
-                }
-
-                plannedRectangle = new WorldCellRectangle(
-                    minimumX,
-                    minimumZ,
-                    maximumX,
-                    maximumZ);
-                error = string.Empty;
                 return true;
             }
             catch (OverflowException)
@@ -837,44 +821,55 @@ namespace MiniCivilization.World.Editor
             }
         }
 
-        private void EnsureSelectedCenter(WorldSettingsData settings)
+        private void EnsureSelectedCenter(
+            SemanticWorldConfigurationData configuration)
         {
             if (hasSelectedCenter)
             {
                 return;
             }
 
-            if (debugger.StreamingController != null
-                && debugger.StreamingController.HasCenter)
+            if (debugger.TryGetStreamingTargetCell(configuration, out var cell))
             {
-                var center = debugger.StreamingController.CurrentCenter;
-                selectedCenterChunk = new Vector2Int(center.X, center.Z);
+                selectedCenterChunk = new Vector2Int(
+                    WorldCoordinateUtility.FloorDivide(
+                        cell.x,
+                        configuration.World.ChunkCellCountXZ),
+                    WorldCoordinateUtility.FloorDivide(
+                        cell.y,
+                        configuration.World.ChunkCellCountXZ));
             }
             else
             {
                 selectedCenterChunk = Vector2Int.zero;
             }
 
-            if (settings.WorldType == WorldType.Finite)
+            if (configuration.World.WorldType == WorldType.Finite)
             {
                 selectedCenterChunk = new Vector2Int(
-                    Math.Clamp(selectedCenterChunk.x,
-                        settings.MinimumChunkCoordinate,
-                        settings.MaximumChunkCoordinate),
-                    Math.Clamp(selectedCenterChunk.y,
-                        settings.MinimumChunkCoordinate,
-                        settings.MaximumChunkCoordinate));
+                    Math.Clamp(
+                        selectedCenterChunk.x,
+                        configuration.World.MinimumChunkCoordinate,
+                        configuration.World.MaximumChunkCoordinate),
+                    Math.Clamp(
+                        selectedCenterChunk.y,
+                        configuration.World.MinimumChunkCoordinate,
+                        configuration.World.MaximumChunkCoordinate));
             }
 
             hasSelectedCenter = true;
         }
 
         private bool IsSelectedCenterValid(WorldSettingsData settings) =>
-            settings.WorldType != WorldType.Finite
-            || selectedCenterChunk.x >= settings.MinimumChunkCoordinate
-            && selectedCenterChunk.x <= settings.MaximumChunkCoordinate
-            && selectedCenterChunk.y >= settings.MinimumChunkCoordinate
-            && selectedCenterChunk.y <= settings.MaximumChunkCoordinate;
+            IsChunkWithinBounds(settings, selectedCenterChunk);
+
+        private static bool IsChunkWithinBounds(
+            WorldSettingsData settings,
+            Vector2Int chunk) => settings.WorldType == WorldType.Infinite
+            || chunk.x >= settings.MinimumChunkCoordinate
+            && chunk.x <= settings.MaximumChunkCoordinate
+            && chunk.y >= settings.MinimumChunkCoordinate
+            && chunk.y <= settings.MaximumChunkCoordinate;
 
         private static List<int> BuildMapLevels(int chunkCellCountXZ)
         {
@@ -915,52 +910,26 @@ namespace MiniCivilization.World.Editor
             return labels;
         }
 
-        private static bool TryGetTerrainRenderRectangle(
-            WorldData world,
-            WorldChunkStreamingController streaming,
-            Vector2Int center,
-            out WorldCellRectangle rectangle)
+        private PatternTileBounds ResolveSelectionBounds(
+            SemanticWorldConfigurationData configuration)
         {
-            var demand = StreamingChunkDemandBuilder.Build(
-                world,
-                new StreamingRequest(
-                    new ChunkCoordinate(center.x, center.y),
-                    streaming.RenderRadius,
-                    streaming.EntityRenderRadius,
-                    streaming.SimulationRadius));
-            var hasChunk = false;
-            var minimumX = 0;
-            var minimumZ = 0;
-            var maximumX = 0;
-            var maximumZ = 0;
-            foreach (var chunk in demand.TerrainRenderChunks)
+            var world = configuration.World;
+            if (world.WorldType == WorldType.Finite)
             {
-                if (!hasChunk)
-                {
-                    minimumX = maximumX = chunk.X;
-                    minimumZ = maximumZ = chunk.Z;
-                    hasChunk = true;
-                    continue;
-                }
-
-                minimumX = Math.Min(minimumX, chunk.X);
-                minimumZ = Math.Min(minimumZ, chunk.Z);
-                maximumX = Math.Max(maximumX, chunk.X);
-                maximumZ = Math.Max(maximumZ, chunk.Z);
+                return new PatternTileBounds(
+                    world.MinimumCellCoordinate,
+                    world.MinimumCellCoordinate,
+                    world.MaximumCellCoordinateExclusive,
+                    world.MaximumCellCoordinateExclusive);
             }
 
-            if (!hasChunk)
-            {
-                rectangle = default;
-                return false;
-            }
-
-            rectangle = new WorldCellRectangle(
-                checked(minimumX * world.ChunkSizeX),
-                checked(minimumZ * world.ChunkSizeZ),
-                checked((maximumX + 1) * world.ChunkSizeX),
-                checked((maximumZ + 1) * world.ChunkSizeZ));
-            return true;
+            var radius = configuration.RenderRangeChunks;
+            var size = world.ChunkCellCountXZ;
+            return new PatternTileBounds(
+                checked((selectedCenterChunk.x - radius) * size),
+                checked((selectedCenterChunk.y - radius) * size),
+                checked((selectedCenterChunk.x + radius + 1) * size),
+                checked((selectedCenterChunk.y + radius + 1) * size));
         }
 
         private bool TryResolveMapPixel(
@@ -971,17 +940,15 @@ namespace MiniCivilization.World.Editor
         {
             pixelX = 0;
             pixelZ = 0;
-            if (!mapViewport.Contains(worldX, worldZ))
+            if (!viewport.Contains(worldX, worldZ))
             {
                 return false;
             }
 
-            var width = mapViewport.MaximumXExclusive - mapViewport.MinimumX;
-            var height = mapViewport.MaximumZExclusive - mapViewport.MinimumZ;
-            pixelX = (int)((long)(worldX - mapViewport.MinimumX)
-                * MapResolution / width);
-            pixelZ = (int)((long)(worldZ - mapViewport.MinimumZ)
-                * MapResolution / height);
+            pixelX = (int)((long)(worldX - viewport.MinimumX)
+                * MapResolution / viewport.Width);
+            pixelZ = (int)((long)(worldZ - viewport.MinimumZ)
+                * MapResolution / viewport.Height);
             return true;
         }
 
@@ -997,48 +964,22 @@ namespace MiniCivilization.World.Editor
             return checked(minimum + (int)offset);
         }
 
-        private void RetireCurrentOperation()
-        {
-            if (mapOperation == null)
-            {
-                return;
-            }
-
-            mapOperation.Cancel();
-            if (mapOperation.HasActiveRow)
-            {
-                retiredOperations.Add(mapOperation);
-            }
-            else
-            {
-                mapOperation.Dispose();
-            }
-
-            mapOperation = null;
-        }
-
-        private void AdvanceRetiredOperations()
-        {
-            for (var index = retiredOperations.Count - 1; index >= 0; index--)
-            {
-                var operation = retiredOperations[index];
-                if (operation.TryTakeCompleted(out _, out _))
-                {
-                    operation.Dispose();
-                    retiredOperations.RemoveAt(index);
-                }
-            }
-        }
-
         private void ClearMap()
         {
-            RetireCurrentOperation();
-            samples = null;
-            completedMapRows = null;
-            completedRows = 0;
-            mapPixelsPerChunk = 0;
-            mapViewport = default;
-            buildError = string.Empty;
+            debugger?.WorldManager?.ClearDebuggerPatternMapDemand();
+            pixelsByTile = null;
+            terrainSamples = null;
+            hydrologySamples = null;
+            terrainAvailable = null;
+            hydrologyAvailable = null;
+            mapColors = null;
+            viewport = default;
+            pixelsPerChunk = 0;
+            mapError = string.Empty;
+            observedRevision = -1;
+            terrainTileCount = 0;
+            hydrologyTileCount = 0;
+            combinedTileCount = 0;
             DestroyMapTexture();
             Repaint();
         }

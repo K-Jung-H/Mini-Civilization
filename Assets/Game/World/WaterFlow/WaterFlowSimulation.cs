@@ -408,7 +408,8 @@ namespace MiniCivilization.World.WaterFlow
                 world,
                 state,
                 coordinate);
-            if (coordinate.Y + 1 < world.Height)
+            if (coordinate.Y + 1 < world.Height
+                && world.IsColumnLoaded(coordinate.X, coordinate.Z))
             {
                 var aboveCell = new CellCoordinate(
                     coordinate.X,
@@ -440,7 +441,7 @@ namespace MiniCivilization.World.WaterFlow
                 var offset = HorizontalDirections[directionIndex];
                 var donorX = coordinate.X - offset.x;
                 var donorZ = coordinate.Z - offset.z;
-                if (!world.Contains(donorX, coordinate.Y, donorZ))
+                if (!world.IsColumnLoaded(donorX, donorZ))
                 {
                     continue;
                 }
@@ -580,7 +581,7 @@ namespace MiniCivilization.World.WaterFlow
                 var offset = HorizontalDirections[directionIndex];
                 var targetX = source.X + offset.x;
                 var targetZ = source.Z + offset.z;
-                if (!world.Contains(targetX, source.Y, targetZ))
+                if (!world.IsColumnLoaded(targetX, targetZ))
                 {
                     continue;
                 }
@@ -618,12 +619,12 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            var belowCell = new CellCoordinate(
-                coordinate.X,
-                coordinate.Y - 1,
-                coordinate.Z);
-            return state.GetWater(belowCell).Role
-                == WaterRole.Source;
+            return world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y - 1,
+                    coordinate.Z,
+                    out var below)
+                && below.Water.Role == WaterRole.Source;
         }
 
         private static WaterData ApplyDissipation(
@@ -706,10 +707,14 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            var below = world.GetCell(
-                coordinate.X,
-                coordinate.Y - 1,
-                coordinate.Z);
+            if (!world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y - 1,
+                    coordinate.Z,
+                    out var below))
+            {
+                return false;
+            }
             if (below.Terrain.SolidHeight >= WorldGrid.HeightStepsPerCell)
             {
                 return false;
@@ -735,10 +740,14 @@ namespace MiniCivilization.World.WaterFlow
                 return false;
             }
 
-            var below = world.GetCell(
-                coordinate.X,
-                coordinate.Y - 1,
-                coordinate.Z);
+            if (!world.TryGetCell(
+                    coordinate.X,
+                    coordinate.Y - 1,
+                    coordinate.Z,
+                    out var below))
+            {
+                return false;
+            }
             return WaterFlowReachability.HasVerticalDropBelow(
                 coordinate.Y,
                 below);
@@ -751,14 +760,19 @@ namespace MiniCivilization.World.WaterFlow
             CellCoordinate targetCoordinate,
             byte candidateAmount)
         {
-            var donorCell = world.GetCell(
-                donorCoordinate.X,
-                donorCoordinate.Y,
-                donorCoordinate.Z);
-            var targetCell = world.GetCell(
-                targetCoordinate.X,
-                targetCoordinate.Y,
-                targetCoordinate.Z);
+            if (!world.TryGetCell(
+                    donorCoordinate.X,
+                    donorCoordinate.Y,
+                    donorCoordinate.Z,
+                    out var donorCell)
+                || !world.TryGetCell(
+                    targetCoordinate.X,
+                    targetCoordinate.Y,
+                    targetCoordinate.Z,
+                    out var targetCell))
+            {
+                return false;
+            }
             var donorWater = state.GetWater(donorCoordinate);
             return WaterFlowReachability.CanReachHorizontally(
                 donorCoordinate,
@@ -788,7 +802,7 @@ namespace MiniCivilization.World.WaterFlow
 
                 var targetX = donor.X + offset.x;
                 var targetZ = donor.Z + offset.z;
-                if (!world.Contains(targetX, donor.Y, targetZ))
+                if (!world.IsColumnLoaded(targetX, targetZ))
                 {
                     return false;
                 }
@@ -839,10 +853,14 @@ namespace MiniCivilization.World.WaterFlow
             foreach (var pair in state.EnumerateStagedCells())
             {
                 var coordinate = pair.Key;
-                var cell = world.GetCell(
-                    coordinate.X,
-                    coordinate.Y,
-                    coordinate.Z);
+                if (!world.TryGetCell(
+                        coordinate.X,
+                        coordinate.Y,
+                        coordinate.Z,
+                        out var cell))
+                {
+                    continue;
+                }
                 var previousWater = cell.Water;
                 if (previousWater.Equals(pair.Value))
                 {
@@ -1024,7 +1042,7 @@ namespace MiniCivilization.World.WaterFlow
             HashSet<CellCoordinate> cells,
             CellCoordinate coordinate)
         {
-            cells.Add(coordinate);
+            AddIfLoaded(coordinate.X, coordinate.Y, coordinate.Z);
             AddIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
             AddIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
             AddIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
@@ -1034,7 +1052,12 @@ namespace MiniCivilization.World.WaterFlow
 
             void AddIfContained(int x, int y, int z)
             {
-                if (world.Contains(x, y, z))
+                AddIfLoaded(x, y, z);
+            }
+
+            void AddIfLoaded(int x, int y, int z)
+            {
+                if (world.TryGetCell(x, y, z, out _))
                 {
                     cells.Add(new CellCoordinate(x, y, z));
                 }

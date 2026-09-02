@@ -27,11 +27,11 @@ namespace MiniCivilization.World.Presentation
         [Header("Mesh")]
         [SerializeField, Min(1)] private int maxPatchRebuildsPerFrame = 2;
 
-        private readonly HashSet<Vector2Int> pendingFullPatches = new();
-        private readonly HashSet<Vector2Int> pendingTerrainPatches = new();
-        private readonly HashSet<Vector2Int> pendingWaterPatches = new();
-        private readonly HashSet<Vector2Int> pendingRoadPatches = new();
-        private readonly HashSet<Vector2Int> pendingCreatePatches = new();
+        private readonly RenderPatchPriorityQueue pendingFullPatches = new();
+        private readonly RenderPatchPriorityQueue pendingTerrainPatches = new();
+        private readonly RenderPatchPriorityQueue pendingWaterPatches = new();
+        private readonly RenderPatchPriorityQueue pendingRoadPatches = new();
+        private readonly RenderPatchPriorityQueue pendingCreatePatches = new();
         private readonly Dictionary<Vector2Int, WorldRenderPatchView>
             renderedPatchViews = new();
         private readonly Stack<WorldRenderPatchView> patchViewPool = new();
@@ -43,6 +43,8 @@ namespace MiniCivilization.World.Presentation
         private WorldSurfaceQuery surfaceQuery;
         private int activeRenderPatchSize;
         private int activeChunksPerPatch;
+        private bool hasPriorityTarget;
+        private ChunkCoordinate priorityTarget;
 
         public WorldRenderBindingMode BindingMode { get; private set; }
         public WorldChangeId LastAppliedChangeId { get; private set; }
@@ -108,6 +110,13 @@ namespace MiniCivilization.World.Presentation
 
             boundWaterFlowState = waterFlowState;
             surfaceQuery?.SetWaterFlowState(waterFlowState);
+        }
+
+        public void SetStreamingPriorityTarget(ChunkCoordinate target)
+        {
+            hasPriorityTarget = true;
+            priorityTarget = target;
+            UpdatePatchPriorities();
         }
 
         private void OnTerrainRenderStateChanged(
@@ -198,7 +207,7 @@ namespace MiniCivilization.World.Presentation
                  buildIndex < maxPatchRebuildsPerFrame;
                  buildIndex++)
             {
-                if (!TryTakePatch(pendingCreatePatches, out var patch))
+                if (!pendingCreatePatches.TryTake(out var patch))
                 {
                     return;
                 }
@@ -351,7 +360,7 @@ namespace MiniCivilization.World.Presentation
                  rebuildIndex < maxPatchRebuildsPerFrame;
                  rebuildIndex++)
             {
-                if (TryTakePatch(pendingFullPatches, out var patch))
+                if (pendingFullPatches.TryTake(out var patch))
                 {
                     pendingTerrainPatches.Remove(patch);
                     pendingWaterPatches.Remove(patch);
@@ -368,7 +377,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (TryTakePatch(pendingTerrainPatches, out patch))
+                if (pendingTerrainPatches.TryTake(out patch))
                 {
                     var rebuildWaterWithTerrain =
                         pendingWaterPatches.Remove(patch);
@@ -394,7 +403,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (TryTakePatch(pendingWaterPatches, out patch))
+                if (pendingWaterPatches.TryTake(out patch))
                 {
                     if (!ContainsPatch(patch))
                     {
@@ -407,7 +416,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (TryTakePatch(pendingRoadPatches, out patch)
+                if (pendingRoadPatches.TryTake(out patch)
                     && ContainsPatch(patch))
                 {
                     RebuildRoadPatch(renderedPatchViews[patch]);
@@ -417,24 +426,6 @@ namespace MiniCivilization.World.Presentation
 
         private bool ContainsPatch(Vector2Int patch) =>
             renderedPatchViews.ContainsKey(patch);
-
-        private static bool TryTakePatch(
-            HashSet<Vector2Int> patches,
-            out Vector2Int patch)
-        {
-            var enumerator = patches.GetEnumerator();
-            if (!enumerator.MoveNext())
-            {
-                enumerator.Dispose();
-                patch = default;
-                return false;
-            }
-
-            patch = enumerator.Current;
-            enumerator.Dispose();
-            patches.Remove(patch);
-            return true;
-        }
 
         private void RebuildWaterPatch(WorldRenderPatchView view)
         {
@@ -576,6 +567,8 @@ namespace MiniCivilization.World.Presentation
             surfaceQuery = null;
             activeRenderPatchSize = 0;
             activeChunksPerPatch = 0;
+            hasPriorityTarget = false;
+            priorityTarget = default;
             BindingMode = WorldRenderBindingMode.None;
             LastAppliedChangeId = WorldChangeId.None;
             pendingFullPatches.Clear();
@@ -718,6 +711,164 @@ namespace MiniCivilization.World.Presentation
         private void OnDestroy()
         {
             Unbind();
+        }
+
+        private void UpdatePatchPriorities()
+        {
+            pendingFullPatches.SetPriorityTarget(
+                priorityTarget,
+                activeChunksPerPatch,
+                hasPriorityTarget);
+            pendingTerrainPatches.SetPriorityTarget(
+                priorityTarget,
+                activeChunksPerPatch,
+                hasPriorityTarget);
+            pendingWaterPatches.SetPriorityTarget(
+                priorityTarget,
+                activeChunksPerPatch,
+                hasPriorityTarget);
+            pendingRoadPatches.SetPriorityTarget(
+                priorityTarget,
+                activeChunksPerPatch,
+                hasPriorityTarget);
+            pendingCreatePatches.SetPriorityTarget(
+                priorityTarget,
+                activeChunksPerPatch,
+                hasPriorityTarget);
+        }
+
+        private sealed class RenderPatchPriorityQueue
+        {
+            private readonly HashSet<Vector2Int> pending = new();
+            private readonly SortedSet<RenderPatchQueueEntry> ordered = new();
+            private ChunkCoordinate target;
+            private int chunksPerPatch;
+            private bool hasTarget;
+
+            public int Count => pending.Count;
+
+            public bool Add(Vector2Int patch)
+            {
+                if (!pending.Add(patch))
+                {
+                    return false;
+                }
+
+                ordered.Add(CreateEntry(patch));
+                return true;
+            }
+
+            public bool Remove(Vector2Int patch)
+            {
+                if (!pending.Remove(patch))
+                {
+                    return false;
+                }
+
+                ordered.Remove(CreateEntry(patch));
+                return true;
+            }
+
+            public bool Contains(Vector2Int patch) => pending.Contains(patch);
+
+            public void Clear()
+            {
+                pending.Clear();
+                ordered.Clear();
+            }
+
+            public void SetPriorityTarget(
+                ChunkCoordinate nextTarget,
+                int nextChunksPerPatch,
+                bool nextHasTarget)
+            {
+                target = nextTarget;
+                chunksPerPatch = nextChunksPerPatch;
+                hasTarget = nextHasTarget;
+                ordered.Clear();
+                foreach (var patch in pending)
+                {
+                    ordered.Add(CreateEntry(patch));
+                }
+            }
+
+            public bool TryTake(out Vector2Int patch)
+            {
+                if (ordered.Count == 0)
+                {
+                    patch = default;
+                    return false;
+                }
+
+                var entry = ordered.Min;
+                ordered.Remove(entry);
+                pending.Remove(entry.Patch);
+                patch = entry.Patch;
+                return true;
+            }
+
+            private RenderPatchQueueEntry CreateEntry(Vector2Int patch) => new(
+                patch,
+                hasTarget && chunksPerPatch > 0
+                    ? CalculateDistanceSquared(patch)
+                    : 0UL);
+
+            private ulong CalculateDistanceSquared(Vector2Int patch)
+            {
+                var minimumX = checked(patch.x * chunksPerPatch);
+                var minimumZ = checked(patch.y * chunksPerPatch);
+                var maximumX = checked(minimumX + chunksPerPatch - 1);
+                var maximumZ = checked(minimumZ + chunksPerPatch - 1);
+                var x = CalculateAxisDistance(target.X, minimumX, maximumX);
+                var z = CalculateAxisDistance(target.Z, minimumZ, maximumZ);
+                var xSquared = x * x;
+                var zSquared = z * z;
+                return ulong.MaxValue - xSquared < zSquared
+                    ? ulong.MaxValue
+                    : xSquared + zSquared;
+            }
+
+            private static ulong CalculateAxisDistance(
+                int value,
+                int minimum,
+                int maximum)
+            {
+                if (value < minimum)
+                {
+                    return (ulong)((long)minimum - value);
+                }
+
+                if (value > maximum)
+                {
+                    return (ulong)((long)value - maximum);
+                }
+
+                return 0UL;
+            }
+        }
+
+        private readonly struct RenderPatchQueueEntry : IComparable<RenderPatchQueueEntry>
+        {
+            public RenderPatchQueueEntry(Vector2Int patch, ulong distanceSquared)
+            {
+                Patch = patch;
+                DistanceSquared = distanceSquared;
+            }
+
+            public Vector2Int Patch { get; }
+            public ulong DistanceSquared { get; }
+
+            public int CompareTo(RenderPatchQueueEntry other)
+            {
+                var distance = DistanceSquared.CompareTo(other.DistanceSquared);
+                if (distance != 0)
+                {
+                    return distance;
+                }
+
+                var z = Patch.y.CompareTo(other.Patch.y);
+                return z != 0 ? z : Patch.x.CompareTo(other.Patch.x);
+            }
         }
 
         private static void ReleaseObject(UnityEngine.Object target)

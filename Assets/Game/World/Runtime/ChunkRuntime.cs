@@ -17,6 +17,7 @@ namespace MiniCivilization.World.Runtime
         public ChunkState State { get; private set; }
         public bool TerrainRenderingEnabled { get; private set; }
         public bool EntityRenderingEnabled { get; private set; }
+        public bool SimulationEnabled { get; private set; }
 
         internal ChunkRuntime(ChunkCoordinate coordinate)
         {
@@ -43,6 +44,17 @@ namespace MiniCivilization.World.Runtime
             }
 
             TerrainRenderingEnabled = enabled;
+            return true;
+        }
+
+        internal bool SetSimulationEnabled(bool enabled)
+        {
+            if (SimulationEnabled == enabled)
+            {
+                return false;
+            }
+
+            SimulationEnabled = enabled;
             return true;
         }
 

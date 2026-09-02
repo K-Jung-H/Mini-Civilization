@@ -1,219 +1,83 @@
 using System;
-using System.IO;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
-using MiniCivilization.World.Generation;
-using MiniCivilization.World.WaterFlow;
-using MiniCivilization.World.Persistence;
+using MiniCivilization.World.Generation.Semantic;
 using MiniCivilization.World.Presentation;
+using MiniCivilization.World.WaterFlow;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Runtime
 {
     [DisallowMultipleComponent]
     public sealed class WorldManager : MonoBehaviour
     {
-        [Header("Current World")]
-        [SerializeField] private WorldDataAsset currentWorldDataAsset;
-
         [Header("Services")]
-        [SerializeField] private WorldGenerationController generator;
         [SerializeField] private WorldEditController editController;
         [SerializeField] private WorldWaterFlowController waterFlowController;
         [SerializeField] private WorldRenderer worldRenderer;
-        [SerializeField] private WorldChunkStreamingController streamingController;
         [SerializeField] private EntityManager entityManager;
-        [SerializeField] private WorldSaveController saveController;
         [SerializeField] private WorldUIManager uiManager;
 
-        public WorldGenerationController Generator => generator;
+        [Header("World Generation Settings")]
+        [SerializeField, FormerlySerializedAs("semanticWorldSettings")]
+        private SemanticWorldSettings worldGenerationSettings;
+        [SerializeField] private Transform streamingTarget;
+
+        private PatternStreamingCoordinator streamingCoordinator;
+        private WorldStreamingProgress streamingProgress;
+        private SemanticWorldConfigurationData semanticConfiguration;
+
         public WorldEditController EditController => editController;
         public WorldWaterFlowController WaterFlowController =>
             waterFlowController;
         public WorldRenderer Renderer => worldRenderer;
-        public WorldChunkStreamingController StreamingController =>
-            streamingController;
         public EntityManager EntityManager => entityManager;
-        public WorldSaveController SaveController => saveController;
-        public WorldDataAsset CurrentWorldDataAsset => currentWorldDataAsset;
+        public SemanticWorldSettings WorldGenerationSettings =>
+            worldGenerationSettings;
+        public Transform StreamingTarget => streamingTarget;
+        public SemanticWorldConfigurationData SemanticConfiguration =>
+            semanticConfiguration;
+        public WorldStreamingProgress StreamingProgress => streamingProgress;
+        public long PatternMapRevision => CurrentWorldRuntime == null
+            ? 0L
+            : CurrentWorldRuntime.PatternMaps.Revision;
         public WorldRuntime CurrentWorldRuntime { get; private set; }
         public WorldData CurrentWorldData => CurrentWorldRuntime?.Data;
         public bool HasWorld => CurrentWorldData != null;
         public bool IsDirty { get; private set; }
-        public WorldOperationProgress CurrentOperationProgress =>
-            activeWorldOperation?.Progress ?? default;
 
-        public event Action<WorldDataAsset> WorldChanged;
+        public event Action WorldChanged;
         public event Action<bool> DirtyStateChanged;
-        public event Action<WorldOperationProgress> OperationProgressChanged;
         public event Action<EntityChangeSet> EntityChanged;
+        public event Action<WorldStreamingProgress> StreamingProgressChanged;
 
-        private WorldOperation activeWorldOperation;
         private void Start()
         {
             uiManager?.Initialize(this);
+            CreateSemanticWorld();
+        }
 
-            if (CurrentWorldData != null)
+        private void Update()
+        {
+            if (streamingCoordinator == null)
             {
                 return;
             }
 
-            InitializeWorld();
+            var target = ResolveStreamingTargetChunk();
+            worldRenderer?.SetStreamingPriorityTarget(target);
+            streamingCoordinator.Update(target);
         }
 
-        public bool InitializeWorld()
+        public void UnloadWorld()
         {
-            if (!TryValidateReferences())
-            {
-                return false;
-            }
-
-            if (currentWorldDataAsset != null && currentWorldDataAsset.HasData)
-            {
-                try
-                {
-                    var startupAsset = Application.isPlaying
-                        ? currentWorldDataAsset.CreateRuntimeWorkingCopy()
-                        : currentWorldDataAsset;
-                    ActivateWorldAsset(
-                        startupAsset,
-                        markDirty: false);
-                    return true;
-                }
-                catch (Exception exception)
-                {
-                    Debug.LogException(exception, this);
-                    return false;
-                }
-            }
-
-            return GenerateWorld();
-        }
-
-        public bool GenerateWorld()
-        {
-            if (!TryValidateReferences())
-            {
-                return false;
-            }
-
-            if (!Application.isPlaying)
-            {
-                return GenerateWorldImmediately();
-            }
-
-            try
-            {
-                ConfigureEntityFactories();
-                return StartWorldOperation(
-                    new WorldGenerationOperation(generator.CreateBuildInput()));
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception, this);
-                return false;
-            }
-        }
-
-        public bool GenerateWorld(int seed)
-        {
-            if (generator == null)
-            {
-                Debug.LogError("WorldManager requires an assigned Generator.", this);
-                return false;
-            }
-
-            generator.SetSeed(seed);
-            return GenerateWorld();
-        }
-
-        public bool SaveWorld()
-        {
-            if (saveController == null || !saveController.HasActiveSavePath)
-            {
-                Debug.LogError(
-                    "The current world has no active save path. Use SaveWorldAs(path) first.",
-                    this);
-                return false;
-            }
-
-            return SaveWorld(saveController.ActiveSavePath);
-        }
-
-        public bool SaveWorld(string path)
-        {
-            if (!TryValidateReferences())
-            {
-                return false;
-            }
-
-            if (!HasWorld || currentWorldDataAsset == null)
-            {
-                Debug.LogError("There is no active world to save.", this);
-                return false;
-            }
-
-            try
-            {
-                saveController.Save(currentWorldDataAsset, path);
-                SetDirty(false);
-                return true;
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception, this);
-                return false;
-            }
-        }
-
-        public bool SaveWorldAs(string path)
-        {
-            return SaveWorld(path);
-        }
-
-        public bool LoadWorld()
-        {
-            return LoadWorld(saveController != null
-                ? saveController.SavePath
-                : null);
-        }
-
-        public bool LoadWorld(string path)
-        {
-            if (!TryValidateReferences())
-            {
-                return false;
-            }
-
-            if (!Application.isPlaying)
-            {
-                return LoadWorldImmediately(path);
-            }
-
-            try
-            {
-                ConfigureEntityFactories();
-                return StartWorldOperation(new WorldLoadOperation(path));
-            }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception, this);
-                return false;
-            }
-        }
-
-        public void SetCurrentWorldAsset(
-            WorldDataAsset asset,
-            bool markDirty = false)
-        {
-            if (asset == null)
-            {
-                UnloadWorld();
-                return;
-            }
-
-            CancelActiveWorldOperation();
-            ActivateWorldAsset(asset, markDirty);
+            DisposeStreamingCoordinator();
+            UnbindRuntime();
+            CurrentWorldRuntime = null;
+            semanticConfiguration = null;
+            SetDirty(false);
+            WorldChanged?.Invoke();
         }
 
         public void MarkDirty()
@@ -221,301 +85,83 @@ namespace MiniCivilization.World.Runtime
             SetDirty(true);
         }
 
-        public void UnloadWorld()
-        {
-            CancelActiveWorldOperation();
-            UnbindRuntime();
-            var previousAsset = currentWorldDataAsset;
-            CurrentWorldRuntime = null;
-            currentWorldDataAsset = null;
-            SetDirty(false);
-            WorldChanged?.Invoke(null);
-            ReleaseRuntimeAsset(previousAsset);
-        }
-
         public void Configure(
-            WorldGenerationController generationController,
             WorldEditController worldEditor,
             WorldWaterFlowController waterFlow,
             WorldRenderer renderer,
-            WorldSaveController saveLoad,
             EntityManager entitiesManager = null,
-            WorldUIManager userInterface = null,
-            WorldChunkStreamingController streaming = null)
+            WorldUIManager userInterface = null)
         {
-            generator = generationController;
             editController = worldEditor;
             waterFlowController = waterFlow;
             worldRenderer = renderer;
-            saveController = saveLoad;
             entityManager = entitiesManager;
             uiManager = userInterface;
-            streamingController = streaming;
         }
 
-        private void ActivateWorldAsset(
-            WorldDataAsset nextAsset,
-            bool markDirty)
+        public void SetStreamingTarget(Vector3 position)
         {
-            if (nextAsset == null)
-            {
-                throw new ArgumentNullException(nameof(nextAsset));
-            }
-
-            if (!nextAsset.HasData)
+            if (streamingTarget == null)
             {
                 throw new InvalidOperationException(
-                    $"World data asset '{nextAsset.name}' is empty.");
+                    "World Manager has no Streaming Target Transform.");
             }
 
-            if (worldRenderer == null)
-            {
-                throw new MissingReferenceException(
-                    "WorldManager requires an assigned Renderer.");
-            }
-
-            ConfigureEntityFactories();
-
-            ActivatePreparedWorldAsset(
-                nextAsset,
-                WorldRuntime.CreatePrepared(nextAsset.Data),
-                markDirty);
+            streamingTarget.position = position;
         }
 
-        private void ActivatePreparedWorldAsset(
-            WorldDataAsset nextAsset,
-            WorldRuntime runtime,
-            bool markDirty)
+        public void SetDebuggerPatternMapDemand(PatternTileBounds bounds)
         {
-            if (nextAsset == null)
+            if (streamingCoordinator == null)
             {
-                throw new ArgumentNullException(nameof(nextAsset));
+                throw new InvalidOperationException(
+                    "Pattern Map preparation requires an active World Runtime.");
             }
 
-            if (runtime == null || !ReferenceEquals(runtime.Data, nextAsset.Data))
-            {
-                throw new ArgumentException(
-                    "The prepared runtime does not belong to the supplied world asset.",
-                    nameof(runtime));
-            }
-
-            var previousAsset = currentWorldDataAsset;
-            UnbindRuntime();
-            BindRuntime(runtime);
-            currentWorldDataAsset = nextAsset;
-            CurrentWorldRuntime = runtime;
-
-            SetDirty(markDirty);
-            WorldChanged?.Invoke(currentWorldDataAsset);
-            if (previousAsset != nextAsset)
-            {
-                ReleaseRuntimeAsset(previousAsset);
-            }
+            streamingCoordinator.SetDebuggerPrepareDemand(bounds);
         }
 
-        private void Update()
+        public void ClearDebuggerPatternMapDemand()
         {
-            var operation = activeWorldOperation;
-            if (operation == null)
-            {
-                return;
-            }
-
-            operation.Update();
-            PublishOperationProgress(operation);
-            if (operation.IsFailed)
-            {
-                Debug.LogException(operation.Failure, this);
-                FinishWorldOperation(operation);
-                return;
-            }
-
-            if (!operation.IsReadyForActivation)
-            {
-                return;
-            }
-
-            if (!operation.IsPresentationStageStarted)
-            {
-                operation.BeginPresentationStage(
-                    operation.Kind == WorldOperationKind.Generate
-                        ? WorldOperationStage.ChunkData
-                        : WorldOperationStage.Mesh);
-                PublishOperationProgress(operation);
-                return;
-            }
-
-            try
-            {
-                var runtime = operation.PreparedRuntime;
-                if (!operation.IsActivated)
-                {
-                    var asset = CreateRuntimeAsset(
-                        runtime.Data,
-                        operation.Kind == WorldOperationKind.Load
-                            ? Path.GetFileNameWithoutExtension(
-                                ((WorldLoadOperation)operation).Path)
-                            : $"World {runtime.Data.Seed}");
-                    ActivatePreparedWorldAsset(
-                        asset,
-                        runtime,
-                        markDirty: operation.Kind == WorldOperationKind.Generate);
-                    operation.MarkActivated();
-                    PublishOperationProgress(operation);
-                    return;
-                }
-
-                if (operation.Kind == WorldOperationKind.Generate
-                    && !runtime.IsTerrainRenderDemandComplete(
-                        out var completedChunkCount,
-                        out var chunkCount))
-                {
-                    if (chunkCount > 0)
-                    {
-                        operation.ReportChunkDataProgress(
-                            completedChunkCount,
-                            chunkCount);
-                        PublishOperationProgress(operation);
-                    }
-                    return;
-                }
-
-                if (operation.Kind == WorldOperationKind.Generate)
-                {
-                    saveController.ClearActiveSavePath();
-                    Debug.Log("[WorldStartup] Initial terrain streaming complete", this);
-                }
-                else
-                {
-                    saveController.SetActiveSavePath(
-                        ((WorldLoadOperation)operation).Path);
-                }
-
-                operation.Complete();
-                PublishOperationProgress(operation);
-                FinishWorldOperation(operation);
-            }
-            catch (Exception exception)
-            {
-                operation.FailBeforeActivation(exception);
-                PublishOperationProgress(operation);
-                Debug.LogException(exception, this);
-                FinishWorldOperation(operation);
-            }
+            streamingCoordinator?.ClearDebuggerPrepareDemand();
         }
 
-        private bool GenerateWorldImmediately()
+        public bool TryGetPatternTile(
+            PatternTileKey key,
+            out PatternTilePair tile)
         {
-            try
+            if (CurrentWorldRuntime != null)
             {
-                var generatedAsset = generator.GenerateDataAsset();
-                saveController.ClearActiveSavePath();
-                ActivateWorldAsset(
-                    generatedAsset,
-                    markDirty: true);
-                return true;
+                return CurrentWorldRuntime.PatternMaps.TryGetPair(key, out tile);
             }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception, this);
-                return false;
-            }
+
+            tile = default;
+            return false;
         }
 
-        private bool LoadWorldImmediately(string path)
+        public bool TryGetTerrainPatternTile(
+            PatternTileKey key,
+            out TerrainPatternTile tile)
         {
-            try
+            if (CurrentWorldRuntime != null)
             {
-                var loadedAsset = saveController.LoadDataAsset(path);
-                ActivateWorldAsset(
-                    loadedAsset,
-                    markDirty: false);
-                return true;
+                return CurrentWorldRuntime.PatternMaps.TryGetTerrain(key, out tile);
             }
-            catch (Exception exception)
-            {
-                Debug.LogException(exception, this);
-                return false;
-            }
+
+            tile = null;
+            return false;
         }
 
-        private bool StartWorldOperation(WorldOperation operation)
+        public bool TryGetHydrologyPatternTile(
+            PatternTileKey key,
+            out HydrologyPatternTile tile)
         {
-            if (activeWorldOperation != null)
+            if (CurrentWorldRuntime != null)
             {
-                Debug.LogWarning(
-                    "A world generation or load operation is already running.",
-                    this);
-                operation.Dispose();
-                return false;
+                return CurrentWorldRuntime.PatternMaps.TryGetHydrology(key, out tile);
             }
 
-            activeWorldOperation = operation;
-            return true;
-        }
-
-        private void PublishOperationProgress(WorldOperation operation)
-        {
-            if (operation != activeWorldOperation
-                || !operation.TryConsumeProgressChange(out var progress))
-            {
-                return;
-            }
-
-            OperationProgressChanged?.Invoke(progress);
-        }
-
-        private void FinishWorldOperation(WorldOperation operation)
-        {
-            if (operation != activeWorldOperation)
-            {
-                return;
-            }
-
-            operation.Dispose();
-            activeWorldOperation = null;
-        }
-
-        private void CancelActiveWorldOperation()
-        {
-            if (activeWorldOperation == null)
-            {
-                return;
-            }
-
-            activeWorldOperation.Dispose();
-            activeWorldOperation = null;
-            OperationProgressChanged?.Invoke(default);
-        }
-
-        private static WorldDataAsset CreateRuntimeAsset(
-            WorldData world,
-            string assetName)
-        {
-            var asset = ScriptableObject.CreateInstance<WorldDataAsset>();
-            asset.name = assetName;
-            asset.hideFlags = HideFlags.DontSave;
-            asset.Initialize(world, captureSerializedData: false);
-            return asset;
-        }
-
-        private bool TryValidateReferences()
-        {
-            if (generator != null
-                && editController != null
-                && waterFlowController != null
-                && worldRenderer != null
-                && streamingController != null
-                && entityManager != null
-                && saveController != null)
-            {
-                return true;
-            }
-
-            Debug.LogError(
-                "WorldManager requires assigned Generation, Editing, Water Flow, " +
-                "Renderer, Streaming, Entity Manager, and Save components.",
-                this);
+            tile = null;
             return false;
         }
 
@@ -530,21 +176,103 @@ namespace MiniCivilization.World.Runtime
             DirtyStateChanged?.Invoke(value);
         }
 
-        private static void ReleaseRuntimeAsset(WorldDataAsset asset)
+        private void OnDestroy()
         {
-            if (asset == null || (asset.hideFlags & HideFlags.DontSave) == 0)
+            DisposeStreamingCoordinator();
+            UnbindRuntime();
+        }
+
+        private void CreateSemanticWorld()
+        {
+            if (worldGenerationSettings == null)
+            {
+                throw new InvalidOperationException(
+                    "World Manager requires World Generation Settings.");
+            }
+
+            if (streamingTarget == null)
+            {
+                throw new InvalidOperationException(
+                    "World Manager requires a Streaming Target Transform.");
+            }
+
+            if (CurrentWorldRuntime != null)
+            {
+                UnloadWorld();
+            }
+
+            semanticConfiguration = worldGenerationSettings.CreateConfiguration();
+            var runtime = WorldRuntime.CreateStreaming(
+                new WorldData(semanticConfiguration.World));
+            try
+            {
+                CurrentWorldRuntime = runtime;
+                BindRuntime(runtime);
+                streamingCoordinator = new PatternStreamingCoordinator(
+                    runtime,
+                    semanticConfiguration);
+                streamingCoordinator.ProgressChanged += OnStreamingProgressChanged;
+                OnStreamingProgressChanged(streamingCoordinator.Progress);
+                var target = ResolveStreamingTargetChunk();
+                worldRenderer?.SetStreamingPriorityTarget(target);
+                streamingCoordinator.Update(target);
+                WorldChanged?.Invoke();
+            }
+            catch
+            {
+                DisposeStreamingCoordinator();
+                UnbindRuntime();
+                CurrentWorldRuntime = null;
+                semanticConfiguration = null;
+                throw;
+            }
+        }
+
+        private void DisposeStreamingCoordinator()
+        {
+            if (streamingCoordinator != null)
+            {
+                streamingCoordinator.ProgressChanged -= OnStreamingProgressChanged;
+                streamingCoordinator.Dispose();
+                streamingCoordinator = null;
+            }
+
+            OnStreamingProgressChanged(default);
+        }
+
+        private void OnStreamingProgressChanged(WorldStreamingProgress progress)
+        {
+            if (streamingProgress.Equals(progress))
             {
                 return;
             }
 
-            if (Application.isPlaying) Destroy(asset);
-            else DestroyImmediate(asset);
+            streamingProgress = progress;
+            StreamingProgressChanged?.Invoke(progress);
         }
 
-        private void OnDestroy()
+        private ChunkCoordinate ResolveStreamingTargetChunk()
         {
-            CancelActiveWorldOperation();
-            UnbindRuntime();
+            var world = CurrentWorldData;
+            if (world == null || streamingTarget == null)
+            {
+                throw new InvalidOperationException(
+                    "Streaming Target resolution requires an active World Runtime.");
+            }
+
+            var position = streamingTarget.position;
+            if (!float.IsFinite(position.x) || !float.IsFinite(position.z))
+            {
+                throw new InvalidOperationException(
+                    "Streaming Target position must be finite.");
+            }
+
+            var cellX = checked((int)MathF.Floor(position.x / world.CellSize));
+            var cellZ = checked((int)MathF.Floor(position.z / world.CellSize));
+            return WorldCoordinateUtility.ToChunk(
+                cellX,
+                cellZ,
+                world.ChunkSizeX);
         }
 
         private void BindRuntime(WorldRuntime runtime)
@@ -555,7 +283,6 @@ namespace MiniCivilization.World.Runtime
                 waterFlowController.Bind(runtime);
                 worldRenderer.Bind(runtime);
                 entityManager.Bind(runtime);
-                streamingController.Bind(runtime, worldRenderer.RenderRoot);
 
                 editController.ChangeCommitted += OnEditChanged;
                 waterFlowController.ChangeCommitted += OnWaterChanged;
@@ -571,8 +298,6 @@ namespace MiniCivilization.World.Runtime
 
         private void UnbindRuntime()
         {
-            streamingController?.Unbind();
-
             if (editController != null)
             {
                 editController.ChangeCommitted -= OnEditChanged;
@@ -615,17 +340,6 @@ namespace MiniCivilization.World.Runtime
 
         private void OnWaterStateChanged(WaterFlowState state) =>
             worldRenderer.SetWaterFlowState(state);
-
-        private void ConfigureEntityFactories()
-        {
-            if (entityManager == null)
-            {
-                throw new MissingReferenceException(
-                    "WorldManager requires an Entity Manager.");
-            }
-
-            entityManager.ConfigureEntityFactories();
-        }
 
         private void OnEntityChanged(EntityChangeSet changeSet)
         {
