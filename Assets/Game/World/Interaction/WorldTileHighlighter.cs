@@ -146,7 +146,7 @@ namespace MiniCivilization.World.Interaction
 
         private void OnEditPreviewChanged() => instancesDirty = true;
 
-        private void OnWorldChanged(WorldDataAsset _)
+        private void OnWorldChanged()
         {
             ClearMatrices();
             selectionState?.Clear();

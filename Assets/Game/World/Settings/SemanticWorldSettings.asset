@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 97ee88ecba994e4fa37d4f1ee7f1ef1b, type: 3}
+  m_Name: WorldGenerationSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Semantic.SemanticWorldSettings
+  seed: 0
+  worldType: 1
+  cellSize: 1
+  chunkCellCountXZ: 8
+  chunkSectionCellCountY: 10
+  initialChunkCountXZ: 15
+  chunkSectionCountY: 10
+  renderChunksPerPatch: 1
+  roadMaxHeightSteps: 5
+  pondMaximumArea: 72
+  spreadAmountLoss: 0.01
+  minimumSpreadAmount: 0.05
+  dissipationAmountLoss: 0.05
+  updateRangeChunks: 5
+  renderRangeChunks: 7
+  prepareRangeChunks: 10
+  chunkMaterializationsPerFrame: 1
+  maximumConcurrentTileBuilds: 2
+  terrain: {fileID: 11400000, guid: 02c64171b2294cf4951c0624d7948638, type: 2}
+  hydrology: {fileID: 11400000, guid: 6fc8ee87425c4800b4e1d76ffeba57c1, type: 2}

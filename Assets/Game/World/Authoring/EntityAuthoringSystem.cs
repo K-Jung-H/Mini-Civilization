@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using MiniCivilization.World.Generation;
 using MiniCivilization.World.Presentation;
 using UnityEngine;
 
@@ -11,8 +10,8 @@ namespace MiniCivilization.World.Authoring
         [SerializeField]
         private EntityAuthoringCellBox cellBoxPrefab;
 
-        [SerializeField]
-        private WorldGenerationSettings worldSettings;
+        [SerializeField, Min(float.Epsilon)]
+        private float cellSize = 1f;
 
         [SerializeField]
         private EntityController entityPrefab;
@@ -41,11 +40,8 @@ namespace MiniCivilization.World.Authoring
         private EntityController previewInstance;
 
         public EntityAuthoringCellBox CellBoxPrefab => cellBoxPrefab;
-        public WorldGenerationSettings WorldSettings => worldSettings;
         public EntityController EntityPrefab => entityPrefab;
-        public float CellSize => worldSettings != null
-            ? worldSettings.CellSize
-            : 1f;
+        public float CellSize => cellSize;
         public Vector3Int GridSize => gridSize;
 
         internal EntityAuthoringCellBox PooledPrefab
@@ -90,6 +86,7 @@ namespace MiniCivilization.World.Authoring
 
         private void OnValidate()
         {
+            cellSize = Mathf.Max(float.Epsilon, cellSize);
             NormalizeSettings();
         }
     }

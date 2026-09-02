@@ -1,0 +1,241 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e4c7e68f2b7942819d2c354bff7198b6, type: 3}
+  m_Name: SemanticTerrainPatternSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Semantic.SemanticTerrainPatternSettings
+  patternTileChunkSpan: 1
+  terrainBaseHeightCells: 32
+  noiseRouter:
+    continentalness:
+      mode: 0
+      scale: 0.004
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.4
+      octaveSeedStride: 1013
+    erosion:
+      mode: 0
+      scale: 0.0055
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.4
+      octaveSeedStride: 1013
+  region:
+    sizeCells: 128
+    centerJitter: 0.35
+    warpField:
+      mode: 1
+      scale: 0.0025
+      layers: 3
+      frequencySpacing: 2
+      persistence: 0.5
+      octaveSeedStride: 1013
+    warpStrengthCells: 24
+    boundaryBlendCells: 10
+    interiorReachRatio: 0.35
+    smoothShare: 0.24
+    ruggedShare: 0.24
+    mountainShare: 0.2
+    canyonShare: 0.16
+    seaShare: 0.16
+  baseSurface:
+    surfaceByContinentalness:
+      atZero: -5
+      atQuarter: -2
+      atHalf: 0
+      atThreeQuarters: 3
+      atOne: 6
+    surfaceByErosion:
+      atZero: 2
+      atQuarter: 1
+      atHalf: 0
+      atThreeQuarters: -1
+      atOne: -2
+  smooth:
+    domainWarp:
+      field:
+        mode: 1
+        scale: 0.006
+        layers: 3
+        frequencySpacing: 2
+        persistence: 0.45
+        octaveSeedStride: 1013
+      strengthCells: 10
+    shapeField:
+      mode: 0
+      scale: 0.012
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.45
+      octaveSeedStride: 1013
+    shapeResponse:
+      atZero: -1
+      atQuarter: -0.45
+      atHalf: 0
+      atThreeQuarters: 0.45
+      atOne: 1
+    shapeAmplitudeCells:
+      minimum: 1.5
+      maximum: 4
+    detailField:
+      mode: 1
+      scale: 0.055
+      layers: 3
+      frequencySpacing: 2
+      persistence: 0.4
+      octaveSeedStride: 1013
+    detailAmplitudeCells:
+      minimum: 0.1
+      maximum: 0.5
+  rugged:
+    domainWarp:
+      field:
+        mode: 1
+        scale: 0.007
+        layers: 3
+        frequencySpacing: 2
+        persistence: 0.45
+        octaveSeedStride: 1013
+      strengthCells: 14
+    shapeField:
+      mode: 2
+      scale: 0.018
+      layers: 5
+      frequencySpacing: 2
+      persistence: 0.48
+      octaveSeedStride: 1013
+    shapeResponse:
+      atZero: -1
+      atQuarter: -0.5
+      atHalf: 0
+      atThreeQuarters: 0.5
+      atOne: 1
+    shapeAmplitudeCells:
+      minimum: 4
+      maximum: 10
+    detailField:
+      mode: 3
+      scale: 0.075
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.42
+      octaveSeedStride: 1013
+    detailAmplitudeCells:
+      minimum: 0.4
+      maximum: 1.5
+  mountain:
+    domainWarp:
+      field:
+        mode: 1
+        scale: 0.0045
+        layers: 4
+        frequencySpacing: 2
+        persistence: 0.48
+        octaveSeedStride: 1013
+      strengthCells: 24
+    massField:
+      mode: 0
+      scale: 0.006
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.5
+      octaveSeedStride: 1013
+    massResponse:
+      atZero: 0.12
+      atQuarter: 0.28
+      atHalf: 0.55
+      atThreeQuarters: 0.82
+      atOne: 1
+    heightCells:
+      minimum: 22
+      maximum: 46
+    ridgeField:
+      mode: 2
+      scale: 0.018
+      layers: 5
+      frequencySpacing: 2
+      persistence: 0.48
+      octaveSeedStride: 1013
+    ridgeResponse:
+      atZero: 0
+      atQuarter: 0.12
+      atHalf: 0.42
+      atThreeQuarters: 0.78
+      atOne: 1
+    ridgeStrengthCells:
+      minimum: 6
+      maximum: 18
+    detailField:
+      mode: 1
+      scale: 0.06
+      layers: 3
+      frequencySpacing: 2
+      persistence: 0.42
+      octaveSeedStride: 1013
+    detailAmplitudeCells:
+      minimum: 0.5
+      maximum: 2.5
+  canyon:
+    domainWarp:
+      field:
+        mode: 1
+        scale: 0.006
+        layers: 4
+        frequencySpacing: 2
+        persistence: 0.48
+        octaveSeedStride: 1013
+      strengthCells: 28
+    basinField:
+      mode: 0
+      scale: 0.006
+      layers: 4
+      frequencySpacing: 2
+      persistence: 0.5
+      octaveSeedStride: 1013
+    basinResponse:
+      atZero: 0.25
+      atQuarter: 0.38
+      atHalf: 0.55
+      atThreeQuarters: 0.72
+      atOne: 0.88
+    basinDepthRatio:
+      minimum: 0.35
+      maximum: 0.65
+    valleyField:
+      mode: 2
+      scale: 0.025
+      layers: 5
+      frequencySpacing: 2
+      persistence: 0.5
+      octaveSeedStride: 1013
+    valleyResponse:
+      atZero: 0
+      atQuarter: 0.05
+      atHalf: 0.32
+      atThreeQuarters: 0.72
+      atOne: 1
+    valleyDepthRatio:
+      minimum: 0.75
+      maximum: 1
+    depthCells:
+      minimum: 16
+      maximum: 32
+    detailField:
+      mode: 1
+      scale: 0.065
+      layers: 3
+      frequencySpacing: 2
+      persistence: 0.4
+      octaveSeedStride: 1013
+    detailAmplitudeCells:
+      minimum: 0.1
+      maximum: 0.6

@@ -2,8 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
-using MiniCivilization.World.Generation;
-using MiniCivilization.World.Generation.Streaming;
+using MiniCivilization.World.Generation.Semantic;
 using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Runtime
@@ -12,25 +11,20 @@ namespace MiniCivilization.World.Runtime
     {
         private readonly Dictionary<ChunkCoordinate, ChunkRuntime>
             chunkRuntimes = new();
-        private readonly List<ChunkCoordinate> removedChunks = new();
-        private readonly List<CellCoordinate> generatedWaterSources = new();
-        private readonly ChunkStreamingCoordinator streamingCoordinator;
-        private StreamingChunkDemand streamingDemand = StreamingChunkDemand.Empty;
-        private bool derivedDataRefreshPending;
-        private bool simulationStateChangedPending;
 
         private WorldRuntime(WorldData data)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
             SurfaceCache = new SurfaceCache(data);
             NavigationCache = new NavigationCache(data, SurfaceCache);
-            streamingCoordinator = new ChunkStreamingCoordinator(data);
+            PatternMaps = new PatternMapStore();
             Context = new WorldContext(this);
         }
 
         public WorldData Data { get; }
         public SurfaceCache SurfaceCache { get; }
         public NavigationCache NavigationCache { get; }
+        public PatternMapStore PatternMaps { get; }
         public WorldContext Context { get; }
         public WaterFlowState WaterFlowState { get; private set; }
         internal WaterFlowResolver WaterFlowResolver { get; private set; }
@@ -47,6 +41,11 @@ namespace MiniCivilization.World.Runtime
         public event Action<ChunkRuntime> EntityRenderStateChanged;
 
         public static WorldRuntime CreatePrepared(WorldData data)
+        {
+            return CreateStreaming(data);
+        }
+
+        public static WorldRuntime CreateStreaming(WorldData data)
         {
             if (data == null)
             {
@@ -73,11 +72,310 @@ namespace MiniCivilization.World.Runtime
             return runtime;
         }
 
+        internal void BeginChunkPreparation(ChunkCoordinate coordinate)
+        {
+            if (!Data.IsChunkWithinBounds(coordinate))
+            {
+                throw new ArgumentOutOfRangeException(nameof(coordinate));
+            }
+
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime))
+            {
+                chunkRuntime = new ChunkRuntime(coordinate);
+                chunkRuntimes.Add(coordinate, chunkRuntime);
+            }
+
+            if (chunkRuntime.State != ChunkState.Unloaded)
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} is not available for preparation.");
+            }
+
+            if (chunkRuntime.SetState(ChunkState.Preparing))
+            {
+                ChunkStateChanged?.Invoke(chunkRuntime);
+            }
+        }
+
+        internal void CompleteChunkPreparation(
+            ChunkCoordinate coordinate,
+            IReadOnlyList<CellCoordinate> sourceCells)
+        {
+            if (sourceCells == null)
+            {
+                throw new ArgumentNullException(nameof(sourceCells));
+            }
+
+            if (!Data.IsChunkLoaded(coordinate))
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} has no materialized WorldData.");
+            }
+
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+                || chunkRuntime.State != ChunkState.Preparing)
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} is not preparing.");
+            }
+
+            SurfaceCache.PrepareChunk(coordinate);
+            NavigationCache.PrepareChunk(
+                coordinate,
+                rebuildWaterDistances: false);
+            if (chunkRuntime.SetState(ChunkState.Ready))
+            {
+                ChunkStateChanged?.Invoke(chunkRuntime);
+            }
+
+            var waterFrontier = BuildWaterFrontier(
+                coordinate,
+                sourceCells);
+            WaterFlowResolver.EnqueueChanges(
+                Data,
+                WaterFlowState,
+                waterFrontier,
+                null);
+        }
+
+        internal void ActivateChunk(ChunkCoordinate coordinate)
+        {
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+                || chunkRuntime.State != ChunkState.Ready)
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} is not ready for activation.");
+            }
+
+            if (chunkRuntime.SetState(ChunkState.Active))
+            {
+                ChunkStateChanged?.Invoke(chunkRuntime);
+            }
+
+            if (chunkRuntime.SetTerrainRenderingEnabled(true))
+            {
+                TerrainRenderStateChanged?.Invoke(chunkRuntime);
+            }
+
+            SimulationStateChanged?.Invoke();
+        }
+
+        internal void SetChunkSimulationEnabled(
+            ChunkCoordinate coordinate,
+            bool enabled)
+        {
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+                || chunkRuntime.State != ChunkState.Active)
+            {
+                if (enabled)
+                {
+                    throw new InvalidOperationException(
+                        $"Chunk {coordinate} is not active for simulation.");
+                }
+
+                return;
+            }
+
+            if (chunkRuntime.SetSimulationEnabled(enabled))
+            {
+                SimulationStateChanged?.Invoke();
+            }
+        }
+
+        internal void ReleaseChunk(ChunkCoordinate coordinate)
+        {
+            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+                || chunkRuntime.State == ChunkState.Unloaded)
+            {
+                return;
+            }
+
+            var simulationChanged = chunkRuntime.SimulationEnabled;
+            if (chunkRuntime.State == ChunkState.Active)
+            {
+                chunkRuntime.SetSimulationEnabled(false);
+                if (chunkRuntime.SetTerrainRenderingEnabled(false))
+                {
+                    TerrainRenderStateChanged?.Invoke(chunkRuntime);
+                }
+
+                if (chunkRuntime.SetState(ChunkState.Ready))
+                {
+                    ChunkStateChanged?.Invoke(chunkRuntime);
+                }
+            }
+
+            if (chunkRuntime.State == ChunkState.Preparing)
+            {
+                if (chunkRuntime.SetState(ChunkState.Unloaded))
+                {
+                    ChunkStateChanged?.Invoke(chunkRuntime);
+                }
+
+                return;
+            }
+
+            if (chunkRuntime.State != ChunkState.Ready)
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} cannot be released from {chunkRuntime.State}.");
+            }
+
+            NavigationCache.ReleaseChunk(
+                coordinate,
+                rebuildWaterDistances: false);
+            SurfaceCache.ReleaseChunk(coordinate);
+            if (chunkRuntime.SetState(ChunkState.Unloaded))
+            {
+                ChunkStateChanged?.Invoke(chunkRuntime);
+            }
+
+            if (simulationChanged)
+            {
+                SimulationStateChanged?.Invoke();
+            }
+        }
+
         internal void RebuildWayPointGraph()
         {
             RoadTopology = WorldRoadTopology.Build(this, Entities);
-            WayPointGraph = WorldWayPointGraph.Build(this, Entities, RoadTopology);
+            WayPointGraph = WorldWayPointGraph.Build(
+                this,
+                Entities,
+                RoadTopology);
             Entities.RestoreBuildingWayLocations(WayPointGraph);
+        }
+
+        private IReadOnlyList<CellCoordinate> BuildWaterFrontier(
+            ChunkCoordinate coordinate,
+            IReadOnlyList<CellCoordinate> sourceCells)
+        {
+            var candidates = new HashSet<CellCoordinate>();
+            for (var index = 0; index < sourceCells.Count; index++)
+            {
+                candidates.Add(sourceCells[index]);
+            }
+
+            AddBoundaryWaterCells(coordinate, candidates);
+            var frontier = new List<CellCoordinate>(candidates.Count);
+            foreach (var candidate in candidates)
+            {
+                if (Data.TryGetCell(
+                        candidate.X,
+                        candidate.Y,
+                        candidate.Z,
+                        out var cell)
+                    && cell.HasWater
+                    && (cell.Water.Role != WaterRole.Source
+                        || WaterSourceFrontierSelector.IsNeeded(
+                            Data,
+                            candidate)))
+                {
+                    frontier.Add(candidate);
+                }
+            }
+
+            frontier.Sort();
+            return frontier;
+        }
+
+        private void AddBoundaryWaterCells(
+            ChunkCoordinate coordinate,
+            ISet<CellCoordinate> candidates)
+        {
+            AddBoundaryWaterCells(
+                coordinate,
+                coordinate.X * Data.ChunkSizeX,
+                coordinate.Z * Data.ChunkSizeZ,
+                -1,
+                0,
+                candidates);
+            AddBoundaryWaterCells(
+                coordinate,
+                coordinate.X * Data.ChunkSizeX,
+                coordinate.Z * Data.ChunkSizeZ,
+                1,
+                0,
+                candidates);
+            AddBoundaryWaterCells(
+                coordinate,
+                coordinate.X * Data.ChunkSizeX,
+                coordinate.Z * Data.ChunkSizeZ,
+                0,
+                -1,
+                candidates);
+            AddBoundaryWaterCells(
+                coordinate,
+                coordinate.X * Data.ChunkSizeX,
+                coordinate.Z * Data.ChunkSizeZ,
+                0,
+                1,
+                candidates);
+        }
+
+        private void AddBoundaryWaterCells(
+            ChunkCoordinate coordinate,
+            int startX,
+            int startZ,
+            int directionX,
+            int directionZ,
+            ISet<CellCoordinate> candidates)
+        {
+            var neighbor = new ChunkCoordinate(
+                coordinate.X + directionX,
+                coordinate.Z + directionZ);
+            if (!Data.IsChunkLoaded(neighbor))
+            {
+                return;
+            }
+
+            var currentX = directionX < 0 ? startX :
+                directionX > 0 ? startX + Data.ChunkSizeX - 1 : 0;
+            var currentZ = directionZ < 0 ? startZ :
+                directionZ > 0 ? startZ + Data.ChunkSizeZ - 1 : 0;
+            var neighborX = currentX + directionX;
+            var neighborZ = currentZ + directionZ;
+            var span = directionX == 0 ? Data.ChunkSizeX : Data.ChunkSizeZ;
+            for (var offset = 0; offset < span; offset++)
+            {
+                var currentColumnX = directionX == 0
+                    ? startX + offset
+                    : currentX;
+                var currentColumnZ = directionZ == 0
+                    ? startZ + offset
+                    : currentZ;
+                var neighborColumnX = directionX == 0
+                    ? startX + offset
+                    : neighborX;
+                var neighborColumnZ = directionZ == 0
+                    ? startZ + offset
+                    : neighborZ;
+                for (var y = 0; y < Data.Height; y++)
+                {
+                    AddWaterCell(
+                        currentColumnX,
+                        y,
+                        currentColumnZ,
+                        candidates);
+                    AddWaterCell(
+                        neighborColumnX,
+                        y,
+                        neighborColumnZ,
+                        candidates);
+                }
+            }
+        }
+
+        private void AddWaterCell(
+            int x,
+            int y,
+            int z,
+            ISet<CellCoordinate> candidates)
+        {
+            if (Data.TryGetCell(x, y, z, out var cell) && cell.HasWater)
+            {
+                candidates.Add(new CellCoordinate(x, y, z));
+            }
         }
 
         internal bool AffectsWayPointGraph(WorldChangeSet changeSet)
@@ -125,7 +423,8 @@ namespace MiniCivilization.World.Runtime
 
         internal WorldChangeId AdvanceChangeId()
         {
-            CurrentChangeId = new WorldChangeId(checked(CurrentChangeId.Value + 1));
+            CurrentChangeId = new WorldChangeId(
+                checked(CurrentChangeId.Value + 1));
             return CurrentChangeId;
         }
 
@@ -134,8 +433,7 @@ namespace MiniCivilization.World.Runtime
             out ChunkRuntime chunkRuntime) =>
             chunkRuntimes.TryGetValue(coordinate, out chunkRuntime);
 
-        public ChunkState GetChunkState(
-            ChunkCoordinate coordinate) =>
+        public ChunkState GetChunkState(ChunkCoordinate coordinate) =>
             chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
                 ? chunkRuntime.State
                 : ChunkState.Unloaded;
@@ -147,7 +445,9 @@ namespace MiniCivilization.World.Runtime
                 Data.ChunkSizeX));
 
         public bool IsSimulationActive(ChunkCoordinate coordinate) =>
-            GetChunkState(coordinate) == ChunkState.Active;
+            chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
+            && chunkRuntime.State == ChunkState.Active
+            && chunkRuntime.SimulationEnabled;
 
         internal bool CanSimulateWaterCell(CellCoordinate cell)
         {
@@ -160,51 +460,8 @@ namespace MiniCivilization.World.Runtime
                 cell.X,
                 cell.Z,
                 Data.ChunkSizeX);
-            if (!IsSimulationActive(chunk))
-            {
-                return false;
-            }
-
-            var localX = WorldCoordinateUtility.PositiveModulo(
-                cell.X,
-                Data.ChunkSizeX);
-            var localZ = WorldCoordinateUtility.PositiveModulo(
-                cell.Z,
-                Data.ChunkSizeZ);
-            if (localX == 0
-                && IsUnavailableSimulationNeighbor(new ChunkCoordinate(
-                    chunk.X - 1,
-                    chunk.Z)))
-            {
-                return false;
-            }
-
-            if (localX == Data.ChunkSizeX - 1
-                && IsUnavailableSimulationNeighbor(new ChunkCoordinate(
-                    chunk.X + 1,
-                    chunk.Z)))
-            {
-                return false;
-            }
-
-            if (localZ == 0
-                && IsUnavailableSimulationNeighbor(new ChunkCoordinate(
-                    chunk.X,
-                    chunk.Z - 1)))
-            {
-                return false;
-            }
-
-            return localZ != Data.ChunkSizeZ - 1
-                || !IsUnavailableSimulationNeighbor(new ChunkCoordinate(
-                    chunk.X,
-                    chunk.Z + 1));
+            return IsSimulationActive(chunk);
         }
-
-        private bool IsUnavailableSimulationNeighbor(
-            ChunkCoordinate coordinate) =>
-            Data.IsChunkWithinBounds(coordinate)
-            && !IsSimulationActive(coordinate);
 
         public bool IsEntityRenderingEnabled(ChunkCoordinate coordinate) =>
             chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
@@ -214,261 +471,12 @@ namespace MiniCivilization.World.Runtime
             SurfaceCache.IsPrepared(coordinate)
             && NavigationCache.IsPrepared(coordinate);
 
-        internal bool IsTerrainRenderDemandComplete(
-            out int completedChunkCount,
-            out int chunkCount)
-        {
-            completedChunkCount = 0;
-            var terrainRenderChunks = streamingDemand.TerrainRenderChunks;
-            chunkCount = terrainRenderChunks.Count;
-            if (chunkCount == 0)
-            {
-                return false;
-            }
-
-            foreach (var coordinate in terrainRenderChunks)
-            {
-                if (Data.IsChunkLoaded(coordinate))
-                {
-                    completedChunkCount++;
-                }
-            }
-
-            return completedChunkCount == chunkCount;
-        }
-
         internal bool IsChunkPrepared(int cellX, int cellZ) =>
             Data.IsColumnLoaded(cellX, cellZ)
             && IsChunkPrepared(WorldCoordinateUtility.ToChunk(
                 cellX,
                 cellZ,
                 Data.ChunkSizeX));
-
-        internal StreamingPatternMapSession OpenPatternMapSession(
-            in WorldCellRectangle rectangle) =>
-            streamingCoordinator.OpenPatternMapSession(rectangle);
-
-        internal void UpdateStreamingChunks(
-            ChunkCoordinate center,
-            int renderRadius,
-            int entityRenderRadius,
-            int simulationRadius)
-        {
-            if (renderRadius < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(renderRadius));
-            }
-
-            if (entityRenderRadius < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(entityRenderRadius));
-            }
-
-            if (simulationRadius < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(simulationRadius));
-            }
-
-            streamingDemand = StreamingChunkDemandBuilder.Build(
-                Data,
-                new StreamingRequest(
-                    center,
-                    renderRadius,
-                    entityRenderRadius,
-                    simulationRadius));
-
-            removedChunks.Clear();
-            foreach (var pair in chunkRuntimes)
-            {
-                if (!streamingDemand.IsPrepared(pair.Key))
-                {
-                    removedChunks.Add(pair.Key);
-                }
-            }
-
-            var cacheSetChanged = false;
-            for (var index = 0; index < removedChunks.Count; index++)
-            {
-                cacheSetChanged |= UnloadChunk(
-                    removedChunks[index],
-                    rebuildWaterDistances: false);
-            }
-
-            foreach (var coordinate in streamingDemand.PreparedChunks)
-            {
-                if (!chunkRuntimes.TryGetValue(
-                        coordinate,
-                        out var chunkRuntime))
-                {
-                    if (!Data.IsChunkLoaded(coordinate))
-                    {
-                        continue;
-                    }
-
-                    chunkRuntime = PrepareChunkRuntime(coordinate);
-                    cacheSetChanged = true;
-                }
-
-                ApplyDesiredChunkState(chunkRuntime);
-            }
-
-            if (cacheSetChanged)
-            {
-                RefreshDerivedData();
-            }
-
-            streamingCoordinator.SetDemand(streamingDemand);
-            RefreshDerivedDataWhenReady();
-            FlushSimulationStateChanged();
-        }
-
-        internal void ProcessStreamingWork(int maximumChunkApplications)
-        {
-            if (maximumChunkApplications <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(maximumChunkApplications));
-            }
-
-            var applied = 0;
-            while (applied < maximumChunkApplications
-                   && streamingCoordinator.TryTakeCompleted(out var build))
-            {
-                if (streamingCoordinator.IsPrepared(build.Coordinate)
-                    && !Data.IsChunkLoaded(build.Coordinate))
-                {
-                    WorldDataBuilder.ApplyChunk(Data, build);
-                    EnqueueGeneratedWaterSources(build.Coordinate);
-                    var chunkRuntime = PrepareChunkRuntime(build.Coordinate);
-                    ApplyDesiredChunkState(chunkRuntime);
-                    derivedDataRefreshPending = true;
-                    applied++;
-                }
-            }
-
-            ApplyAllDesiredChunkStates();
-            RefreshDerivedDataWhenReady();
-            FlushSimulationStateChanged();
-        }
-
-        private ChunkRuntime PrepareChunkRuntime(ChunkCoordinate coordinate)
-        {
-            if (chunkRuntimes.TryGetValue(coordinate, out var existing))
-            {
-                return existing;
-            }
-
-            var chunkRuntime = new ChunkRuntime(coordinate);
-            chunkRuntimes.Add(coordinate, chunkRuntime);
-            ChangeChunkState(chunkRuntime, ChunkState.Preparing);
-            SurfaceCache.PrepareChunk(coordinate);
-            NavigationCache.PrepareChunk(
-                coordinate,
-                rebuildWaterDistances: false);
-            ChangeChunkState(chunkRuntime, ChunkState.Ready);
-            return chunkRuntime;
-        }
-
-        private void ApplyAllDesiredChunkStates()
-        {
-            foreach (var coordinate in streamingDemand.PreparedChunks)
-            {
-                if (chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime))
-                {
-                    ApplyDesiredChunkState(chunkRuntime);
-                }
-            }
-        }
-
-        private void ApplyDesiredChunkState(ChunkRuntime chunkRuntime)
-        {
-            var coordinate = chunkRuntime.Coordinate;
-            var shouldBeActive = streamingDemand.IsActive(coordinate);
-            if (chunkRuntime.State == ChunkState.Ready && shouldBeActive)
-            {
-                ChangeChunkState(chunkRuntime, ChunkState.Active);
-            }
-            else if (chunkRuntime.State == ChunkState.Active && !shouldBeActive)
-            {
-                ChangeChunkState(chunkRuntime, ChunkState.Ready);
-            }
-
-            ChangeTerrainRenderState(
-                chunkRuntime,
-                streamingDemand.IsTerrainRendering(coordinate)
-                && HasPreparedTerrainTopology(coordinate));
-            ChangeEntityRenderState(
-                chunkRuntime,
-                streamingDemand.IsEntityRendering(coordinate));
-        }
-
-        private bool HasPreparedTerrainTopology(ChunkCoordinate coordinate)
-        {
-            for (var z = coordinate.Z - 1; z <= coordinate.Z + 1; z++)
-            for (var x = coordinate.X - 1; x <= coordinate.X + 1; x++)
-            {
-                var neighbor = new ChunkCoordinate(x, z);
-                if (Data.IsChunkWithinBounds(neighbor)
-                    && !IsChunkPrepared(neighbor))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private void RefreshDerivedDataWhenReady()
-        {
-            if (!derivedDataRefreshPending
-                || streamingCoordinator.HasWork)
-            {
-                return;
-            }
-
-            RefreshDerivedData();
-        }
-
-        private void RefreshDerivedData()
-        {
-            NavigationCache.RebuildWaterDistances();
-            RebuildWayPointGraph();
-            WaterFlowState.ReplaceWaterBodies(
-                WaterBodyResolver.ResolvePrepared(this));
-            derivedDataRefreshPending = false;
-        }
-
-        private void EnqueueGeneratedWaterSources(ChunkCoordinate coordinate)
-        {
-            generatedWaterSources.Clear();
-            var startX = coordinate.X * Data.ChunkSizeX;
-            var startZ = coordinate.Z * Data.ChunkSizeZ;
-            for (var y = 0; y < Data.Height; y++)
-            for (var localZ = -1; localZ <= Data.ChunkSizeZ; localZ++)
-            for (var localX = -1; localX <= Data.ChunkSizeX; localX++)
-            {
-                var cell = new CellCoordinate(
-                    startX + localX,
-                    y,
-                    startZ + localZ);
-                if (Data.TryGetCell(cell.X, cell.Y, cell.Z, out var data)
-                    && data.HasWater
-                    && data.Water.Role == WaterRole.Source
-                    && WaterSourceFrontierSelector.IsNeeded(Data, cell))
-                {
-                    generatedWaterSources.Add(cell);
-                }
-            }
-
-            if (generatedWaterSources.Count > 0)
-            {
-                WaterFlowResolver.EnqueueChanges(
-                    Data,
-                    WaterFlowState,
-                    generatedWaterSources,
-                    null);
-            }
-        }
 
         internal bool HasTerrainRenderingInPatch(
             int patchX,
@@ -494,111 +502,6 @@ namespace MiniCivilization.World.Runtime
 
             return false;
         }
-
-        internal void ClearStreamingChunks()
-        {
-            streamingCoordinator.Clear();
-            removedChunks.Clear();
-            foreach (var coordinate in chunkRuntimes.Keys)
-            {
-                removedChunks.Add(coordinate);
-            }
-
-            var cacheSetChanged = false;
-            for (var index = 0; index < removedChunks.Count; index++)
-            {
-                cacheSetChanged |= UnloadChunk(
-                    removedChunks[index],
-                    rebuildWaterDistances: false);
-            }
-
-            if (cacheSetChanged)
-            {
-                NavigationCache.RebuildWaterDistances();
-                RebuildWayPointGraph();
-                WaterFlowState.ReplaceWaterBodies(
-                    WaterBodyResolver.ResolvePrepared(this));
-            }
-
-            streamingDemand = StreamingChunkDemand.Empty;
-            derivedDataRefreshPending = false;
-            FlushSimulationStateChanged();
-        }
-
-        private bool UnloadChunk(
-            ChunkCoordinate coordinate,
-            bool rebuildWaterDistances)
-        {
-            if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime))
-            {
-                return false;
-            }
-
-            if (chunkRuntime.State == ChunkState.Active)
-            {
-                ChangeChunkState(
-                    chunkRuntime,
-                    ChunkState.Ready);
-            }
-
-            ChangeTerrainRenderState(chunkRuntime, false);
-            ChangeEntityRenderState(chunkRuntime, false);
-
-            NavigationCache.ReleaseChunk(
-                coordinate,
-                rebuildWaterDistances);
-            SurfaceCache.ReleaseChunk(coordinate);
-            ChangeChunkState(chunkRuntime, ChunkState.Unloaded);
-            chunkRuntimes.Remove(coordinate);
-            return true;
-        }
-
-        private void ChangeChunkState(
-            ChunkRuntime chunkRuntime,
-            ChunkState state)
-        {
-            var wasActive = chunkRuntime.State == ChunkState.Active;
-            if (chunkRuntime.SetState(state))
-            {
-                ChunkStateChanged?.Invoke(chunkRuntime);
-                if (wasActive != (state == ChunkState.Active))
-                {
-                    simulationStateChangedPending = true;
-                }
-            }
-        }
-
-        private void FlushSimulationStateChanged()
-        {
-            if (!simulationStateChangedPending)
-            {
-                return;
-            }
-
-            simulationStateChangedPending = false;
-            SimulationStateChanged?.Invoke();
-        }
-
-        private void ChangeEntityRenderState(
-            ChunkRuntime chunkRuntime,
-            bool enabled)
-        {
-            if (chunkRuntime.SetEntityRenderingEnabled(enabled))
-            {
-                EntityRenderStateChanged?.Invoke(chunkRuntime);
-            }
-        }
-
-        private void ChangeTerrainRenderState(
-            ChunkRuntime chunkRuntime,
-            bool enabled)
-        {
-            if (chunkRuntime.SetTerrainRenderingEnabled(enabled))
-            {
-                TerrainRenderStateChanged?.Invoke(chunkRuntime);
-            }
-        }
-
     }
 
     public sealed class WorldContext
@@ -608,7 +511,8 @@ namespace MiniCivilization.World.Runtime
 
         internal WorldContext(WorldRuntime runtime)
         {
-            Runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+            Runtime = runtime ?? throw new ArgumentNullException(
+                nameof(runtime));
         }
 
         public CellView GetCell(CellCoordinate position)

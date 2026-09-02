@@ -23,9 +23,9 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private WorldRoadCatalogView roadCatalogView;
         [SerializeField] private RoadVisualCatalog roadVisualCatalog;
         [SerializeField] private WorldEditConfirmationView editConfirmationView;
-        [SerializeField] private WorldOperationProgressView operationProgressView;
         [SerializeField] private WorldTileInfoPresenter tileInfoPresenter;
         [SerializeField] private WorldTileInfoPanel tileInfoPanel;
+        [SerializeField] private WorldStreamingProgressView streamingProgressView;
 
         private WorldManager worldManager;
 
@@ -51,7 +51,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             worldManager = manager;
-            operationProgressView?.SetWorldManager(manager);
+            streamingProgressView?.SetWorldManager(manager);
             if (entityCatalogView != null)
             {
                 entityCatalogView.Initialize(
@@ -95,13 +95,5 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private void OnDestroy()
-        {
-            if (operationProgressView != null
-                && operationProgressView.WorldManager == worldManager)
-            {
-                operationProgressView.SetWorldManager(null);
-            }
-        }
     }
 }

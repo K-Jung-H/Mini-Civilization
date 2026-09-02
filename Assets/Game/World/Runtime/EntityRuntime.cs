@@ -179,7 +179,7 @@ namespace MiniCivilization.World.Runtime
             tickBuffer.Clear();
             foreach (var pair in runtime.ChunkRuntimes)
             {
-                if (pair.Value.State == ChunkState.Active
+                if (runtime.IsSimulationActive(pair.Key)
                     && tickEntitiesByChunk.TryGetValue(
                         pair.Key,
                         out var chunkEntities))
