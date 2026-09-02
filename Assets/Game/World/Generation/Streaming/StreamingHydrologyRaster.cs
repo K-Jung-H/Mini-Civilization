@@ -408,7 +408,7 @@ namespace MiniCivilization.World.Generation.Streaming
                 sample.Route.Id);
         }
 
-        private static WorldPatternResult Compose(
+        internal static WorldPatternResult Compose(
             WorldSettingsData settings,
             in WorldPatternResult terrain,
             in StreamingHydrologyCell hydrology)

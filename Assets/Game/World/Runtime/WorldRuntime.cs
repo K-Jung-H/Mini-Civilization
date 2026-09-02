@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using MiniCivilization.World.Generation;
+using MiniCivilization.World.Generation.Streaming;
 using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Runtime
@@ -242,6 +243,10 @@ namespace MiniCivilization.World.Runtime
                 cellX,
                 cellZ,
                 Data.ChunkSizeX));
+
+        internal StreamingPatternMapSession OpenPatternMapSession(
+            in WorldCellRectangle rectangle) =>
+            streamingCoordinator.OpenPatternMapSession(rectangle);
 
         internal void UpdateStreamingChunks(
             ChunkCoordinate center,

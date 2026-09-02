@@ -38,6 +38,8 @@ namespace MiniCivilization.World.Generation.Streaming
             riverSpatialTiles = new();
         private readonly HashSet<PlanningTileKey> leasedTiles = new();
         private readonly HashSet<ChunkCoordinate> leasedChunks = new();
+        private readonly Dictionary<int, WorldCellRectangle> patternMapLeases =
+            new();
         private readonly Dictionary<ChunkCoordinate, HashSet<PlanningTileKey>>
             chunkDependencies = new();
         private readonly Dictionary<ChunkCoordinate, HashSet<PlanningTileKey>>
@@ -45,6 +47,7 @@ namespace MiniCivilization.World.Generation.Streaming
         private HashSet<ChunkCoordinate> requestedLeaseChunks;
         private bool hasRequestedLeaseUpdate;
         private bool isBuildingRaster;
+        private int nextPatternMapLeaseId;
         private HashSet<PlanningTileKey> activeDependencies;
 
         public StreamingFeatureWorld(WorldSettingsData settings)
@@ -76,26 +79,73 @@ namespace MiniCivilization.World.Generation.Streaming
             }
         }
 
-        public void SetLeaseRectangles(IEnumerable<WorldCellRectangle> rectangles)
+        internal StreamingPatternMapSession OpenPatternMapSession(
+            in WorldCellRectangle rectangle)
         {
-            if (rectangles == null)
+            lock (gate)
             {
-                throw new ArgumentNullException(nameof(rectangles));
+                ApplyRequestedLeaseChunks();
+                var leaseId = checked(nextPatternMapLeaseId + 1);
+                nextPatternMapLeaseId = leaseId;
+                patternMapLeases.Add(leaseId, rectangle);
+                RebuildLeasedTiles();
+                return new StreamingPatternMapSession(this, rectangle, leaseId);
+            }
+        }
+
+        internal StreamingPatternMapSample SamplePatternMap(
+            StreamingHydrologyCellQuery hydrology,
+            in WorldCellRectangle rectangle,
+            int worldX,
+            int worldZ)
+        {
+            if (hydrology == null)
+            {
+                throw new ArgumentNullException(nameof(hydrology));
+            }
+
+            if (!rectangle.Contains(worldX, worldZ))
+            {
+                throw new ArgumentOutOfRangeException(nameof(worldX));
             }
 
             lock (gate)
             {
-                ClearRequestedLeaseChunks();
-                leasedChunks.Clear();
-                chunkDependencies.Clear();
-                pendingChunkDependencies.Clear();
-                var tiles = new HashSet<PlanningTileKey>();
-                foreach (var rectangle in rectangles)
+                ApplyRequestedLeaseChunks();
+                var terrainFact = SampleBaseTerrain(worldX, worldZ);
+                var hydrologyCell = hydrology.Sample(worldX, worldZ);
+                var combined = StreamingHydrologyRaster.Compose(
+                    settings,
+                    terrainFact.Terrain,
+                    hydrologyCell);
+                var hydrologyType = combined.HydrologyType != WaterType.None
+                    ? combined.HydrologyType
+                    : combined.WaterType;
+                var membership = combined.HydrologyMembership;
+                if (hydrologyType != WaterType.None && membership <= 0f)
                 {
-                    AddLeasedTiles(rectangle.Expand(DirectLeaseExtent()), tiles);
+                    membership = 1f;
                 }
 
-                ApplyLeasedTiles(tiles);
+                return new StreamingPatternMapSample(
+                    worldX,
+                    worldZ,
+                    terrainFact.Terrain,
+                    combined,
+                    hydrologyType,
+                    membership);
+            }
+        }
+
+        internal void ReleasePatternMapSession(int leaseId)
+        {
+            lock (gate)
+            {
+                if (patternMapLeases.Remove(leaseId))
+                {
+                    ApplyRequestedLeaseChunks();
+                    RebuildLeasedTiles();
+                }
             }
         }
 
@@ -1339,15 +1389,6 @@ namespace MiniCivilization.World.Generation.Streaming
             RebuildLeasedTiles();
         }
 
-        private void ClearRequestedLeaseChunks()
-        {
-            lock (leaseGate)
-            {
-                requestedLeaseChunks = null;
-                hasRequestedLeaseUpdate = false;
-            }
-        }
-
         private void RemoveReleasedChunkDependencies()
         {
             var released = new List<ChunkCoordinate>();
@@ -1372,6 +1413,11 @@ namespace MiniCivilization.World.Generation.Streaming
             {
                 AddLeasedTiles(WorldCellRectangle.FromChunk(chunk,
                     settings.ChunkCellCountXZ).Expand(DirectLeaseExtent()), tiles);
+            }
+
+            foreach (var rectangle in patternMapLeases.Values)
+            {
+                AddLeasedTiles(rectangle.Expand(DirectLeaseExtent()), tiles);
             }
 
             foreach (var pair in chunkDependencies)

@@ -813,6 +813,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.WorldTerrainPatternDebugger
   generationController: {fileID: 1900000003}
   worldManager: {fileID: 1900000002}
+  patternMapPalette: {fileID: 11400000, guid: 7d1ef5fc9ab146efb3b0a08f6ab0960c, type: 2}
 --- !u!1 &1910000020
 GameObject:
   m_ObjectHideFlags: 0

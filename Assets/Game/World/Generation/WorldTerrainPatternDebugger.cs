@@ -8,10 +8,12 @@ namespace MiniCivilization.World.Generation
     {
         [SerializeField] private WorldGenerationController generationController;
         [SerializeField] private WorldManager worldManager;
+        [SerializeField] private WorldPatternMapPalette patternMapPalette;
 
         public WorldGenerationController GenerationController =>
             generationController;
         public WorldManager WorldManager => worldManager;
+        public WorldPatternMapPalette PatternMapPalette => patternMapPalette;
         public WorldChunkStreamingController StreamingController =>
             worldManager != null ? worldManager.StreamingController : null;
 

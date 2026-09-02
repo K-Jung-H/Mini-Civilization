@@ -63,6 +63,10 @@ namespace MiniCivilization.World.Runtime
         public bool IsPrepared(ChunkCoordinate coordinate) =>
             demand.IsPrepared(coordinate);
 
+        internal StreamingPatternMapSession OpenPatternMapSession(
+            in WorldCellRectangle rectangle) =>
+            features.OpenPatternMapSession(rectangle);
+
         public void Clear()
         {
             demand = StreamingChunkDemand.Empty;
