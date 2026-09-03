@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Definitions
 {
@@ -12,12 +11,8 @@ namespace MiniCivilization.World.Definitions
         public RoadType Type = RoadType.Basic;
         public string DisplayName;
         public Sprite Thumbnail;
-        [FormerlySerializedAs("CenterMask")]
-        [FormerlySerializedAs("Turn2Mask")]
         public Texture2D CornerMask;
-        [FormerlySerializedAs("Turn1Mask")]
         public Texture2D QuarterMask;
-        [FormerlySerializedAs("HalfMask")]
         public Texture2D StraightMask;
         public SurfaceTextureProfile Surface = new();
 
@@ -68,8 +63,7 @@ namespace MiniCivilization.World.Definitions
 
         [SerializeField, Min(1)] private int textureResolution = 256;
         [SerializeField] private TextureFormat textureArrayFormat = TextureFormat.RGBA32;
-        [FormerlySerializedAs("textureArrayMipMaps")]
-        [SerializeField] private bool surfaceTextureArrayMipMaps = true;
+        [SerializeField] private bool generateSurfaceTextureArrayMipMaps = true;
         [SerializeField] private List<RoadVisualDefinition> roads = new();
         [SerializeField, HideInInspector] private Texture2DArray shapeMaskArray;
         [SerializeField, HideInInspector] private Texture2DArray albedoArray;
@@ -87,7 +81,7 @@ namespace MiniCivilization.World.Definitions
 
         internal int TextureResolution => textureResolution;
         internal TextureFormat TextureArrayFormat => textureArrayFormat;
-        internal bool SurfaceTextureArrayMipMaps => surfaceTextureArrayMipMaps;
+        internal bool GenerateSurfaceTextureArrayMipMaps => generateSurfaceTextureArrayMipMaps;
         internal IReadOnlyList<RoadVisualDefinition> Roads => roads;
         internal Texture2DArray ShapeMaskArray => shapeMaskArray;
         internal Texture2DArray AlbedoArray => albedoArray;

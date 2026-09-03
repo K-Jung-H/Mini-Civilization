@@ -1,4 +1,4 @@
-# 2단계: Semantic Pattern Tile 계약
+# 2단계: Pattern Tile 계약
 
 ## 완료 범위
 
@@ -13,7 +13,7 @@ ChunkData를 만들지 않는다. 따라서 이 단계만으로 실행 가능한
 - Feature 후보 열거 반경은 별도 Settings나 요청 범위가 아니라, 후속
   `HydrologyFieldEvaluator`가 Basin 최대 도달 거리와 River 길이·곡선·폭·회피 Corridor의
   명시값에서 직접 유도한다.
-- `PatternTileSettingsData`는 Terrain/Hydrology에서 독립적으로 쓸 수 있는 Tile grid만 가진다.
+- `PatternTileGridSettingsData`는 Terrain/Hydrology에서 독립적으로 쓸 수 있는 Tile grid만 가진다.
 - `WaterFeatureIdentity`는 Feature 종류, 절대 후보 소유 좌표, world seed, seed salt로
   구성된다. 실행 중 증가 ID가 아니다.
 - `TerrainPatternTile`은 Cell별 Terrain 종류, 기본/상세 표면, slope, Sea 입력을 보관한다.

@@ -3,7 +3,6 @@ using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
 using MiniCivilization.World.Entities.Building;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Presentation
 {
@@ -19,7 +18,7 @@ namespace MiniCivilization.World.Presentation
         public Vector3Int LocalOffset;
         [Range(0, WorldGrid.HeightStepsPerCell)]
         public int TerrainHeight;
-        [Min(0)] public int MaxHeightAdjustmentSteps;
+        [Min(0)] public int MaxTerrainHeightAdjustmentSteps;
     }
 
     [Serializable]
@@ -27,7 +26,7 @@ namespace MiniCivilization.World.Presentation
     {
         [Range(0, WorldGrid.HeightStepsPerCell)]
         public int TerrainHeight;
-        [Min(0)] public int MaxHeightAdjustmentSteps;
+        [Min(0)] public int MaxTerrainHeightAdjustmentSteps;
     }
 
     [Serializable]
@@ -42,8 +41,7 @@ namespace MiniCivilization.World.Presentation
     public struct TerrainAnchorBakeData
     {
         public Vector3Int LocalOffset;
-        [FormerlySerializedAs("MaxTerrainCorrectionSteps")]
-        [Min(0)] public int MaxHeightAdjustmentSteps;
+        [Min(0)] public int MaxTerrainHeightAdjustmentSteps;
     }
 
     [Serializable]
@@ -58,8 +56,7 @@ namespace MiniCivilization.World.Presentation
     {
         [SerializeField] private BuildingEntityType entityType;
         [SerializeField]
-        [FormerlySerializedAs("occupiedCells")]
-        private Vector3Int[] buildingCells = Array.Empty<Vector3Int>();
+        private Vector3Int[] localBuildingCellOffsets = Array.Empty<Vector3Int>();
         [SerializeField] private BuildingCellTerrainBakeData[]
             buildingCellTerrain = Array.Empty<BuildingCellTerrainBakeData>();
         [SerializeField] private TerrainAnchorBakeData[] terrainAnchors =
@@ -96,21 +93,21 @@ namespace MiniCivilization.World.Presentation
             BuildingWayBakeData[] ways)
         {
             cells ??= Array.Empty<BuildingCellBakeData>();
-            buildingCells = new Vector3Int[cells.Length];
+            localBuildingCellOffsets = new Vector3Int[cells.Length];
             buildingCellTerrain = new BuildingCellTerrainBakeData[cells.Length];
             for (var index = 0; index < cells.Length; index++)
             {
                 var cell = cells[index];
-                buildingCells[index] = cell.LocalOffset;
+                localBuildingCellOffsets[index] = cell.LocalOffset;
                 buildingCellTerrain[index] = new BuildingCellTerrainBakeData
                 {
                     TerrainHeight = Mathf.Clamp(
                         cell.TerrainHeight,
                         0,
                         WorldGrid.HeightStepsPerCell),
-                    MaxHeightAdjustmentSteps = Mathf.Max(
+                    MaxTerrainHeightAdjustmentSteps = Mathf.Max(
                         0,
-                        cell.MaxHeightAdjustmentSteps)
+                        cell.MaxTerrainHeightAdjustmentSteps)
                 };
             }
 
@@ -127,7 +124,7 @@ namespace MiniCivilization.World.Presentation
                 return cachedLayout;
             }
 
-            var cells = new BuildingCell[buildingCells?.Length ?? 0];
+            var cells = new BuildingCell[localBuildingCellOffsets?.Length ?? 0];
             for (var index = 0; index < cells.Length; index++)
             {
                 var terrain = buildingCellTerrain != null
@@ -135,12 +132,12 @@ namespace MiniCivilization.World.Presentation
                     ? buildingCellTerrain[index]
                     : default;
                 cells[index] = new BuildingCell(
-                    ToOffset(buildingCells[index]),
+                    ToOffset(localBuildingCellOffsets[index]),
                     Mathf.Clamp(
                         terrain.TerrainHeight,
                         0,
                         WorldGrid.HeightStepsPerCell),
-                    Mathf.Max(0, terrain.MaxHeightAdjustmentSteps));
+                    Mathf.Max(0, terrain.MaxTerrainHeightAdjustmentSteps));
             }
 
             var anchors = new TerrainAnchorCell[
@@ -150,7 +147,7 @@ namespace MiniCivilization.World.Presentation
                 var anchor = terrainAnchors[index];
                 anchors[index] = new TerrainAnchorCell(
                     ToOffset(anchor.LocalOffset),
-                    Mathf.Max(0, anchor.MaxHeightAdjustmentSteps));
+                    Mathf.Max(0, anchor.MaxTerrainHeightAdjustmentSteps));
             }
 
             var points = new BuildingWayPoint[localWayPoints?.Length ?? 0];
@@ -192,9 +189,9 @@ namespace MiniCivilization.World.Presentation
                     terrain.TerrainHeight,
                     0,
                     WorldGrid.HeightStepsPerCell);
-                terrain.MaxHeightAdjustmentSteps = Mathf.Max(
+                terrain.MaxTerrainHeightAdjustmentSteps = Mathf.Max(
                     0,
-                    terrain.MaxHeightAdjustmentSteps);
+                    terrain.MaxTerrainHeightAdjustmentSteps);
                 buildingCellTerrain[index] = terrain;
             }
 
@@ -203,9 +200,9 @@ namespace MiniCivilization.World.Presentation
                  index++)
             {
                 var anchor = terrainAnchors[index];
-                anchor.MaxHeightAdjustmentSteps = Math.Max(
+                anchor.MaxTerrainHeightAdjustmentSteps = Math.Max(
                     0,
-                    anchor.MaxHeightAdjustmentSteps);
+                    anchor.MaxTerrainHeightAdjustmentSteps);
                 terrainAnchors[index] = anchor;
             }
 

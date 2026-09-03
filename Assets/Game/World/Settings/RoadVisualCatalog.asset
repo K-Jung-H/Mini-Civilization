@@ -92,7 +92,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.RoadVisualCatalog
   textureResolution: 256
   textureArrayFormat: 4
-  surfaceTextureArrayMipMaps: 1
+  generateSurfaceTextureArrayMipMaps: 1
   roads:
   - Type: 1
     DisplayName: "\uAE30\uBCF8 \uB3C4\uB85C"

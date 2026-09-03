@@ -11,7 +11,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 97ee88ecba994e4fa37d4f1ee7f1ef1b, type: 3}
   m_Name: WorldGenerationSettings
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Semantic.SemanticWorldSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.WorldGenerationSettings
   seed: 0
   worldType: 1
   cellSize: 1

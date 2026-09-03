@@ -19,12 +19,12 @@ namespace MiniCivilization.World.Entities
     {
         public CellOffset LocalOffset { get; }
         public int TerrainHeight { get; }
-        public int MaxHeightAdjustmentSteps { get; }
+        public int MaxTerrainHeightAdjustmentSteps { get; }
 
         public BuildingCell(
             CellOffset localOffset,
             int terrainHeight = 0,
-            int maxHeightAdjustmentSteps = 0)
+            int maxTerrainHeightAdjustmentSteps = 0)
         {
             if (terrainHeight < 0
                 || terrainHeight > WorldGrid.HeightStepsPerCell)
@@ -33,35 +33,35 @@ namespace MiniCivilization.World.Entities
                     nameof(terrainHeight));
             }
 
-            if (maxHeightAdjustmentSteps < 0)
+            if (maxTerrainHeightAdjustmentSteps < 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maxHeightAdjustmentSteps));
+                    nameof(maxTerrainHeightAdjustmentSteps));
             }
 
             LocalOffset = localOffset;
             TerrainHeight = terrainHeight;
-            MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
+            MaxTerrainHeightAdjustmentSteps = maxTerrainHeightAdjustmentSteps;
         }
     }
 
     public readonly struct TerrainAnchorCell
     {
         public CellOffset LocalOffset { get; }
-        public int MaxHeightAdjustmentSteps { get; }
+        public int MaxTerrainHeightAdjustmentSteps { get; }
 
         public TerrainAnchorCell(
             CellOffset localOffset,
-            int maxHeightAdjustmentSteps)
+            int maxTerrainHeightAdjustmentSteps)
         {
-            if (maxHeightAdjustmentSteps < 0)
+            if (maxTerrainHeightAdjustmentSteps < 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maxHeightAdjustmentSteps));
+                    nameof(maxTerrainHeightAdjustmentSteps));
             }
 
             LocalOffset = localOffset;
-            MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
+            MaxTerrainHeightAdjustmentSteps = maxTerrainHeightAdjustmentSteps;
         }
     }
 

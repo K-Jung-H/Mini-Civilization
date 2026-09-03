@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Entities
 {
@@ -11,8 +10,8 @@ namespace MiniCivilization.World.Entities
         private readonly CellOffset[] neighborOffsets;
 
         public IReadOnlyList<CellOffset> NeighborOffsets => neighborOffsets;
-        public float MaxUpHeight { get; }
-        public float MaxDownHeight { get; }
+        public float MaxStepUpHeight { get; }
+        public float MaxStepDownHeight { get; }
         public float WalkDuration { get; }
         public float HeightTransitionDuration { get; }
         public float SwimDuration { get; }
@@ -20,8 +19,8 @@ namespace MiniCivilization.World.Entities
 
         public EntityCellMovementRules(
             IReadOnlyList<CellOffset> neighborOffsets,
-            float maxUpHeight,
-            float maxDownHeight,
+            float maxStepUpHeight,
+            float maxStepDownHeight,
             float walkDuration,
             float heightTransitionDuration,
             float swimDuration,
@@ -34,16 +33,16 @@ namespace MiniCivilization.World.Entities
                     nameof(neighborOffsets));
             }
 
-            if (maxUpHeight < 0f || !float.IsFinite(maxUpHeight))
+            if (maxStepUpHeight < 0f || !float.IsFinite(maxStepUpHeight))
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maxUpHeight));
+                    nameof(maxStepUpHeight));
             }
 
-            if (maxDownHeight < 0f || !float.IsFinite(maxDownHeight))
+            if (maxStepDownHeight < 0f || !float.IsFinite(maxStepDownHeight))
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maxDownHeight));
+                    nameof(maxStepDownHeight));
             }
 
             ValidateDuration(walkDuration, nameof(walkDuration));
@@ -67,8 +66,8 @@ namespace MiniCivilization.World.Entities
                 this.neighborOffsets[index] = offset;
             }
 
-            MaxUpHeight = maxUpHeight;
-            MaxDownHeight = maxDownHeight;
+            MaxStepUpHeight = maxStepUpHeight;
+            MaxStepDownHeight = maxStepDownHeight;
             WalkDuration = walkDuration;
             HeightTransitionDuration = heightTransitionDuration;
             SwimDuration = swimDuration;
@@ -83,8 +82,8 @@ namespace MiniCivilization.World.Entities
         {
             var heightDifference = nextSurfaceHeight
                 - currentSurfaceHeight;
-            if (heightDifference > MaxUpHeight
-                || -heightDifference > MaxDownHeight)
+            if (heightDifference > MaxStepUpHeight
+                || -heightDifference > MaxStepDownHeight)
             {
                 return false;
             }
@@ -135,14 +134,12 @@ namespace MiniCivilization.World.Entities
         }
 
         [SerializeField] private NeighborOffset[] neighborOffsets;
-        [FormerlySerializedAs("maxUpHeightUnits")]
         [SerializeField, Min(0f)]
         [Tooltip("이동 가능한 최대 상승 표면 높이 차이입니다. 단위는 월드 좌표입니다.")]
-        private float maxUpHeight = 1f;
-        [FormerlySerializedAs("maxDownHeightUnits")]
+        private float maxStepUpHeight = 1f;
         [SerializeField, Min(0f)]
         [Tooltip("이동 가능한 최대 하강 표면 높이 차이입니다. 단위는 월드 좌표입니다.")]
-        private float maxDownHeight = 1f;
+        private float maxStepDownHeight = 1f;
         [SerializeField, Min(0.01f)] private float walkDuration = 1f;
         [SerializeField, Min(0.01f)]
         private float heightTransitionDuration = 1f;
@@ -166,8 +163,8 @@ namespace MiniCivilization.World.Entities
 
             cachedRules = new EntityCellMovementRules(
                 offsets,
-                maxUpHeight,
-                maxDownHeight,
+                maxStepUpHeight,
+                maxStepDownHeight,
                 walkDuration,
                 heightTransitionDuration,
                 swimDuration,

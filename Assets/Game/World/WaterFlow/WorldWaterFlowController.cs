@@ -124,6 +124,7 @@ namespace MiniCivilization.World.WaterFlow
             boundRuntime = runtime;
             boundWorld = runtime.Data;
             boundRuntime.SimulationStateChanged += OnSimulationStateChanged;
+            boundRuntime.ChunkDataUnloaded += OnChunkDataUnloaded;
             activeParameters = CreateParameters();
             if (runtime.WaterFlowState == null
                 || runtime.WaterFlowResolver == null)
@@ -145,6 +146,7 @@ namespace MiniCivilization.World.WaterFlow
             if (boundRuntime != null)
             {
                 boundRuntime.SimulationStateChanged -= OnSimulationStateChanged;
+                boundRuntime.ChunkDataUnloaded -= OnChunkDataUnloaded;
             }
 
             boundWorld = null;
@@ -172,6 +174,18 @@ namespace MiniCivilization.World.WaterFlow
                 boundWorld,
                 State);
             simulationAccumulator = 0f;
+        }
+
+        private void OnChunkDataUnloaded(ChunkCoordinate _)
+        {
+            if (boundRuntime == null || State == null)
+            {
+                return;
+            }
+
+            State.ReplaceWaterBodies(
+                WaterBodyResolver.ResolvePrepared(boundRuntime));
+            StateChanged?.Invoke(State);
         }
 
         public void ApplyChanges(WorldChangeSet changeSet)

@@ -10,8 +10,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e4c7e68f2b7942819d2c354bff7198b6, type: 3}
-  m_Name: SemanticTerrainPatternSettings
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Semantic.SemanticTerrainPatternSettings
+  m_Name: TerrainPatternSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.TerrainPatternSettings
   patternTileChunkSpan: 1
   terrainBaseHeightCells: 32
   noiseRouter:

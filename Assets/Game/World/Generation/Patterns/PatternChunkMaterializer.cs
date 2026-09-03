@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     public readonly struct PatternTilePair
     {

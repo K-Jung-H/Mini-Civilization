@@ -2,11 +2,11 @@ using System;
 using MiniCivilization.World.Domain;
 using UnityEngine;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
-    public sealed class SemanticWorldConfigurationData
+    public sealed class WorldGenerationConfiguration
     {
-        public SemanticWorldConfigurationData(
+        public WorldGenerationConfiguration(
             WorldSettingsData world,
             TerrainPatternSettingsData terrain,
             HydrologyFeatureSettingsData hydrology,
@@ -61,7 +61,7 @@ namespace MiniCivilization.World.Generation.Semantic
     [CreateAssetMenu(
         fileName = "WorldGenerationSettings",
         menuName = "Mini Civilization/World/World Generation Settings")]
-    public sealed class SemanticWorldSettings : ScriptableObject
+    public sealed class WorldGenerationSettings : ScriptableObject
     {
         [Header("World")]
         [SerializeField] private int seed;
@@ -92,15 +92,15 @@ namespace MiniCivilization.World.Generation.Semantic
         [SerializeField, Min(1)] private int maximumConcurrentTileBuilds = 2;
 
         [Header("Pattern Sources")]
-        [SerializeField] private SemanticTerrainPatternSettings terrain;
-        [SerializeField] private SemanticHydrologyFeatureSettings hydrology;
+        [SerializeField] private TerrainPatternSettings terrain;
+        [SerializeField] private HydrologyFeatureSettings hydrology;
 
-        public SemanticWorldConfigurationData CreateConfiguration()
+        public WorldGenerationConfiguration CreateConfiguration()
         {
             if (terrain == null || hydrology == null)
             {
                 throw new InvalidOperationException(
-                    "Semantic World Settings requires Terrain and Hydrology Pattern Settings.");
+                    "World Generation Settings requires Terrain and Hydrology Pattern Settings.");
             }
 
             var world = new WorldSettingsData(
@@ -130,7 +130,7 @@ namespace MiniCivilization.World.Generation.Semantic
                     "World and Hydrology Pond maximum areas must agree.");
             }
 
-            return new SemanticWorldConfigurationData(
+            return new WorldGenerationConfiguration(
                 world,
                 terrainData,
                 hydrologyData,

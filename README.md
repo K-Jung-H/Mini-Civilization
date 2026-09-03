@@ -4,27 +4,25 @@
 
 ## 주요 기능
 
-- Seed 기반 지형·수문·수역·바이옴 생성
-- Terrain과 Biome 계산의 Unity Job System 병렬 처리
-- Generate/Load 단계별 진행 상태 표시
+- Seed·설정·절대 좌표 기반 Pattern Tile 지형·수문 생성
+- Streaming Target과 세 Range 기반 Pattern Tile·Chunk 준비
+- Pattern Map Debugger와 생성 진행 상태 표시
 - Cell 단위 지형 편집과 Brush·Single 선택
 - Source와 Dynamic Water 기반 물 확산
 - 변경 영역 중심의 Surface·Navigation·Mesh 갱신
-- 월드 데이터 Save/Load
 - Prefab·Catalog 기반 엔티티 생성
 - sealed Entity 상태머신과 공통 EntityController 표현 구조
 - Animator와 Cell 내부 이동을 분리한 `EntityRenderProfile`
 
 ## 개발 상태
 
-월드 생성·로드·편집·물·렌더링 구조 전환은 완료되었으며, 현재 엔티티 시스템을 확장하고 있습니다.
+Pattern Tile 기반 월드 생성·스트리밍·편집·물·렌더링 구조를 완료했으며,
+Save/Load는 다음 단계에서 구현합니다. 현재 엔티티 시스템을 확장하고 있습니다.
 
 - Tree: 배치 및 렌더 위치 확인 완료
 - Dog: Idle/Move 상태, Cell 이동, Blend Tree, Local Motion 적용
 - 진행 예정: 높이차 기반 Walk/Jump/Fall, 엔티티 LOD
 - 이후 예정: Human 목적지 경로 탐색, Building 배치와 이동 우회, WalkLinks
-
-Save/Load 형식은 현재 구조 검증용입니다. 버전 간 저장 파일 호환성은 보장하지 않습니다.
 
 ## 개발 환경
 
@@ -64,8 +62,7 @@ Unity가 `Packages/manifest.json`을 기준으로 필요한 패키지를 복원�
 Assets/Game/World
 ├─ Domain          저장되는 월드 사실 데이터와 변경 데이터
 ├─ Runtime         WorldRuntime, Cache, EntityRuntime, Manager
-├─ Generation      지형·수문·수역·바이옴 생성 Pipeline
-├─ Persistence     World Save/Load Codec와 Load Operation
+├─ Generation      Pattern Tile 기반 지형·수문 생성과 Chunk materialization
 ├─ WaterFlow       물 상태, 해석, 확산 Simulation
 ├─ Editing         월드·엔티티 편집 입력과 적용
 ├─ Interaction     Cell 선택, Raycast, 정보 표시
@@ -79,7 +76,8 @@ Assets/Game/World
 ### 월드 흐름
 
 ```text
-Generate / Load
+WorldGenerationSettings
+→ Pattern Tile streaming
 → WorldData
 → WorldRuntime 준비
 → WorldManager 활성화

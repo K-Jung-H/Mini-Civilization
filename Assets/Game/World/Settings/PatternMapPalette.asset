@@ -10,8 +10,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c077239f0e8b49c2957b87e928f52ad9, type: 3}
-  m_Name: SemanticPatternMapPalette
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.SemanticPatternMapPalette
+  m_Name: PatternMapPalette
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.PatternMapPalette
   smooth: {r: 0.25, g: 0.8, b: 0.3, a: 1}
   rugged: {r: 0.9, g: 0.5, b: 0.15, a: 1}
   mountain: {r: 0.9, g: 0.9, b: 0.9, a: 1}

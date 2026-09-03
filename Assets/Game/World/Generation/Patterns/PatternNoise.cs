@@ -1,8 +1,8 @@
 using System;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
-    internal static class SemanticPatternNoise
+    internal static class PatternNoise
     {
         public static int DeriveSeed(int worldSeed, string path)
         {
@@ -59,8 +59,8 @@ namespace MiniCivilization.World.Generation.Semantic
             TerrainNoiseFieldData field,
             int seed)
         {
-            var value = field.Mode is SemanticNoiseMode.Ridge
-                or SemanticNoiseMode.SignedRidge
+            var value = field.Mode is PatternNoiseMode.Ridge
+                or PatternNoiseMode.SignedRidge
                 ? RidgedFractalNoise(
                     x * field.Scale,
                     z * field.Scale,
@@ -77,14 +77,14 @@ namespace MiniCivilization.World.Generation.Semantic
                     field.FrequencySpacing,
                     field.Persistence,
                     field.OctaveSeedStride);
-            return field.Mode is SemanticNoiseMode.Signed
-                or SemanticNoiseMode.SignedRidge
+            return field.Mode is PatternNoiseMode.Signed
+                or PatternNoiseMode.SignedRidge
                 ? value * 2f - 1f
                 : value;
         }
 
-        public static float Normalize(float value, SemanticNoiseMode mode) =>
-            mode is SemanticNoiseMode.Signed or SemanticNoiseMode.SignedRidge
+        public static float Normalize(float value, PatternNoiseMode mode) =>
+            mode is PatternNoiseMode.Signed or PatternNoiseMode.SignedRidge
                 ? Math.Clamp((value + 1f) * 0.5f, 0f, 1f)
                 : Math.Clamp(value, 0f, 1f);
 

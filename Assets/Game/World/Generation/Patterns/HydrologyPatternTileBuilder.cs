@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     internal sealed class HydrologyPatternTileBuilder
     {

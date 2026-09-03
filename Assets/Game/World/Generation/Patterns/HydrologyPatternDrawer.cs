@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     internal sealed class HydrologyPatternDrawer
     {

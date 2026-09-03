@@ -1,4 +1,4 @@
-# Semantic Pattern Tile 기반 월드 생성: 최종 재설계
+# Pattern Tile 기반 월드 생성: 최종 재설계
 
 > 이 문서의 `locally resolved Hydrology Features`, Feature Geometry, River terrain-aware
 > 처리 설명은 더 이상 활성 계약이 아니다. WaterMap 생성 원본은
@@ -322,16 +322,16 @@ PatternTileKey, FeatureKey, Terrain/Hydrology 논리 Cell, compact Tile 저장 �
 
 #### 2단계 완료 기록
 
-- `Generation/Semantic`에 절대 `PatternTileKey`/bounds, Terrain·Hydrology 논리 Cell,
+- `Generation/Patterns`에 절대 `PatternTileKey`/bounds, Terrain·Hydrology 논리 Cell,
   tile-local Feature Table, Combined 즉시 합성 계약을 추가했다.
 - `PatternTileGridSettingsData`는 Terrain에서도 독립적으로 쓸 Tile span을, 완전한
-  `PatternTileSettingsData`는 Feature 영향 범위를 명시 입력으로 받는다. 고정 월드의
+  `PatternTileGridSettingsData`는 Feature 영향 범위를 명시 입력으로 받는다. 고정 월드의
   Tile/world 경계 불일치는 자동 보정하지 않고 생성 전 검증으로 드러낸다.
 - 아직 evaluator, scheduler, Runtime 연결, Tile 결과 Cache는 없다. 새 Tile span과
   Feature reach 수치를 코드 기본값으로 정하지 않았으므로, 3·4단계의 실제 Terrain/
   Hydrology 설정과 동시에 명시한다.
 - 삭제된 설정 asset의 Pattern 디자인 수치와 이관 경계는
-  `19-stage-2-semantic-contract.md`에 기록했다.
+  `19-stage-2-pattern-contract.md`에 기록했다.
 
 ### 3. TerrainPatternTile 구현
 
@@ -341,7 +341,7 @@ Height Field의 **디자인 규칙**만 새 순수 evaluator로 옮긴다. Terra
 
 #### 3단계 완료 기록
 
-- `SemanticTerrainPatternSettings.asset`에 기존 Terrain Pattern 디자인 수치만 새
+- `TerrainPatternSettings.asset`에 기존 Terrain Pattern 디자인 수치만 새
   설정 원본으로 이관했다. `PatternTileChunkSpan`은 1 Chunk로 명시했고, Sea 수면/
   해저와 Hydrology 수치는 이 Terrain 설정에 섞지 않았다.
 - `TerrainPatternEvaluator`는 Settings·Seed·절대 XZ만으로 Region, land Form,
@@ -398,7 +398,7 @@ Tile Drawing을 생성 원본으로 바꾸지 않는 운영 계층으로만 추�
 
 #### 6단계 완료 기록
 
-- `SemanticWorldSettings`가 WorldData 크기·WaterFlow·Streaming과 Terrain/Hydrology Pattern
+- `WorldGenerationSettings`가 WorldData 크기·WaterFlow·Streaming과 Terrain/Hydrology Pattern
   source를 하나의 명시적 입력으로 만든다. Tile span과 Pond 분류 기준의 불일치는 생성 전에
   오류로 드러난다.
 - `PatternStreamingCoordinator`는 Target의 output ChunkDemand만 계산한다. 순수 Tile 작업은
@@ -431,7 +431,7 @@ Target 이동, 이동 중 재이동, Terrain/Hydrology/Combined Map 일치와 �
 #### 7단계 완료 기록
 
 - `WorldTerrainPatternDebugger`와 전용 Editor가 삭제된 Preview/Batch/Snapshot 경로 없이
-  Semantic Terrain/Hydrology Tile pair를 읽는다.
+  Terrain/Hydrology Pattern Tile pair를 읽는다.
 - Map은 고정 `256 × 256` Texture, Chunk당 `2` Pixel부터 Cell 1:1 Level까지의 표시 단계,
   Terrain/Hydrology/Combined Palette를 제공한다.
 - Map request는 필요한 TileKey를 deduplicate하고 설정된 Tile 동시 준비 수 안에서 중심 우선
@@ -439,7 +439,8 @@ Target 이동, 이동 중 재이동, Terrain/Hydrology/Combined Map 일치와 �
   공유하거나 변경하지 않는다.
 - Target은 빨간 5 Pixel 십자로 표시되고, 선택 영역 이동은 Transform만 변경해 다음 Runtime
   frame의 정상 Streaming 요청으로 이어진다.
-- 상세 계약과 사용자 실제 검증 항목은 `24-stage-7-semantic-pattern-debugger.md`에 기록했다.
+- Pattern Map 수명과 Debugger 수요 계약은
+  `25-pattern-map-store-streaming-contract.md`를 따른다.
 
 ### 8. 새 저장/로드 구조 복원
 

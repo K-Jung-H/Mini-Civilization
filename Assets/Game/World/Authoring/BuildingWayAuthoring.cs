@@ -294,8 +294,8 @@ namespace MiniCivilization.World.Authoring
                     {
                         LocalOffset = cell.LocalOffset,
                         TerrainHeight = cell.TerrainHeight,
-                        MaxHeightAdjustmentSteps =
-                            cell.MaxHeightAdjustmentSteps
+                        MaxTerrainHeightAdjustmentSteps =
+                            cell.MaxTerrainHeightAdjustmentSteps
                     });
                 }
                 else
@@ -311,8 +311,8 @@ namespace MiniCivilization.World.Authoring
                     anchors.Add(new TerrainAnchorBakeData
                     {
                         LocalOffset = cell.LocalOffset,
-                        MaxHeightAdjustmentSteps =
-                            cell.MaxHeightAdjustmentSteps
+                        MaxTerrainHeightAdjustmentSteps =
+                            cell.MaxTerrainHeightAdjustmentSteps
                     });
                 }
             }

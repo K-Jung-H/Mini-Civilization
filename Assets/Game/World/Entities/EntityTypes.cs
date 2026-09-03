@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
 
@@ -76,6 +77,54 @@ namespace MiniCivilization.World.Entities
         internal abstract void Tick(
             EntityRuntime runtime,
             float deltaTime);
+
+        internal byte[] CapturePersistentPayload()
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(
+                stream,
+                System.Text.Encoding.UTF8,
+                true);
+            WritePersistentState(writer);
+            return stream.ToArray();
+        }
+
+        internal void RestorePersistentPayload(byte[] payload)
+        {
+            if (payload == null)
+            {
+                throw new ArgumentNullException(nameof(payload));
+            }
+
+            try
+            {
+                using var stream = new MemoryStream(payload, false);
+                using var reader = new BinaryReader(
+                    stream,
+                    System.Text.Encoding.UTF8,
+                    true);
+                ReadPersistentState(reader);
+                if (stream.Position != stream.Length)
+                {
+                    throw new InvalidOperationException(
+                        $"Entity {Id} has unread saved progress data.");
+                }
+            }
+            catch (EndOfStreamException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Entity {Id} has truncated saved progress data.",
+                    exception);
+            }
+        }
+
+        protected virtual void WritePersistentState(BinaryWriter writer)
+        {
+        }
+
+        protected virtual void ReadPersistentState(BinaryReader reader)
+        {
+        }
     }
 
     public abstract class FixedEntity : Entity
@@ -267,6 +316,68 @@ namespace MiniCivilization.World.Entities
             MoveProgress = 1f;
             IsMoving = false;
         }
+
+        protected override void WritePersistentState(BinaryWriter writer)
+        {
+            base.WritePersistentState(writer);
+            writer.Write(IsMoving);
+            if (!IsMoving)
+            {
+                return;
+            }
+
+            WriteCellCoordinate(writer, MoveFrom);
+            WriteCellCoordinate(writer, MoveTo);
+            writer.Write(MoveProgress);
+            writer.Write((byte)MoveType);
+        }
+
+        protected override void ReadPersistentState(BinaryReader reader)
+        {
+            base.ReadPersistentState(reader);
+            var isMoving = reader.ReadBoolean();
+            if (!isMoving)
+            {
+                IsMoving = false;
+                MoveFrom = default;
+                MoveTo = default;
+                MoveProgress = 0f;
+                MoveType = default;
+                return;
+            }
+
+            var moveFrom = ReadCellCoordinate(reader);
+            var moveTo = ReadCellCoordinate(reader);
+            var moveProgress = reader.ReadSingle();
+            var moveType = (EntityMoveType)reader.ReadByte();
+            if (!moveFrom.Equals(AnchorCell)
+                || !float.IsFinite(moveProgress)
+                || moveProgress < 0f
+                || moveProgress >= 1f
+                || !Enum.IsDefined(typeof(EntityMoveType), moveType))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {Id} has an invalid saved movement state.");
+            }
+
+            IsMoving = true;
+            MoveFrom = moveFrom;
+            MoveTo = moveTo;
+            MoveProgress = moveProgress;
+            MoveType = moveType;
+        }
+
+        private static void WriteCellCoordinate(
+            BinaryWriter writer,
+            CellCoordinate coordinate)
+        {
+            writer.Write(coordinate.X);
+            writer.Write(coordinate.Y);
+            writer.Write(coordinate.Z);
+        }
+
+        private static CellCoordinate ReadCellCoordinate(BinaryReader reader) =>
+            new(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
     }
 
     public abstract class AnimalEntity : DynamicEntity
@@ -480,6 +591,25 @@ namespace MiniCivilization.World.Entities
             state ^= state << 5;
             randomState = state;
             return (int)(state % (uint)exclusiveMaximum);
+        }
+
+        protected override void WritePersistentState(BinaryWriter writer)
+        {
+            base.WritePersistentState(writer);
+            writer.Write(randomState);
+        }
+
+        protected override void ReadPersistentState(BinaryReader reader)
+        {
+            base.ReadPersistentState(reader);
+            var state = reader.ReadUInt32();
+            if (state == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Animal Entity {Id} has an invalid saved random state.");
+            }
+
+            randomState = state;
         }
     }
 

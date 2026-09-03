@@ -561,6 +561,7 @@ Transform:
   - {fileID: 1910000041}
   - {fileID: 6994699054033613888}
   - {fileID: 685759187}
+  - {fileID: 1900000061}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1900000002
@@ -580,8 +581,9 @@ MonoBehaviour:
   worldRenderer: {fileID: 1900000004}
   entityManager: {fileID: 685759189}
   uiManager: {fileID: 8017234081965372401}
-  semanticWorldSettings: {fileID: 11400000, guid: 50973727c32c4e47ab8f2388c52d7ca9, type: 2}
+  worldGenerationSettings: {fileID: 11400000, guid: 50973727c32c4e47ab8f2388c52d7ca9, type: 2}
   streamingTarget: {fileID: 330585546}
+  saveLoadManager: {fileID: 1900000062}
 --- !u!114 &1900000004
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -682,6 +684,51 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1910000021}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1900000060
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1900000061}
+  - component: {fileID: 1900000062}
+  m_Layer: 0
+  m_Name: Save Load
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1900000061
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1900000060}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1900000001}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1900000062
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1900000060}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aa28f6a5716a4150b80ac77f8d4efafd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Persistence.SaveLoadManager
+  initialWorldFolderName: World 1
 --- !u!1 &1910000000
 GameObject:
   m_ObjectHideFlags: 0
@@ -714,52 +761,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1900000001}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1910000050
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1910000051}
-  - component: {fileID: 1910000052}
-  m_Layer: 0
-  m_Name: Pattern Debugger
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1910000051
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1910000050}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1900000001}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1910000052
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1910000050}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6bc9c9cb15ea43ba9967c8f3524a536a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.WorldTerrainPatternDebugger
-  worldManager: {fileID: 1900000002}
-  patternMapPalette: {fileID: 11400000, guid: 1d7535ac38a9459eac3c4ba0f5dc0db1, type: 2}
 --- !u!1 &1910000020
 GameObject:
   m_ObjectHideFlags: 0
@@ -840,6 +841,52 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f5bef81376014839ab27a29d261902ac, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Interaction.WorldCellInfoProvider
+--- !u!1 &1910000050
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1910000051}
+  - component: {fileID: 1910000052}
+  m_Layer: 0
+  m_Name: Pattern Debugger
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1910000051
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1910000050}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1900000001}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1910000052
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1910000050}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6bc9c9cb15ea43ba9967c8f3524a536a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.WorldTerrainPatternDebugger
+  worldManager: {fileID: 1900000002}
+  patternMapPalette: {fileID: 11400000, guid: 1d7535ac38a9459eac3c4ba0f5dc0db1, type: 2}
 --- !u!1 &1920000010
 GameObject:
   m_ObjectHideFlags: 0
@@ -3339,6 +3386,21 @@ RectTransform:
   m_AnchoredPosition: {x: 80, y: 8}
   m_SizeDelta: {x: 64, y: 64}
   m_Pivot: {x: 0, y: 0}
+--- !u!114 &1427700696428730206
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6472401242640069952}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 72f0d2e3247e4b66a85f030781785fe4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.WorldStreamingProgressView
+  panelRoot: {fileID: 3300683974524713671}
+  stageText: {fileID: 3737816384218512651}
+  completedText: {fileID: 7182204930391716258}
 --- !u!114 &1429553041320181596
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8901,7 +8963,7 @@ MonoBehaviour:
   selectModeGroup: {fileID: 8120000000000000015}
   terrainGroup: {fileID: 8130000000000000015}
   entityGroup: {fileID: 8110000000000000015}
-  environmentGroup: {fileID: 8100000000000000015}
+  environmentEditGroup: {fileID: 8100000000000000015}
   dividers:
   - {fileID: 5249857936014466613}
   - {fileID: 4494729711391764690}
@@ -11285,21 +11347,6 @@ MonoBehaviour:
   tileInfoPresenter: {fileID: 651989717420740925}
   tileInfoPanel: {fileID: 4208463202308907824}
   streamingProgressView: {fileID: 1427700696428730206}
---- !u!114 &1427700696428730206
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6472401242640069952}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 72f0d2e3247e4b66a85f030781785fe4, type: 3}
-  m_Name:
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.WorldStreamingProgressView
-  panelRoot: {fileID: 3300683974524713671}
-  stageText: {fileID: 3737816384218512651}
-  completedText: {fileID: 7182204930391716258}
 --- !u!1 &8100000000000000001
 GameObject:
   m_ObjectHideFlags: 0

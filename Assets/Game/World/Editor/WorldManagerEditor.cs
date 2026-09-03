@@ -43,10 +43,6 @@ namespace MiniCivilization.World.Editor
                 $"Dirty: {(manager.IsDirty ? "Yes" : "No")}",
                 MessageType.None);
 
-            if (GUILayout.Button("Unload"))
-            {
-                manager.UnloadWorld();
-            }
         }
     }
 }

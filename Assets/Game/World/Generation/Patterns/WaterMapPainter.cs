@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     internal readonly struct HydrologyDrawingSample
     {
@@ -292,13 +292,13 @@ namespace MiniCivilization.World.Generation.Semantic
         }
 
         private int DeriveRegionSeed(int regionKey, int channel) =>
-            unchecked((int)SemanticPatternNoise.Hash(
+            unchecked((int)PatternNoise.Hash(
                 regionKey,
                 channel,
                 settings.World.Seed));
 
         private float Value01(int regionKey, int channel) =>
-            (SemanticPatternNoise.Hash(
+            (PatternNoise.Hash(
                 regionKey,
                 channel,
                 settings.World.Seed) & 0x00FFFFFFu) / 16777215f;

@@ -72,6 +72,171 @@ namespace MiniCivilization.World.Runtime
             target.Sort(CompareEntities);
         }
 
+        internal ulong NextEntityId => nextEntityId;
+
+        internal void RestoreNextEntityId(ulong value)
+        {
+            nextEntityId = value;
+        }
+
+        internal void CopyPersistentStatesTo(
+            List<EntityPersistentState> target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            CopyEntitiesTo(tickBuffer);
+            for (var index = 0; index < tickBuffer.Count; index++)
+            {
+                target.Add(CapturePersistentState(tickBuffer[index]));
+            }
+        }
+
+        internal bool CanRestorePersistentState(EntityPersistentState state)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException(nameof(state));
+            }
+
+            var entity = registry.Create(CreateEntityData(state));
+            var referencedChunks = ResolveReferencedChunks(entity);
+            for (var index = 0; index < referencedChunks.Length; index++)
+            {
+                if (!world.IsChunkLoaded(referencedChunks[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        internal EntityChangeSet RestorePersistentState(
+            EntityPersistentState state)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException(nameof(state));
+            }
+
+            if (entitiesById.ContainsKey(state.Id))
+            {
+                throw new InvalidOperationException(
+                    $"Entity ID {state.Id} already exists in the runtime.");
+            }
+
+            if (!CanRestorePersistentState(state))
+            {
+                throw new InvalidOperationException(
+                    $"Entity {state.Id} cannot be restored before all referenced Chunks are loaded.");
+            }
+
+            var data = CreateEntityData(state);
+            var entity = registry.Create(data);
+            RestoreEntityRuntimeState(entity, state);
+            world.AddEntity(data);
+            try
+            {
+                AddRuntimeEntity(entity);
+                if (entity is DynamicEntity dynamicEntity
+                    && dynamicEntity.IsMoving)
+                {
+                    movingEntityIds.Add(entity.Id);
+                }
+
+                if (state.HasBuildingWayLocation)
+                {
+                    buildingWayLocations.Add(
+                        entity.Id,
+                        state.BuildingWayLocation);
+                }
+
+                if (state.ActiveWayMove != null)
+                {
+                    activeWayMoves.Add(
+                        entity.Id,
+                        RestoreWayMove(state.ActiveWayMove));
+                }
+
+                ReserveEntityId(entity.Id);
+            }
+            catch
+            {
+                if (entitiesById.TryGetValue(entity.Id, out var registered)
+                    && ReferenceEquals(registered, entity))
+                {
+                    RemoveRuntimeEntity(entity);
+                }
+
+                world.RemoveEntity(entity.Id);
+                throw;
+            }
+
+            if (entity is BuildingEntity && runtime.WayPointGraph != null)
+            {
+                runtime.RebuildWayPointGraph();
+            }
+
+            return PublishChange(
+                new[] { entity.Id },
+                NoEntityIds,
+                NoEntityIds,
+                GetIndexedCells(entity),
+                wayTopologyChanged: entity is BuildingEntity);
+        }
+
+        internal void DetachPersistentStatesReferencing(
+            ChunkCoordinate coordinate,
+            List<EntityPersistentState> target)
+        {
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            CopyEntitiesTo(tickBuffer);
+            var removedIds = new List<EntityId>();
+            var affectedCells = new List<CellCoordinate>();
+            var topologyChanged = false;
+            for (var index = 0; index < tickBuffer.Count; index++)
+            {
+                var entity = tickBuffer[index];
+                if (!ReferencesChunk(entity.Id, coordinate))
+                {
+                    continue;
+                }
+
+                target.Add(CapturePersistentState(entity));
+                removedIds.Add(entity.Id);
+                affectedCells.AddRange(GetIndexedCells(entity));
+                topologyChanged |= entity is BuildingEntity;
+                RemoveRuntimeEntity(entity);
+                world.RemoveEntity(entity.Id);
+            }
+
+            if (removedIds.Count == 0)
+            {
+                return;
+            }
+
+            if (topologyChanged && runtime.WayPointGraph != null)
+            {
+                runtime.RebuildWayPointGraph();
+            }
+
+            PublishChange(
+                NoEntityIds,
+                removedIds,
+                NoEntityIds,
+                affectedCells,
+                topologyChanged);
+        }
+
         public void CopyEntitiesInChunkTo(
             ChunkCoordinate coordinate,
             List<Entity> target)
@@ -410,7 +575,7 @@ namespace MiniCivilization.World.Runtime
                 column.SetBuildingTarget(
                     targetHeight,
                     coordinate,
-                    localCell.MaxHeightAdjustmentSteps);
+                    localCell.MaxTerrainHeightAdjustmentSteps);
             }
 
             for (var index = 0;
@@ -523,7 +688,7 @@ namespace MiniCivilization.World.Runtime
                     column.TargetHeight - column.Surface.GroundHeight);
                 if (correctionSteps
                     > layout.TerrainAnchorCells[index]
-                        .MaxHeightAdjustmentSteps)
+                        .MaxTerrainHeightAdjustmentSteps)
                 {
                     invalidCells.Add(coordinate);
                 }
@@ -531,7 +696,7 @@ namespace MiniCivilization.World.Runtime
 
             foreach (var column in columns.Values)
             {
-                if (column.MaxHeightAdjustmentSteps < 0)
+                if (column.MaxTerrainHeightAdjustmentSteps < 0)
                 {
                     continue;
                 }
@@ -539,7 +704,7 @@ namespace MiniCivilization.World.Runtime
                 var adjustmentSteps = Math.Abs(
                     column.TargetHeight - column.Surface.GroundHeight);
                 if (adjustmentSteps
-                    > column.MaxHeightAdjustmentSteps)
+                    > column.MaxTerrainHeightAdjustmentSteps)
                 {
                     invalidCells.Add(column.RepresentativeCell);
                 }
@@ -974,6 +1139,74 @@ namespace MiniCivilization.World.Runtime
                 : id.Value + 1;
         }
 
+        private EntityPersistentState CapturePersistentState(Entity entity)
+        {
+            var hasBuildingWayLocation = buildingWayLocations.TryGetValue(
+                entity.Id,
+                out var buildingWayLocation);
+            var activeWayMove = activeWayMoves.TryGetValue(
+                entity.Id,
+                out var wayMove)
+                ? CaptureWayMove(wayMove)
+                : null;
+            return new EntityPersistentState(
+                entity.Id,
+                entity.TypeKey,
+                entity.AnchorCell,
+                entity.Direction,
+                entity.CapturePersistentPayload(),
+                hasBuildingWayLocation,
+                buildingWayLocation,
+                activeWayMove);
+        }
+
+        private static EntityData CreateEntityData(EntityPersistentState state) =>
+            new(
+                state.Id,
+                state.TypeKey,
+                state.AnchorCell,
+                state.Direction);
+
+        private static WayMovementPlanPersistentState CaptureWayMove(
+            WayMovementPlan plan)
+        {
+            var positions = new UnityEngine.Vector3[plan.GraphPositions.Length];
+            plan.GraphPositions.CopyTo(positions, 0);
+            return new WayMovementPlanPersistentState(
+                positions,
+                plan.StartsAtCellCenter,
+                plan.EndsAtCellCenter,
+                plan.EndsInsideBuilding,
+                plan.EndLocation);
+        }
+
+        private static WayMovementPlan RestoreWayMove(
+            WayMovementPlanPersistentState state)
+        {
+            var positions = new UnityEngine.Vector3[state.GraphPositions.Length];
+            state.GraphPositions.CopyTo(positions, 0);
+            return new WayMovementPlan(
+                positions,
+                state.StartsAtCellCenter,
+                state.EndsAtCellCenter,
+                state.EndsInsideBuilding,
+                state.EndLocation);
+        }
+
+        private static void RestoreEntityRuntimeState(
+            Entity entity,
+            EntityPersistentState state)
+        {
+            entity.RestorePersistentPayload(state.ProgressPayload);
+
+            if (state.ActiveWayMove != null
+                && entity is not DynamicEntity)
+            {
+                throw new InvalidOperationException(
+                    $"Entity {state.Id} has an invalid saved Way movement plan.");
+            }
+        }
+
         private void AddRuntimeEntity(Entity entity)
         {
             if (entity == null)
@@ -1161,6 +1394,27 @@ namespace MiniCivilization.World.Runtime
             chunks.CopyTo(result);
             Array.Sort(result);
             return result;
+        }
+
+        private bool ReferencesChunk(
+            EntityId id,
+            ChunkCoordinate coordinate)
+        {
+            if (!referencedChunksByEntityId.TryGetValue(id, out var chunks))
+            {
+                throw new InvalidOperationException(
+                    $"Entity ID {id} has no Chunk references.");
+            }
+
+            for (var index = 0; index < chunks.Length; index++)
+            {
+                if (chunks[index].Equals(coordinate))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private ChunkCoordinate ToChunk(CellCoordinate cell) =>
@@ -1503,7 +1757,7 @@ namespace MiniCivilization.World.Runtime
             public SurfaceHeightData Surface { get; }
             public bool HasBuildingTarget { get; private set; }
             public int BuildingTargetHeight { get; private set; }
-            public int MaxHeightAdjustmentSteps { get; private set; } = -1;
+            public int MaxTerrainHeightAdjustmentSteps { get; private set; } = -1;
             public int MinimumAnchorHeight { get; private set; }
             public bool RequiresRebuild { get; set; }
             public int TargetHeight { get; set; }
@@ -1520,7 +1774,7 @@ namespace MiniCivilization.World.Runtime
             public void SetBuildingTarget(
                 int height,
                 CellCoordinate representativeCell,
-                int maxHeightAdjustmentSteps)
+                int maxTerrainHeightAdjustmentSteps)
             {
                 if (HasBuildingTarget
                     && BuildingTargetHeight <= height)
@@ -1531,7 +1785,7 @@ namespace MiniCivilization.World.Runtime
                 HasBuildingTarget = true;
                 BuildingTargetHeight = height;
                 RepresentativeCell = representativeCell;
-                MaxHeightAdjustmentSteps = maxHeightAdjustmentSteps;
+                MaxTerrainHeightAdjustmentSteps = maxTerrainHeightAdjustmentSteps;
             }
 
             public void RequireAnchorHeight(

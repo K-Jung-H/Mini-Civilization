@@ -1,14 +1,14 @@
 using System;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
 using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
 {
     [CreateAssetMenu(
-        fileName = "SemanticPatternMapPalette",
-        menuName = "Mini Civilization/World/Semantic Pattern Map Palette")]
-    public sealed class SemanticPatternMapPalette : ScriptableObject
+        fileName = "PatternMapPalette",
+        menuName = "Mini Civilization/World/Pattern Map Palette")]
+    public sealed class PatternMapPalette : ScriptableObject
     {
         [Header("Terrain Pattern")]
         [SerializeField] private Color smooth = new(0.25f, 0.8f, 0.3f, 1f);

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
 
     public sealed class PatternTileGridSettingsData
@@ -101,13 +101,4 @@ namespace MiniCivilization.World.Generation.Semantic
         }
     }
 
-    public sealed class PatternTileSettingsData
-    {
-        public PatternTileSettingsData(PatternTileGridSettingsData grid)
-        {
-            Grid = grid ?? throw new ArgumentNullException(nameof(grid));
-        }
-
-        public PatternTileGridSettingsData Grid { get; }
-    }
 }

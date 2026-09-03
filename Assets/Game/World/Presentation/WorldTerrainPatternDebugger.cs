@@ -1,6 +1,6 @@
 using System;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
 using MiniCivilization.World.Runtime;
 using UnityEngine;
 
@@ -10,16 +10,16 @@ namespace MiniCivilization.World.Presentation
     public sealed class WorldTerrainPatternDebugger : MonoBehaviour
     {
         [SerializeField] private WorldManager worldManager;
-        [SerializeField] private SemanticPatternMapPalette patternMapPalette;
+        [SerializeField] private PatternMapPalette patternMapPalette;
 
         public WorldManager WorldManager => worldManager;
-        public SemanticPatternMapPalette PatternMapPalette => patternMapPalette;
+        public PatternMapPalette PatternMapPalette => patternMapPalette;
         public long PatternMapRevision => worldManager == null
             ? 0L
             : worldManager.PatternMapRevision;
 
         public bool TryCreateConfiguration(
-            out SemanticWorldConfigurationData configuration,
+            out WorldGenerationConfiguration configuration,
             out string error)
         {
             configuration = null;
@@ -31,13 +31,13 @@ namespace MiniCivilization.World.Presentation
             }
 
             if (worldManager.CurrentWorldRuntime == null
-                || worldManager.SemanticConfiguration == null)
+                || worldManager.GenerationConfiguration == null)
             {
                 error = "Pattern Map Store가 있는 Runtime World가 필요합니다.";
                 return false;
             }
 
-            configuration = worldManager.SemanticConfiguration;
+            configuration = worldManager.GenerationConfiguration;
             return true;
         }
 
@@ -104,7 +104,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         public bool TryGetStreamingTargetCell(
-            SemanticWorldConfigurationData configuration,
+            WorldGenerationConfiguration configuration,
             out Vector2Int cell)
         {
             cell = default;
@@ -129,7 +129,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         public bool TryMoveStreamingTargetToChunk(
-            SemanticWorldConfigurationData configuration,
+            WorldGenerationConfiguration configuration,
             Vector2Int chunk)
         {
             var target = worldManager != null

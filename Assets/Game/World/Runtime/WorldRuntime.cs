@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
 using MiniCivilization.World.WaterFlow;
 
 namespace MiniCivilization.World.Runtime
@@ -39,13 +39,9 @@ namespace MiniCivilization.World.Runtime
         public event Action SimulationStateChanged;
         public event Action<ChunkRuntime> TerrainRenderStateChanged;
         public event Action<ChunkRuntime> EntityRenderStateChanged;
+        public event Action<ChunkCoordinate> ChunkDataUnloaded;
 
-        public static WorldRuntime CreatePrepared(WorldData data)
-        {
-            return CreateStreaming(data);
-        }
-
-        public static WorldRuntime CreateStreaming(WorldData data)
+        public static WorldRuntime Create(WorldData data)
         {
             if (data == null)
             {
@@ -157,6 +153,11 @@ namespace MiniCivilization.World.Runtime
                 TerrainRenderStateChanged?.Invoke(chunkRuntime);
             }
 
+            if (chunkRuntime.SetEntityRenderingEnabled(true))
+            {
+                EntityRenderStateChanged?.Invoke(chunkRuntime);
+            }
+
             SimulationStateChanged?.Invoke();
         }
 
@@ -182,7 +183,9 @@ namespace MiniCivilization.World.Runtime
             }
         }
 
-        internal void ReleaseChunk(ChunkCoordinate coordinate)
+        internal void ReleaseChunk(
+            ChunkCoordinate coordinate,
+            bool unloadWorldData = false)
         {
             if (!chunkRuntimes.TryGetValue(coordinate, out var chunkRuntime)
                 || chunkRuntime.State == ChunkState.Unloaded)
@@ -197,6 +200,11 @@ namespace MiniCivilization.World.Runtime
                 if (chunkRuntime.SetTerrainRenderingEnabled(false))
                 {
                     TerrainRenderStateChanged?.Invoke(chunkRuntime);
+                }
+
+                if (chunkRuntime.SetEntityRenderingEnabled(false))
+                {
+                    EntityRenderStateChanged?.Invoke(chunkRuntime);
                 }
 
                 if (chunkRuntime.SetState(ChunkState.Ready))
@@ -233,6 +241,13 @@ namespace MiniCivilization.World.Runtime
             if (simulationChanged)
             {
                 SimulationStateChanged?.Invoke();
+            }
+
+            if (unloadWorldData)
+            {
+                Data.UnloadChunk(coordinate);
+                chunkRuntimes.Remove(coordinate);
+                ChunkDataUnloaded?.Invoke(coordinate);
             }
         }
 

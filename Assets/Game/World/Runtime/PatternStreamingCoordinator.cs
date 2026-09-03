@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
+using MiniCivilization.World.Persistence;
 
 namespace MiniCivilization.World.Runtime
 {
@@ -22,18 +23,23 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentOutOfRangeException(nameof(radiusChunks));
             }
 
-            var minimumX = world.IsInfinite
-                ? checked(target.X - radiusChunks)
-                : world.MinimumChunkX;
-            var maximumX = world.IsInfinite
-                ? checked(target.X + radiusChunks)
-                : world.MaximumChunkX;
-            var minimumZ = world.IsInfinite
-                ? checked(target.Z - radiusChunks)
-                : world.MinimumChunkZ;
-            var maximumZ = world.IsInfinite
-                ? checked(target.Z + radiusChunks)
-                : world.MaximumChunkZ;
+            var minimumX = checked(target.X - radiusChunks);
+            var maximumX = checked(target.X + radiusChunks);
+            var minimumZ = checked(target.Z - radiusChunks);
+            var maximumZ = checked(target.Z + radiusChunks);
+            if (!world.IsInfinite)
+            {
+                minimumX = Math.Max(minimumX, world.MinimumChunkX);
+                maximumX = Math.Min(maximumX, world.MaximumChunkX);
+                minimumZ = Math.Max(minimumZ, world.MinimumChunkZ);
+                maximumZ = Math.Min(maximumZ, world.MaximumChunkZ);
+            }
+
+            if (minimumX > maximumX || minimumZ > maximumZ)
+            {
+                return new List<ChunkCoordinate>();
+            }
+
             var result = new List<ChunkCoordinate>(checked(
                 (maximumX - minimumX + 1)
                 * (maximumZ - minimumZ + 1)));
@@ -71,9 +77,10 @@ namespace MiniCivilization.World.Runtime
     internal sealed class PatternStreamingCoordinator : IDisposable
     {
         private readonly WorldRuntime runtime;
-        private readonly SemanticWorldConfigurationData configuration;
+        private readonly WorldGenerationConfiguration configuration;
         private readonly PatternMapPreparationScheduler mapScheduler;
         private readonly PatternChunkMaterializer materializer;
+        private readonly WorldPersistenceService persistence;
         private readonly HashSet<ChunkCoordinate> renderChunks = new();
         private readonly HashSet<ChunkCoordinate> updateChunks = new();
         private readonly List<ChunkCoordinate> orderedRenderChunks = new();
@@ -83,7 +90,8 @@ namespace MiniCivilization.World.Runtime
 
         public PatternStreamingCoordinator(
             WorldRuntime runtime,
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration,
+            WorldPersistenceService persistence = null)
         {
             this.runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             this.configuration = configuration
@@ -91,7 +99,7 @@ namespace MiniCivilization.World.Runtime
             if (!ReferenceEquals(runtime.Data.Settings, configuration.World))
             {
                 throw new ArgumentException(
-                    "Streaming Runtime and Semantic World Settings disagree.",
+                    "Streaming Runtime and World Generation Settings disagree.",
                     nameof(configuration));
             }
 
@@ -114,6 +122,7 @@ namespace MiniCivilization.World.Runtime
                 configuration.MaximumConcurrentTileBuilds);
             materializer = new PatternChunkMaterializer(
                 configuration.PatternTiles);
+            this.persistence = persistence;
         }
 
         public WorldStreamingProgress Progress { get; private set; }
@@ -186,7 +195,10 @@ namespace MiniCivilization.World.Runtime
             {
                 if (!nextRender.Contains(coordinate))
                 {
-                    runtime.ReleaseChunk(coordinate);
+                    persistence?.SaveAndDetachChunk(coordinate);
+                    runtime.ReleaseChunk(
+                        coordinate,
+                        unloadWorldData: persistence != null);
                 }
             }
 
@@ -245,6 +257,12 @@ namespace MiniCivilization.World.Runtime
                             coordinate,
                             Array.Empty<CellCoordinate>());
                     }
+                    else if (persistence?.TryLoadChunk(coordinate) == true)
+                    {
+                        result = new ChunkMaterializationResult(
+                            coordinate,
+                            Array.Empty<CellCoordinate>());
+                    }
                     else if (!runtime.PatternMaps.TryGetPair(
                                  configuration.PatternTiles.GetKeyForChunk(
                                      coordinate),
@@ -259,6 +277,7 @@ namespace MiniCivilization.World.Runtime
                             runtime.Data,
                             coordinate,
                             tile);
+                        persistence?.MarkDirty(coordinate);
                         runtime.CompleteChunkPreparation(
                             coordinate,
                             result.SourceCells);
@@ -271,6 +290,8 @@ namespace MiniCivilization.World.Runtime
                     runtime.CompleteChunkPreparation(
                         coordinate,
                         result.SourceCells);
+                    persistence?.RestoreWaterFrontier(coordinate);
+                    persistence?.RestoreAvailableEntities();
                 }
 
                 if (runtime.GetChunkState(coordinate) == ChunkState.Ready)

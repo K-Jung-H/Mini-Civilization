@@ -146,7 +146,7 @@ namespace MiniCivilization.World.Editor
             value.Append(BakeFormatVersion).Append('|')
                 .Append(catalog.TextureResolution).Append('|')
                 .Append((int)catalog.TextureArrayFormat).Append('|')
-                .Append(catalog.SurfaceTextureArrayMipMaps ? 1 : 0).Append('|')
+                .Append(catalog.GenerateSurfaceTextureArrayMipMaps ? 1 : 0).Append('|')
                 .Append(roads.Count);
             for (var index = 0; index < roads.Count; index++)
             {
@@ -257,7 +257,7 @@ namespace MiniCivilization.World.Editor
                 catalog.TextureResolution,
                 roads.Count + 1,
                 catalog.TextureArrayFormat,
-                catalog.SurfaceTextureArrayMipMaps,
+                catalog.GenerateSurfaceTextureArrayMipMaps,
                 linear)
             {
                 name = arrayName,
@@ -289,7 +289,7 @@ namespace MiniCivilization.World.Editor
             }
 
             array.Apply(
-                catalog.SurfaceTextureArrayMipMaps,
+                catalog.GenerateSurfaceTextureArrayMipMaps,
                 makeNoLongerReadable: true);
             return array;
         }

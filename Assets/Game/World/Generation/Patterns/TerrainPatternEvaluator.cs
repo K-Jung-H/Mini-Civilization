@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     internal readonly struct TerrainPatternSample
     {
@@ -115,17 +115,6 @@ namespace MiniCivilization.World.Generation.Semantic
         {
             this.settings = settings
                 ?? throw new ArgumentNullException(nameof(settings));
-        }
-
-        public TerrainPatternCell Evaluate(int worldX, int worldZ)
-        {
-            var center = EvaluateSample(worldX, worldZ);
-            var slope = CalculateSlope(
-                EvaluateSample(checked(worldX - 1), worldZ).SurfaceHeight,
-                EvaluateSample(checked(worldX + 1), worldZ).SurfaceHeight,
-                EvaluateSample(worldX, checked(worldZ - 1)).SurfaceHeight,
-                EvaluateSample(worldX, checked(worldZ + 1)).SurfaceHeight);
-            return ToCell(center, slope);
         }
 
         internal TerrainPatternSample EvaluateSample(int worldX, int worldZ)
@@ -558,7 +547,7 @@ namespace MiniCivilization.World.Generation.Semantic
             };
 
         private int DeriveCandidateSeed(RegionCandidate candidate, string path) =>
-            unchecked((int)SemanticPatternNoise.Hash(
+            unchecked((int)PatternNoise.Hash(
                 candidate.Key,
                 ResolveLegacyChannel(path),
                 settings.WorldSeed));
@@ -568,7 +557,7 @@ namespace MiniCivilization.World.Generation.Semantic
             TerrainRangeData range,
             string path)
         {
-            var selector = (SemanticPatternNoise.Hash(
+            var selector = (PatternNoise.Hash(
                     candidate.Key,
                     ResolveLegacyChannel(path),
                     settings.WorldSeed) & 0x00FFFFFFu)
@@ -610,14 +599,14 @@ namespace MiniCivilization.World.Generation.Semantic
             _ => throw new ArgumentOutOfRangeException(nameof(path))
         };
 
-        private static float NormalizeNoise(float value, SemanticNoiseMode mode) =>
-            SemanticPatternNoise.Normalize(value, mode);
+        private static float NormalizeNoise(float value, PatternNoiseMode mode) =>
+            PatternNoise.Normalize(value, mode);
 
         private static float SampleNormalizedNoise(
             double x,
             double z,
             TerrainNoiseFieldData field,
-            int seed) => SemanticPatternNoise.SampleNormalized(
+            int seed) => PatternNoise.SampleNormalized(
             x,
             z,
             field,
@@ -627,13 +616,13 @@ namespace MiniCivilization.World.Generation.Semantic
             double x,
             double z,
             TerrainNoiseFieldData field,
-            int seed) => SemanticPatternNoise.SampleSigned(x, z, field, seed);
+            int seed) => PatternNoise.SampleSigned(x, z, field, seed);
 
         private static float SampleNoise(
             double x,
             double z,
             TerrainNoiseFieldData field,
-            int seed) => SemanticPatternNoise.Sample(x, z, field, seed);
+            int seed) => PatternNoise.Sample(x, z, field, seed);
 
         private static bool IsBefore(
             double candidateDistance,
@@ -663,16 +652,16 @@ namespace MiniCivilization.World.Generation.Semantic
             from + (to - from) * amount;
 
         private static int DeriveSeed(int worldSeed, string path) =>
-            SemanticPatternNoise.DeriveSeed(worldSeed, path);
+            PatternNoise.DeriveSeed(worldSeed, path);
 
         private static uint Hash(long x, long z, int seed) =>
-            SemanticPatternNoise.Hash(x, z, seed);
+            PatternNoise.Hash(x, z, seed);
 
         private static float Value01(long x, long z, int seed) =>
-            SemanticPatternNoise.Value01(x, z, seed);
+            PatternNoise.Value01(x, z, seed);
 
         private static float SignedValue01(long x, long z, int seed) =>
-            SemanticPatternNoise.SignedValue01(x, z, seed);
+            PatternNoise.SignedValue01(x, z, seed);
     }
 
     public sealed class TerrainPatternTileBuilder

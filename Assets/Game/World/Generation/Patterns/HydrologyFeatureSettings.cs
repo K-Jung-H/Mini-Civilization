@@ -2,23 +2,23 @@ using System;
 using MiniCivilization.World.Domain;
 using UnityEngine;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     [Serializable]
-    public struct SemanticBasinFeatureSettings
+    public struct BasinFeatureSettings
     {
         [SerializeField] private int candidateLatticeSpacingCells;
         [SerializeField] private float occurrence;
-        [SerializeField] private SemanticRange areaCells;
+        [SerializeField] private PatternRange areaCells;
         [SerializeField] private int pondMaximumAreaCells;
-        [SerializeField] private SemanticRange maximumDepthCells;
-        [SerializeField] private SemanticNoiseField potentialField;
-        [SerializeField] private SemanticCurve potentialResponse;
+        [SerializeField] private PatternRange maximumDepthCells;
+        [SerializeField] private PatternNoiseField potentialField;
+        [SerializeField] private PatternCurve potentialResponse;
         [SerializeField] private int shoreTransitionCells;
-        [SerializeField] private SemanticCurve shoreTransition;
-        [SerializeField] private SemanticCurve depthByInterior;
-        [SerializeField] private SemanticNoiseField bedField;
-        [SerializeField] private SemanticRange bedAmplitudeCells;
+        [SerializeField] private PatternCurve shoreTransition;
+        [SerializeField] private PatternCurve depthByInterior;
+        [SerializeField] private PatternNoiseField bedField;
+        [SerializeField] private PatternRange bedAmplitudeCells;
         [SerializeField] private int maximumReachCells;
         [SerializeField] private float potentialCost;
         [SerializeField] private float terrainDeformationCost;
@@ -50,15 +50,15 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticSeaFeatureSettings
+    public struct SeaFeatureSettings
     {
-        [SerializeField] private SemanticDomainWarp domainWarp;
-        [SerializeField] private SemanticNoiseField basinField;
+        [SerializeField] private PatternDomainWarp domainWarp;
+        [SerializeField] private PatternNoiseField basinField;
         [SerializeField] private float basinVariation;
-        [SerializeField] private SemanticCurve depthByInterior;
-        [SerializeField] private SemanticRange maximumDepthCells;
-        [SerializeField] private SemanticNoiseField seabedField;
-        [SerializeField] private SemanticRange seabedAmplitudeCells;
+        [SerializeField] private PatternCurve depthByInterior;
+        [SerializeField] private PatternRange maximumDepthCells;
+        [SerializeField] private PatternNoiseField seabedField;
+        [SerializeField] private PatternRange seabedAmplitudeCells;
         [SerializeField] private int surfaceCell;
         [SerializeField] private int surfaceStep;
 
@@ -74,14 +74,14 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticRiverFeatureSettings
+    public struct RiverFeatureSettings
     {
         [SerializeField] private int candidateLatticeSpacingCells;
         [SerializeField] private int anchorJitterCells;
         [SerializeField] private float occurrence;
-        [SerializeField] private SemanticRange lengthCells;
+        [SerializeField] private PatternRange lengthCells;
         [SerializeField] private int strokeSampleSpacingCells;
-        [SerializeField] private SemanticRange nodeTurnDegrees;
+        [SerializeField] private PatternRange nodeTurnDegrees;
         [SerializeField] private int terrainCorrectionRadiusCells;
         [SerializeField] private int terrainCorrectionSmoothingPasses;
         [SerializeField] private float terrainSlopeCost;
@@ -89,16 +89,16 @@ namespace MiniCivilization.World.Generation.Semantic
         [SerializeField] private float elevationChangeCost;
         [SerializeField] private float corridorDeformationCost;
         [SerializeField] private float curvatureCost;
-        [SerializeField] private SemanticNoiseField widthField;
-        [SerializeField] private SemanticRange widthCells;
-        [SerializeField] private SemanticCurve crossSection;
-        [SerializeField] private SemanticRange depthCells;
-        [SerializeField] private SemanticRange waterInsetCells;
+        [SerializeField] private PatternNoiseField widthField;
+        [SerializeField] private PatternRange widthCells;
+        [SerializeField] private PatternCurve crossSection;
+        [SerializeField] private PatternRange depthCells;
+        [SerializeField] private PatternRange waterInsetCells;
         [SerializeField] private float bankMarginCells;
         [SerializeField] private int dropTransitionCells;
-        [SerializeField] private SemanticCurve dropTransition;
-        [SerializeField] private SemanticNoiseField riverbedField;
-        [SerializeField] private SemanticRange riverbedAmplitudeCells;
+        [SerializeField] private PatternCurve dropTransition;
+        [SerializeField] private PatternNoiseField riverbedField;
+        [SerializeField] private PatternRange riverbedAmplitudeCells;
 
         internal RiverFeatureSettingsData CreateData() => new(
             candidateLatticeSpacingCells,
@@ -127,10 +127,10 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticNaturalEndpointSettings
+    public struct NaturalEndpointSettings
     {
         [SerializeField] private int endpointTransitionCells;
-        [SerializeField] private SemanticCurve endpointTransitionRate;
+        [SerializeField] private PatternCurve endpointTransitionRate;
 
         internal NaturalEndpointSettingsData CreateData() => new(
             endpointTransitionCells,
@@ -138,14 +138,14 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [CreateAssetMenu(
-        fileName = "SemanticHydrologyFeatureSettings",
-        menuName = "Mini Civilization/World/Semantic Hydrology Feature Settings")]
-    public sealed class SemanticHydrologyFeatureSettings : ScriptableObject
+        fileName = "HydrologyFeatureSettings",
+        menuName = "Mini Civilization/World/Hydrology Feature Settings")]
+    public sealed class HydrologyFeatureSettings : ScriptableObject
     {
-        [SerializeField] private SemanticSeaFeatureSettings sea;
-        [SerializeField] private SemanticBasinFeatureSettings basins;
-        [SerializeField] private SemanticRiverFeatureSettings river;
-        [SerializeField] private SemanticNaturalEndpointSettings naturalEndpoint;
+        [SerializeField] private SeaFeatureSettings sea;
+        [SerializeField] private BasinFeatureSettings basins;
+        [SerializeField] private RiverFeatureSettings river;
+        [SerializeField] private NaturalEndpointSettings naturalEndpoint;
 
         public HydrologyFeatureSettingsData CreateData(
             WorldSettingsData world) => new(

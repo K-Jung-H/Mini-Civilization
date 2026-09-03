@@ -6,13 +6,13 @@
 않고, 다음 순수 평가기로 구현했다.
 
 ```text
-SemanticTerrainPatternSettings + World seed + absolute XZ
+TerrainPatternSettings + World seed + absolute XZ
   → TerrainPatternEvaluator
   → TerrainPatternTileBuilder
   → TerrainPatternTile
 ```
 
-- [SemanticTerrainPatternSettings.asset](../Settings/SemanticTerrainPatternSettings.asset)가
+- [TerrainPatternSettings.asset](../Settings/TerrainPatternSettings.asset)가
   Terrain Pattern의 유일한 수치 원본이다.
 - `PatternTileChunkSpan`은 `1`이다. Pattern Tile은 정확히 한 Chunk XZ Core와 일치한다.
   현재 15×15 고정 Chunk 범위를 나누며, 새 Render Chunk가 더 큰 Terrain Tile 완료를
@@ -44,7 +44,7 @@ frequency spacing, persistence, octave seed stride도 모두 asset 값이다. No
 
 ## 검증 범위
 
-- 새 Semantic source를 실제 C# compile 목록에 포함해 `MiniCivilization.World.Editor`
+- 새 Pattern source를 실제 C# compile 목록에 포함해 `MiniCivilization.World.Editor`
   컴파일 오류 없이 확인했다.
 - 실제 Terrain Tile 생성, ChunkData, Renderer, World 생성은 아직 연결되지 않았으므로
   실행 테스트 대상이 아니다.

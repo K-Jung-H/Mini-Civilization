@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
 using MiniCivilization.World.Presentation;
 using UnityEditor;
 using UnityEngine;
@@ -98,7 +98,7 @@ namespace MiniCivilization.World.Editor
             if (debugger.PatternMapPalette == null)
             {
                 EditorGUILayout.HelpBox(
-                    "Semantic Pattern Map Palette is not assigned.",
+                    "Pattern Map Palette is not assigned.",
                     MessageType.Error);
                 return;
             }
@@ -117,7 +117,7 @@ namespace MiniCivilization.World.Editor
             mapLevel = Math.Clamp(mapLevel, 0, levels.Count - 1);
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(
-                "Semantic Pattern Map",
+                "Pattern Map",
                 EditorStyles.boldLabel);
             EditorGUILayout.LabelField(
                 "출력 해상도",
@@ -226,7 +226,7 @@ namespace MiniCivilization.World.Editor
         }
 
         private void StartMapPreparation(
-            SemanticWorldConfigurationData configuration,
+            WorldGenerationConfiguration configuration,
             int nextPixelsPerChunk)
         {
             if (!TryResolveViewport(
@@ -278,7 +278,7 @@ namespace MiniCivilization.World.Editor
 
         private Dictionary<PatternTileKey, List<PatternMapPixel>>
             BuildPixelGroups(
-                SemanticWorldConfigurationData configuration,
+                WorldGenerationConfiguration configuration,
                 IReadOnlyList<PatternMapPixel> pixels)
         {
             var result = new Dictionary<PatternTileKey, List<PatternMapPixel>>();
@@ -522,7 +522,7 @@ namespace MiniCivilization.World.Editor
 
         private void DrawSelectionOverlay(
             Rect rect,
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             var selection = ResolveSelectionBounds(configuration);
             DrawWorldRectangle(rect, selection, new Color(1f, 0.55f, 0f, 1f));
@@ -530,7 +530,7 @@ namespace MiniCivilization.World.Editor
 
         private void DrawStreamingRenderRangeOverlay(
             Rect rect,
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             if (!debugger.TryGetStreamingTargetCell(configuration, out var cell))
             {
@@ -575,7 +575,7 @@ namespace MiniCivilization.World.Editor
 
         private void DrawStreamingTargetCross(
             Rect rect,
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             if (!debugger.TryGetStreamingTargetCell(
                     configuration,
@@ -660,7 +660,7 @@ namespace MiniCivilization.World.Editor
 
         private void HandleMapSelection(
             Rect rect,
-            SemanticWorldConfigurationData configuration,
+            WorldGenerationConfiguration configuration,
             int nextPixelsPerChunk)
         {
             var current = Event.current;
@@ -712,7 +712,7 @@ namespace MiniCivilization.World.Editor
         }
 
         private void MoveStreamingTarget(
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             var streamingTarget = debugger.WorldManager != null
                 ? debugger.WorldManager.StreamingTarget
@@ -733,7 +733,7 @@ namespace MiniCivilization.World.Editor
         }
 
         private void SelectCurrentStreamingTarget(
-            SemanticWorldConfigurationData configuration,
+            WorldGenerationConfiguration configuration,
             int nextPixelsPerChunk)
         {
             if (!debugger.TryGetStreamingTargetCell(configuration, out var cell))
@@ -822,7 +822,7 @@ namespace MiniCivilization.World.Editor
         }
 
         private void EnsureSelectedCenter(
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             if (hasSelectedCenter)
             {
@@ -911,7 +911,7 @@ namespace MiniCivilization.World.Editor
         }
 
         private PatternTileBounds ResolveSelectionBounds(
-            SemanticWorldConfigurationData configuration)
+            WorldGenerationConfiguration configuration)
         {
             var world = configuration.World;
             if (world.WorldType == WorldType.Finite)

@@ -4,7 +4,6 @@ using MiniCivilization.World.Domain;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace MiniCivilization.World.Editing
@@ -57,8 +56,7 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private WorldEditToolbarGroup terrainGroup;
         [SerializeField] private WorldEditToolbarGroup entityGroup;
         [SerializeField]
-        [FormerlySerializedAs("propertyGroup")]
-        private WorldEditToolbarGroup environmentGroup;
+        private WorldEditToolbarGroup environmentEditGroup;
         [SerializeField] private RectTransform[] dividers;
 
         [Header("History")]
@@ -121,7 +119,7 @@ namespace MiniCivilization.World.Editing
             selectModeGroup?.Initialize();
             terrainGroup?.Initialize();
             entityGroup?.Initialize();
-            environmentGroup?.Initialize();
+            environmentEditGroup?.Initialize();
             NormalizeActionGroupExpansion();
             BindEvents();
             EnsureSelectionModeSelected();
@@ -376,7 +374,7 @@ namespace MiniCivilization.World.Editing
 
         private void ToggleEnvironmentGroup()
         {
-            ToggleExclusiveActionGroup(environmentGroup);
+            ToggleExclusiveActionGroup(environmentEditGroup);
         }
 
         private void ToggleIndependentGroup(WorldEditToolbarGroup group)
@@ -424,9 +422,9 @@ namespace MiniCivilization.World.Editing
         private void NormalizeActionGroupExpansion()
         {
             WorldEditToolbarGroup expandedGroup = null;
-            if (environmentGroup != null && environmentGroup.IsExpanded)
+            if (environmentEditGroup != null && environmentEditGroup.IsExpanded)
             {
-                expandedGroup = environmentGroup;
+                expandedGroup = environmentEditGroup;
             }
             else if (entityGroup != null && entityGroup.IsExpanded)
             {
@@ -456,9 +454,9 @@ namespace MiniCivilization.World.Editing
                 entityGroup.SetExpanded(false);
             }
 
-            if (environmentGroup != null && environmentGroup != expandedGroup)
+            if (environmentEditGroup != null && environmentEditGroup != expandedGroup)
             {
-                environmentGroup.SetExpanded(false);
+                environmentEditGroup.SetExpanded(false);
             }
         }
 
@@ -485,7 +483,7 @@ namespace MiniCivilization.World.Editing
             BindGroupButton(selectModeGroup, ToggleSelectModeGroup);
             BindGroupButton(terrainGroup, ToggleTerrainGroup);
             BindGroupButton(entityGroup, ToggleEntityGroup);
-            BindGroupButton(environmentGroup, ToggleEnvironmentGroup);
+            BindGroupButton(environmentEditGroup, ToggleEnvironmentGroup);
 
             BindToggle(singleSelectionToggle);
             BindToggle(areaSelectionToggle);
@@ -552,7 +550,7 @@ namespace MiniCivilization.World.Editing
             UnbindGroupButton(selectModeGroup, ToggleSelectModeGroup);
             UnbindGroupButton(terrainGroup, ToggleTerrainGroup);
             UnbindGroupButton(entityGroup, ToggleEntityGroup);
-            UnbindGroupButton(environmentGroup, ToggleEnvironmentGroup);
+            UnbindGroupButton(environmentEditGroup, ToggleEnvironmentGroup);
 
             UnbindToggle(singleSelectionToggle);
             UnbindToggle(areaSelectionToggle);
@@ -839,7 +837,7 @@ namespace MiniCivilization.World.Editing
             selectModeGroup?.RefreshVisibility(isExpanded);
             terrainGroup?.RefreshVisibility(isExpanded);
             entityGroup?.RefreshVisibility(isExpanded);
-            environmentGroup?.RefreshVisibility(isExpanded);
+            environmentEditGroup?.RefreshVisibility(isExpanded);
 
             if (!isExpanded)
             {
@@ -854,7 +852,7 @@ namespace MiniCivilization.World.Editing
             LayoutDivider(GetDivider(2), ref cursor);
             LayoutGroup(entityGroup, ref cursor);
             LayoutDivider(GetDivider(3), ref cursor);
-            LayoutGroup(environmentGroup, ref cursor);
+            LayoutGroup(environmentEditGroup, ref cursor);
 
             var expandedWidth = cursor + 8f;
             expandedContent.sizeDelta = new Vector2(expandedWidth, 84f);
@@ -929,8 +927,8 @@ namespace MiniCivilization.World.Editing
             return sectionIndex switch
             {
                 0 or 1 => terrainGroup != null && terrainGroup.IsExpanded,
-                2 => environmentGroup != null
-                    && environmentGroup.IsExpanded,
+                2 => environmentEditGroup != null
+                    && environmentEditGroup.IsExpanded,
                 _ => false
             };
         }

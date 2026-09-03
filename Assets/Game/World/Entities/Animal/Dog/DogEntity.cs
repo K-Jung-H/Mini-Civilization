@@ -1,3 +1,4 @@
+using System.IO;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Runtime;
 
@@ -90,6 +91,30 @@ namespace MiniCivilization.World.Entities.Animal
         private void EnterIdle()
         {
             currentState = BehaviorState.Idle;
+        }
+
+        protected override void WritePersistentState(BinaryWriter writer)
+        {
+            base.WritePersistentState(writer);
+            writer.Write((byte)currentState);
+            writer.Write(decisionElapsed);
+        }
+
+        protected override void ReadPersistentState(BinaryReader reader)
+        {
+            base.ReadPersistentState(reader);
+            var behaviorState = reader.ReadByte();
+            var savedDecisionElapsed = reader.ReadSingle();
+            if (behaviorState > (byte)BehaviorState.Move
+                || !float.IsFinite(savedDecisionElapsed)
+                || savedDecisionElapsed < 0f)
+            {
+                throw new System.InvalidOperationException(
+                    $"Dog Entity {Id} has an invalid saved behavior state.");
+            }
+
+            currentState = (BehaviorState)behaviorState;
+            decisionElapsed = savedDecisionElapsed;
         }
     }
 }

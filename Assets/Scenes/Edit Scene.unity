@@ -188,7 +188,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 2034307140}
     - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
-      propertyPath: maxHeightAdjustmentSteps
+      propertyPath: maxTerrainHeightAdjustmentSteps
       value: 5
       objectReference: {fileID: 0}
     m_RemovedComponents: []
@@ -762,7 +762,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 2034307140}
     - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
-      propertyPath: maxHeightAdjustmentSteps
+      propertyPath: maxTerrainHeightAdjustmentSteps
       value: 5
       objectReference: {fileID: 0}
     m_RemovedComponents: []
@@ -1118,7 +1118,7 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 2034307140}
     - target: {fileID: 8949609715501591675, guid: 86d3d8cd69def3943b43de15b120af12, type: 3}
-      propertyPath: maxHeightAdjustmentSteps
+      propertyPath: maxTerrainHeightAdjustmentSteps
       value: 5
       objectReference: {fileID: 0}
     m_RemovedComponents: []

@@ -21,8 +21,8 @@ MonoBehaviour:
     z: 1
   - x: 0
     z: -1
-  maxUpHeight: 6
-  maxDownHeight: 10
+  maxStepUpHeight: 6
+  maxStepDownHeight: 10
   walkDuration: 1
   heightTransitionDuration: 1
   swimDuration: 2

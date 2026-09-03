@@ -1,6 +1,5 @@
 using MiniCivilization.World.Domain;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Authoring
 {
@@ -44,11 +43,11 @@ namespace MiniCivilization.World.Authoring
         [SerializeField]
         private BuildingCellRole buildingRole;
 
-        [SerializeField, FormerlySerializedAs("maxTerrainCorrectionSteps"), Min(0)]
-        private int maxHeightAdjustmentSteps;
+        [SerializeField, Min(0)]
+        private int maxTerrainHeightAdjustmentSteps;
 
         public BuildingCellRole BuildingRole => buildingRole;
-        public int MaxHeightAdjustmentSteps => maxHeightAdjustmentSteps;
+        public int MaxTerrainHeightAdjustmentSteps => maxTerrainHeightAdjustmentSteps;
         public bool HasValidTerrainAnchor =>
             buildingRole != BuildingCellRole.TerrainAnchor
             || TerrainHeight == WorldGrid.HeightStepsPerCell;
@@ -86,11 +85,11 @@ namespace MiniCivilization.World.Authoring
 
             var sourceCorrectionSteps =
                 source is BuildingEntityAuthoringCellBox sourceBuilding
-                    ? sourceBuilding.MaxHeightAdjustmentSteps
+                    ? sourceBuilding.MaxTerrainHeightAdjustmentSteps
                     : 0;
-            if (maxHeightAdjustmentSteps != sourceCorrectionSteps)
+            if (maxTerrainHeightAdjustmentSteps != sourceCorrectionSteps)
             {
-                maxHeightAdjustmentSteps = sourceCorrectionSteps;
+                maxTerrainHeightAdjustmentSteps = sourceCorrectionSteps;
                 changed = true;
             }
 
@@ -106,9 +105,9 @@ namespace MiniCivilization.World.Authoring
         protected override void OnValidate()
         {
             base.OnValidate();
-            maxHeightAdjustmentSteps = Mathf.Max(
+            maxTerrainHeightAdjustmentSteps = Mathf.Max(
                 0,
-                maxHeightAdjustmentSteps);
+                maxTerrainHeightAdjustmentSteps);
             if (buildingRole == BuildingCellRole.TerrainAnchor)
             {
                 SetTerrainHeight(WorldGrid.HeightStepsPerCell);

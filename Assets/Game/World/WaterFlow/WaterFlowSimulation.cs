@@ -244,6 +244,59 @@ namespace MiniCivilization.World.WaterFlow
             PersistFrontier(world, state);
         }
 
+        public void RestoreChunkFrontier(
+            WorldData world,
+            WaterFlowState state,
+            IReadOnlyList<CellCoordinate> frontier)
+        {
+            ValidateWorldAndState(world, state);
+            if (frontier == null || frontier.Count == 0)
+            {
+                return;
+            }
+
+            for (var index = 0; index < frontier.Count; index++)
+            {
+                var cell = frontier[index];
+                if (!world.TryGetCell(cell.X, cell.Y, cell.Z, out _))
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(frontier),
+                        "A saved water frontier Cell is not loaded.");
+                }
+
+                AddFrontier(cell);
+            }
+
+            RefreshRunnableFrontier();
+            PersistFrontier(world, state);
+        }
+
+        public void DetachChunkFrontier(
+            WorldData world,
+            WaterFlowState state,
+            ChunkCoordinate coordinate,
+            List<CellCoordinate> target)
+        {
+            ValidateWorldAndState(world, state);
+            if (target == null)
+            {
+                throw new ArgumentNullException(nameof(target));
+            }
+
+            target.Clear();
+            CancelActiveWave(state, requeue: true);
+            if (chunkStates.TryGetValue(coordinate, out var chunkState))
+            {
+                chunkStates.Remove(coordinate);
+                target.AddRange(chunkState.Frontier);
+                target.Sort();
+            }
+
+            RefreshRunnableFrontier();
+            PersistFrontier(world, state);
+        }
+
         public void EnqueueChanges(
             WorldData world,
             WaterFlowState state,
@@ -1091,69 +1144,6 @@ namespace MiniCivilization.World.WaterFlow
             {
                 throw new InvalidOperationException(
                     "The water resolver belongs to a different world.");
-            }
-        }
-    }
-
-    internal static class WaterFlowSolver
-    {
-        public static void PrepareGeneratedWorld(WorldData world)
-        {
-            if (world == null)
-            {
-                throw new ArgumentNullException(nameof(world));
-            }
-
-            var frontier = new HashSet<CellCoordinate>();
-            foreach (var chunk in world.EnumerateLoadedChunks())
-            {
-                var startX = chunk.Coordinate.X * world.ChunkSizeX;
-                var startZ = chunk.Coordinate.Z * world.ChunkSizeZ;
-                for (var y = 0; y < world.Height; y++)
-                for (var localZ = 0; localZ < world.ChunkSizeZ; localZ++)
-                for (var localX = 0; localX < world.ChunkSizeX; localX++)
-                {
-                    var x = startX + localX;
-                    var z = startZ + localZ;
-                    var cell = world.GetCell(x, y, z);
-                    if (!cell.HasWater
-                        || cell.Water.Role != WaterRole.Source)
-                    {
-                        continue;
-                    }
-
-                    var coordinate = new CellCoordinate(x, y, z);
-                    if (WaterSourceFrontierSelector.IsNeeded(
-                            world,
-                            coordinate))
-                    {
-                        AddSourceAndNeighbors(coordinate);
-                    }
-                }
-            }
-
-            var sortedFrontier = new CellCoordinate[frontier.Count];
-            frontier.CopyTo(sortedFrontier);
-            Array.Sort(sortedFrontier);
-            world.WaterFlowSchedule.ReplaceFrontier(sortedFrontier);
-
-            void AddSourceAndNeighbors(CellCoordinate coordinate)
-            {
-                frontier.Add(coordinate);
-                AddIfContained(coordinate.X + 1, coordinate.Y, coordinate.Z);
-                AddIfContained(coordinate.X - 1, coordinate.Y, coordinate.Z);
-                AddIfContained(coordinate.X, coordinate.Y + 1, coordinate.Z);
-                AddIfContained(coordinate.X, coordinate.Y - 1, coordinate.Z);
-                AddIfContained(coordinate.X, coordinate.Y, coordinate.Z + 1);
-                AddIfContained(coordinate.X, coordinate.Y, coordinate.Z - 1);
-            }
-
-            void AddIfContained(int x, int y, int z)
-            {
-                if (world.TryGetCell(x, y, z, out _))
-                {
-                    frontier.Add(new CellCoordinate(x, y, z));
-                }
             }
         }
     }

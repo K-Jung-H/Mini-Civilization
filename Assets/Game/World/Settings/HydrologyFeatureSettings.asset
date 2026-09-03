@@ -10,8 +10,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 21a2722eac784471aecb4525f4ef8d95, type: 3}
-  m_Name: SemanticHydrologyFeatureSettings
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Semantic.SemanticHydrologyFeatureSettings
+  m_Name: HydrologyFeatureSettings
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.HydrologyFeatureSettings
   sea:
     domainWarp:
       field:

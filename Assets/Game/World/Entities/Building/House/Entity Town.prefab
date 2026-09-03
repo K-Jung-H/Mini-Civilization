@@ -118,19 +118,19 @@ MonoBehaviour:
   visualMotionProfile: {fileID: 0}
   animator: {fileID: 0}
   entityType: 1
-  buildingCells:
+  localBuildingCellOffsets:
   - {x: 0, y: 0, z: -1}
   - {x: 0, y: 0, z: 0}
   buildingCellTerrain:
   - TerrainHeight: 3
-    MaxHeightAdjustmentSteps: 5
+    MaxTerrainHeightAdjustmentSteps: 5
   - TerrainHeight: 0
-    MaxHeightAdjustmentSteps: 0
+    MaxTerrainHeightAdjustmentSteps: 0
   terrainAnchors:
   - LocalOffset: {x: 0, y: -1, z: -1}
-    MaxHeightAdjustmentSteps: 5
+    MaxTerrainHeightAdjustmentSteps: 5
   - LocalOffset: {x: 0, y: -1, z: 0}
-    MaxHeightAdjustmentSteps: 5
+    MaxTerrainHeightAdjustmentSteps: 5
   localWayPoints:
   - LocalCellOffset: {x: 0, y: 0, z: 0}
     LocalPosition: {x: 0.25, y: 0, z: 0.5}

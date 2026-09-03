@@ -1,11 +1,11 @@
 using System;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
-using MiniCivilization.World.Generation.Semantic;
+using MiniCivilization.World.Generation.Patterns;
+using MiniCivilization.World.Persistence;
 using MiniCivilization.World.Presentation;
 using MiniCivilization.World.WaterFlow;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace MiniCivilization.World.Runtime
 {
@@ -20,24 +20,27 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldUIManager uiManager;
 
         [Header("World Generation Settings")]
-        [SerializeField, FormerlySerializedAs("semanticWorldSettings")]
-        private SemanticWorldSettings worldGenerationSettings;
+        [SerializeField] private WorldGenerationSettings worldGenerationSettings;
         [SerializeField] private Transform streamingTarget;
+
+        [Header("Save / Load")]
+        [SerializeField] private SaveLoadManager saveLoadManager;
 
         private PatternStreamingCoordinator streamingCoordinator;
         private WorldStreamingProgress streamingProgress;
-        private SemanticWorldConfigurationData semanticConfiguration;
+        private WorldGenerationConfiguration generationConfiguration;
 
         public WorldEditController EditController => editController;
         public WorldWaterFlowController WaterFlowController =>
             waterFlowController;
         public WorldRenderer Renderer => worldRenderer;
         public EntityManager EntityManager => entityManager;
-        public SemanticWorldSettings WorldGenerationSettings =>
+        public WorldGenerationSettings WorldGenerationSettings =>
             worldGenerationSettings;
+        public SaveLoadManager SaveLoadManager => saveLoadManager;
         public Transform StreamingTarget => streamingTarget;
-        public SemanticWorldConfigurationData SemanticConfiguration =>
-            semanticConfiguration;
+        public WorldGenerationConfiguration GenerationConfiguration =>
+            generationConfiguration;
         public WorldStreamingProgress StreamingProgress => streamingProgress;
         public long PatternMapRevision => CurrentWorldRuntime == null
             ? 0L
@@ -55,7 +58,22 @@ namespace MiniCivilization.World.Runtime
         private void Start()
         {
             uiManager?.Initialize(this);
-            CreateSemanticWorld();
+            if (saveLoadManager == null)
+            {
+                throw new InvalidOperationException(
+                    "World Manager requires a Save Load Manager.");
+            }
+
+            saveLoadManager.Saved += OnWorldSaved;
+            try
+            {
+                CreateWorld();
+            }
+            catch
+            {
+                saveLoadManager.Saved -= OnWorldSaved;
+                throw;
+            }
         }
 
         private void Update()
@@ -68,16 +86,6 @@ namespace MiniCivilization.World.Runtime
             var target = ResolveStreamingTargetChunk();
             worldRenderer?.SetStreamingPriorityTarget(target);
             streamingCoordinator.Update(target);
-        }
-
-        public void UnloadWorld()
-        {
-            DisposeStreamingCoordinator();
-            UnbindRuntime();
-            CurrentWorldRuntime = null;
-            semanticConfiguration = null;
-            SetDirty(false);
-            WorldChanged?.Invoke();
         }
 
         public void MarkDirty()
@@ -178,18 +186,16 @@ namespace MiniCivilization.World.Runtime
 
         private void OnDestroy()
         {
-            DisposeStreamingCoordinator();
-            UnbindRuntime();
-        }
-
-        private void CreateSemanticWorld()
-        {
-            if (worldGenerationSettings == null)
+            if (saveLoadManager != null)
             {
-                throw new InvalidOperationException(
-                    "World Manager requires World Generation Settings.");
+                saveLoadManager.Saved -= OnWorldSaved;
             }
 
+            DisposeWorldRuntime();
+        }
+
+        private void CreateWorld()
+        {
             if (streamingTarget == null)
             {
                 throw new InvalidOperationException(
@@ -198,19 +204,23 @@ namespace MiniCivilization.World.Runtime
 
             if (CurrentWorldRuntime != null)
             {
-                UnloadWorld();
+                throw new InvalidOperationException(
+                    "World Manager already has an active World Runtime.");
             }
 
-            semanticConfiguration = worldGenerationSettings.CreateConfiguration();
-            var runtime = WorldRuntime.CreateStreaming(
-                new WorldData(semanticConfiguration.World));
+            generationConfiguration = saveLoadManager.ResolveGeneration(
+                worldGenerationSettings);
+            var data = new WorldData(generationConfiguration.World);
+            var runtime = WorldRuntime.Create(data);
             try
             {
                 CurrentWorldRuntime = runtime;
+                saveLoadManager.Attach(runtime);
                 BindRuntime(runtime);
                 streamingCoordinator = new PatternStreamingCoordinator(
                     runtime,
-                    semanticConfiguration);
+                    generationConfiguration,
+                    saveLoadManager.Persistence);
                 streamingCoordinator.ProgressChanged += OnStreamingProgressChanged;
                 OnStreamingProgressChanged(streamingCoordinator.Progress);
                 var target = ResolveStreamingTargetChunk();
@@ -223,9 +233,17 @@ namespace MiniCivilization.World.Runtime
                 DisposeStreamingCoordinator();
                 UnbindRuntime();
                 CurrentWorldRuntime = null;
-                semanticConfiguration = null;
+                generationConfiguration = null;
                 throw;
             }
+        }
+
+        private void DisposeWorldRuntime()
+        {
+            DisposeStreamingCoordinator();
+            UnbindRuntime();
+            CurrentWorldRuntime = null;
+            generationConfiguration = null;
         }
 
         private void DisposeStreamingCoordinator()
@@ -329,12 +347,14 @@ namespace MiniCivilization.World.Runtime
 
             waterFlowController.ApplyChanges(changeSet);
             worldRenderer.ApplyChanges(changeSet);
+            TrackDirty(changeSet);
             MarkDirty();
         }
 
         private void OnWaterChanged(WorldChangeSet changeSet)
         {
             worldRenderer.ApplyChanges(changeSet);
+            TrackDirty(changeSet);
             MarkDirty();
         }
 
@@ -344,8 +364,19 @@ namespace MiniCivilization.World.Runtime
         private void OnEntityChanged(EntityChangeSet changeSet)
         {
             worldRenderer.ApplyEntityChanges(changeSet);
-            MarkDirty();
+            if (!saveLoadManager.IsSynchronizing)
+            {
+                MarkDirty();
+            }
+
             EntityChanged?.Invoke(changeSet);
         }
+
+        private void TrackDirty(WorldChangeSet changeSet)
+        {
+            saveLoadManager.MarkDirty(changeSet);
+        }
+
+        private void OnWorldSaved() => SetDirty(false);
     }
 }

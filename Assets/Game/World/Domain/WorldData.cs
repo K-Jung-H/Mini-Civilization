@@ -471,6 +471,22 @@ namespace MiniCivilization.World.Domain
             return GetOrCreateChunk(coordinate);
         }
 
+        internal void UnloadChunk(ChunkCoordinate coordinate)
+        {
+            if (!loadedChunks.TryGetValue(coordinate, out var chunk))
+            {
+                return;
+            }
+
+            if (chunk.Entities.Count != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Chunk {coordinate} cannot be unloaded while it owns Entities.");
+            }
+
+            loadedChunks.Remove(coordinate);
+        }
+
         internal void SetCellBulk(int x, int y, int z, CellData cell)
         {
             ValidateCellCoordinate(x, y, z);

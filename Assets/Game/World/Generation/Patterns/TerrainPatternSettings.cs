@@ -2,9 +2,9 @@ using System;
 using MiniCivilization.World.Domain;
 using UnityEngine;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
-    public enum SemanticNoiseMode : byte
+    public enum PatternNoiseMode : byte
     {
         Value,
         Signed,
@@ -13,9 +13,9 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticNoiseField
+    public struct PatternNoiseField
     {
-        [SerializeField] private SemanticNoiseMode mode;
+        [SerializeField] private PatternNoiseMode mode;
         [SerializeField] private float scale;
         [SerializeField] private int layers;
         [SerializeField] private float frequencySpacing;
@@ -32,7 +32,7 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticCurve
+    public struct PatternCurve
     {
         [SerializeField] private float atZero;
         [SerializeField] private float atQuarter;
@@ -49,7 +49,7 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticRange
+    public struct PatternRange
     {
         [SerializeField] private float minimum;
         [SerializeField] private float maximum;
@@ -60,9 +60,9 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticDomainWarp
+    public struct PatternDomainWarp
     {
-        [SerializeField] private SemanticNoiseField field;
+        [SerializeField] private PatternNoiseField field;
         [SerializeField] private float strengthCells;
 
         internal TerrainDomainWarpData CreateData() => new(
@@ -71,10 +71,10 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticNoiseRouter
+    public struct TerrainNoiseRouterSettings
     {
-        [SerializeField] private SemanticNoiseField continentalness;
-        [SerializeField] private SemanticNoiseField erosion;
+        [SerializeField] private PatternNoiseField continentalness;
+        [SerializeField] private PatternNoiseField erosion;
 
         internal TerrainNoiseRouterData CreateData() => new(
             continentalness.CreateData(),
@@ -82,11 +82,11 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticTerrainRegion
+    public struct TerrainRegionSettings
     {
         [SerializeField] private int sizeCells;
         [SerializeField] private float centerJitter;
-        [SerializeField] private SemanticNoiseField warpField;
+        [SerializeField] private PatternNoiseField warpField;
         [SerializeField] private float warpStrengthCells;
         [SerializeField] private float boundaryBlendCells;
         [SerializeField] private float interiorReachRatio;
@@ -111,10 +111,10 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticTerrainBaseSurface
+    public struct TerrainBaseSurfaceSettings
     {
-        [SerializeField] private SemanticCurve surfaceByContinentalness;
-        [SerializeField] private SemanticCurve surfaceByErosion;
+        [SerializeField] private PatternCurve surfaceByContinentalness;
+        [SerializeField] private PatternCurve surfaceByErosion;
 
         internal TerrainBaseSurfaceData CreateData() => new(
             surfaceByContinentalness.CreateData(
@@ -124,14 +124,14 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticTerrainSurfaceForm
+    public struct TerrainSurfaceFormSettings
     {
-        [SerializeField] private SemanticDomainWarp domainWarp;
-        [SerializeField] private SemanticNoiseField shapeField;
-        [SerializeField] private SemanticCurve shapeResponse;
-        [SerializeField] private SemanticRange shapeAmplitudeCells;
-        [SerializeField] private SemanticNoiseField detailField;
-        [SerializeField] private SemanticRange detailAmplitudeCells;
+        [SerializeField] private PatternDomainWarp domainWarp;
+        [SerializeField] private PatternNoiseField shapeField;
+        [SerializeField] private PatternCurve shapeResponse;
+        [SerializeField] private PatternRange shapeAmplitudeCells;
+        [SerializeField] private PatternNoiseField detailField;
+        [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainSurfaceFormData CreateData() => new(
             domainWarp.CreateData(),
@@ -143,17 +143,17 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticMountainForm
+    public struct MountainFormSettings
     {
-        [SerializeField] private SemanticDomainWarp domainWarp;
-        [SerializeField] private SemanticNoiseField massField;
-        [SerializeField] private SemanticCurve massResponse;
-        [SerializeField] private SemanticRange heightCells;
-        [SerializeField] private SemanticNoiseField ridgeField;
-        [SerializeField] private SemanticCurve ridgeResponse;
-        [SerializeField] private SemanticRange ridgeStrengthCells;
-        [SerializeField] private SemanticNoiseField detailField;
-        [SerializeField] private SemanticRange detailAmplitudeCells;
+        [SerializeField] private PatternDomainWarp domainWarp;
+        [SerializeField] private PatternNoiseField massField;
+        [SerializeField] private PatternCurve massResponse;
+        [SerializeField] private PatternRange heightCells;
+        [SerializeField] private PatternNoiseField ridgeField;
+        [SerializeField] private PatternCurve ridgeResponse;
+        [SerializeField] private PatternRange ridgeStrengthCells;
+        [SerializeField] private PatternNoiseField detailField;
+        [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainMountainFormData CreateData() => new(
             domainWarp.CreateData(),
@@ -168,18 +168,18 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [Serializable]
-    public struct SemanticCanyonForm
+    public struct CanyonFormSettings
     {
-        [SerializeField] private SemanticDomainWarp domainWarp;
-        [SerializeField] private SemanticNoiseField basinField;
-        [SerializeField] private SemanticCurve basinResponse;
-        [SerializeField] private SemanticRange basinDepthRatio;
-        [SerializeField] private SemanticNoiseField valleyField;
-        [SerializeField] private SemanticCurve valleyResponse;
-        [SerializeField] private SemanticRange valleyDepthRatio;
-        [SerializeField] private SemanticRange depthCells;
-        [SerializeField] private SemanticNoiseField detailField;
-        [SerializeField] private SemanticRange detailAmplitudeCells;
+        [SerializeField] private PatternDomainWarp domainWarp;
+        [SerializeField] private PatternNoiseField basinField;
+        [SerializeField] private PatternCurve basinResponse;
+        [SerializeField] private PatternRange basinDepthRatio;
+        [SerializeField] private PatternNoiseField valleyField;
+        [SerializeField] private PatternCurve valleyResponse;
+        [SerializeField] private PatternRange valleyDepthRatio;
+        [SerializeField] private PatternRange depthCells;
+        [SerializeField] private PatternNoiseField detailField;
+        [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainCanyonFormData CreateData() => new(
             domainWarp.CreateData(),
@@ -195,19 +195,19 @@ namespace MiniCivilization.World.Generation.Semantic
     }
 
     [CreateAssetMenu(
-        fileName = "SemanticTerrainPatternSettings",
-        menuName = "Mini Civilization/World/Semantic Terrain Pattern Settings")]
-    public sealed class SemanticTerrainPatternSettings : ScriptableObject
+        fileName = "TerrainPatternSettings",
+        menuName = "Mini Civilization/World/Terrain Pattern Settings")]
+    public sealed class TerrainPatternSettings : ScriptableObject
     {
         [SerializeField] private int patternTileChunkSpan;
         [SerializeField] private int terrainBaseHeightCells;
-        [SerializeField] private SemanticNoiseRouter noiseRouter;
-        [SerializeField] private SemanticTerrainRegion region;
-        [SerializeField] private SemanticTerrainBaseSurface baseSurface;
-        [SerializeField] private SemanticTerrainSurfaceForm smooth;
-        [SerializeField] private SemanticTerrainSurfaceForm rugged;
-        [SerializeField] private SemanticMountainForm mountain;
-        [SerializeField] private SemanticCanyonForm canyon;
+        [SerializeField] private TerrainNoiseRouterSettings noiseRouter;
+        [SerializeField] private TerrainRegionSettings region;
+        [SerializeField] private TerrainBaseSurfaceSettings baseSurface;
+        [SerializeField] private TerrainSurfaceFormSettings smooth;
+        [SerializeField] private TerrainSurfaceFormSettings rugged;
+        [SerializeField] private MountainFormSettings mountain;
+        [SerializeField] private CanyonFormSettings canyon;
 
         public TerrainPatternSettingsData CreateData(int worldSeed) => new(
             worldSeed,
@@ -225,14 +225,14 @@ namespace MiniCivilization.World.Generation.Semantic
     public readonly struct TerrainNoiseFieldData
     {
         public TerrainNoiseFieldData(
-            SemanticNoiseMode mode,
+            PatternNoiseMode mode,
             float scale,
             int layers,
             float frequencySpacing,
             float persistence,
             int octaveSeedStride)
         {
-            if (!Enum.IsDefined(typeof(SemanticNoiseMode), mode)
+            if (!Enum.IsDefined(typeof(PatternNoiseMode), mode)
                 || !float.IsFinite(scale)
                 || scale <= 0f
                 || layers <= 0
@@ -254,7 +254,7 @@ namespace MiniCivilization.World.Generation.Semantic
             OctaveSeedStride = octaveSeedStride;
         }
 
-        public SemanticNoiseMode Mode { get; }
+        public PatternNoiseMode Mode { get; }
         public float Scale { get; }
         public int Layers { get; }
         public float FrequencySpacing { get; }

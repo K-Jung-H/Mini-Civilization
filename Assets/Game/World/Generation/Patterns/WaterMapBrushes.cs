@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     internal interface IWaterMapBrush
     {
@@ -1545,25 +1545,25 @@ namespace MiniCivilization.World.Generation.Semantic
             from + (to - from) * progress;
 
         public static int DeriveSeed(int seed, string path) =>
-            SemanticPatternNoise.DeriveSeed(seed, path);
+            PatternNoise.DeriveSeed(seed, path);
 
         public static float Value01(long x, long z, int seed) =>
-            SemanticPatternNoise.Value01(x, z, seed);
+            PatternNoise.Value01(x, z, seed);
 
         public static float SignedValue01(long x, long z, int seed) =>
-            SemanticPatternNoise.SignedValue01(x, z, seed);
+            PatternNoise.SignedValue01(x, z, seed);
 
         public static float SampleNormalized(
             double x,
             double z,
             TerrainNoiseFieldData field,
-            int seed) => SemanticPatternNoise.SampleNormalized(x, z, field, seed);
+            int seed) => PatternNoise.SampleNormalized(x, z, field, seed);
 
         public static float SampleSigned(
             double x,
             double z,
             TerrainNoiseFieldData field,
-            int seed) => SemanticPatternNoise.SampleSigned(x, z, field, seed);
+            int seed) => PatternNoise.SampleSigned(x, z, field, seed);
 
         private static float EvaluateIntegratedRate(
             float progress,

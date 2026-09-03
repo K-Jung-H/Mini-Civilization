@@ -1,7 +1,7 @@
 using System;
 using MiniCivilization.World.Domain;
 
-namespace MiniCivilization.World.Generation.Semantic
+namespace MiniCivilization.World.Generation.Patterns
 {
     public enum TerrainPatternType : byte
     {
