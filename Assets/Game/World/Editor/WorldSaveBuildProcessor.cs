@@ -32,7 +32,7 @@ namespace MiniCivilization.World.Editor
             {
                 foreach (var manager in root.GetComponentsInChildren<SaveLoadManager>(true))
                 {
-                    if (string.IsNullOrWhiteSpace(manager.InitialWorldFolderName))
+                    if (string.IsNullOrWhiteSpace(manager.InitialSaveFolderName))
                     {
                         continue;
                     }
@@ -101,25 +101,7 @@ namespace MiniCivilization.World.Editor
                 Directory.Delete(destination, true);
             }
 
-            CopyDirectory(source, destination);
-        }
-
-        private static void CopyDirectory(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (var file in Directory.GetFiles(source))
-            {
-                File.Copy(
-                    file,
-                    Path.Combine(destination, Path.GetFileName(file)));
-            }
-
-            foreach (var directory in Directory.GetDirectories(source))
-            {
-                CopyDirectory(
-                    directory,
-                    Path.Combine(destination, Path.GetFileName(directory)));
-            }
+            WorldSaveStorage.CopyDirectory(source, destination);
         }
     }
 }

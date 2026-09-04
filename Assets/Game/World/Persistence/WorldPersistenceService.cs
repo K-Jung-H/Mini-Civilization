@@ -36,10 +36,9 @@ namespace MiniCivilization.World.Persistence
             }
 
             this.chunkSizeX = chunkSizeX;
-            ApplyMetadata(saveData.Progress);
+            ApplyRuntimeState(saveData.RuntimeState);
         }
 
-        public WorldSaveData SaveData => saveData;
         public bool IsSynchronizing { get; private set; }
 
         public void Attach(WorldRuntime value)
@@ -125,10 +124,10 @@ namespace MiniCivilization.World.Persistence
                 throw new ArgumentNullException(nameof(changeSet));
             }
 
-            MarkDirty(changeSet.World, changeSet.ChangedCells);
+            MarkDirtyCells(changeSet.World, changeSet.ChangedCells);
         }
 
-        public void MarkDirty(
+        private void MarkDirtyCells(
             WorldData world,
             IReadOnlyList<CellCoordinate> cells)
         {
@@ -154,19 +153,6 @@ namespace MiniCivilization.World.Persistence
                     cell.X,
                     cell.Z,
                     world.ChunkSizeX));
-            }
-        }
-
-        public void MarkDirty(IEnumerable<ChunkCoordinate> coordinates)
-        {
-            if (coordinates == null)
-            {
-                throw new ArgumentNullException(nameof(coordinates));
-            }
-
-            foreach (var coordinate in coordinates)
-            {
-                dirtyChunks.Add(coordinate);
             }
         }
 
@@ -214,7 +200,7 @@ namespace MiniCivilization.World.Persistence
                     runtime.Data,
                     coordinate));
             }
-            WriteSaveData();
+
             IsSynchronizing = true;
             try
             {
@@ -234,10 +220,12 @@ namespace MiniCivilization.World.Persistence
                 coordinate,
                 frontierBuffer);
             ReplaceDeferredWaterFrontier(coordinate, frontierBuffer);
+
+            WriteSaveData();
             dirtyChunks.Remove(coordinate);
         }
 
-        public void Promote(
+        public void FinalizeTemporarySave(
             WorldSaveRepository destination,
             string saveName)
         {
@@ -250,7 +238,7 @@ namespace MiniCivilization.World.Persistence
             SaveAll();
             saveData = saveData.WithSaveName(saveName);
             temporaryRepository.WriteSaveData(saveData);
-            temporaryRepository.CopyTo(destination);
+            temporaryRepository.CopyPackageTo(destination);
             repository = destination;
             try
             {
@@ -276,7 +264,7 @@ namespace MiniCivilization.World.Persistence
             var sourceSaveData = saveData;
             try
             {
-                sourceRepository.CopyTo(destination);
+                sourceRepository.CopyPackageTo(destination);
                 var newWorldId = Guid.NewGuid();
                 destination.RekeyWorldId(newWorldId);
                 repository = destination;
@@ -294,7 +282,7 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
-        private WorldSaveMetadata CreateMetadata()
+        private WorldSaveRuntimeState CreateRuntimeState()
         {
             entityBuffer.Clear();
             runtime.Entities.CopyPersistentStatesTo(entityBuffer);
@@ -316,7 +304,7 @@ namespace MiniCivilization.World.Persistence
                 runtime.Data.WaterFlowSchedule.FrontierCells);
             var sortedWaterFrontier = new List<CellCoordinate>(waterFrontier);
             sortedWaterFrontier.Sort();
-            return new WorldSaveMetadata(
+            return new WorldSaveRuntimeState(
                 runtime.Entities.NextEntityId,
                 sortedWaterFrontier,
                 entities);
@@ -324,16 +312,18 @@ namespace MiniCivilization.World.Persistence
 
         private void WriteSaveData()
         {
-            saveData = saveData.WithProgress(CreateMetadata());
+            saveData = saveData.WithRuntimeState(CreateRuntimeState());
             repository.WriteSaveData(saveData);
         }
 
-        private void ApplyMetadata(WorldSaveMetadata metadata)
+        private void ApplyRuntimeState(WorldSaveRuntimeState runtimeState)
         {
-            nextEntityId = metadata.NextEntityId;
-            for (var index = 0; index < metadata.WaterFrontier.Count; index++)
+            nextEntityId = runtimeState.NextEntityId;
+            for (var index = 0;
+                 index < runtimeState.WaterFrontier.Count;
+                 index++)
             {
-                var cell = metadata.WaterFrontier[index];
+                var cell = runtimeState.WaterFrontier[index];
                 var coordinate = WorldCoordinateUtility.ToChunk(
                     cell.X,
                     cell.Z,
@@ -349,9 +339,9 @@ namespace MiniCivilization.World.Persistence
                 values.Add(cell);
             }
 
-            for (var index = 0; index < metadata.Entities.Count; index++)
+            for (var index = 0; index < runtimeState.Entities.Count; index++)
             {
-                var state = metadata.Entities[index];
+                var state = runtimeState.Entities[index];
                 var coordinate = WorldCoordinateUtility.ToChunk(
                     state.AnchorCell.X,
                     state.AnchorCell.Z,

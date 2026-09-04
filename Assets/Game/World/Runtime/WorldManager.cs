@@ -208,7 +208,7 @@ namespace MiniCivilization.World.Runtime
                     "World Manager already has an active World Runtime.");
             }
 
-            generationConfiguration = saveLoadManager.ResolveGeneration(
+            generationConfiguration = saveLoadManager.OpenOrCreateWorldSession(
                 worldGenerationSettings);
             var data = new WorldData(generationConfiguration.World);
             var runtime = WorldRuntime.Create(data);

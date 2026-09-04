@@ -16,6 +16,7 @@ namespace MiniCivilization.World.Editor
         private string catalogError;
         private string pendingSaveName = DefaultSaveName;
         private SaveNameRequest saveNameRequest;
+        private GUIStyle activeSaveNameStyle;
 
         public override void OnInspectorGUI()
         {
@@ -29,13 +30,10 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            using (new EditorGUI.DisabledScope(true))
-            {
-                EditorGUILayout.TextField(
-                    "Active Save",
-                    manager.ActiveSaveName,
-                    CreateActiveSaveNameStyle());
-            }
+            EditorGUILayout.LabelField(
+                "Active Save File",
+                manager.ActiveSaveName,
+                ActiveSaveNameStyle);
 
             if (!manager.HasActiveSession)
             {
@@ -67,15 +65,12 @@ namespace MiniCivilization.World.Editor
             DrawSaveNameRequest(manager);
         }
 
-        private static GUIStyle CreateActiveSaveNameStyle()
-        {
-            return new GUIStyle(EditorStyles.textField)
+        private GUIStyle ActiveSaveNameStyle => activeSaveNameStyle ??=
+            new GUIStyle(EditorStyles.label)
             {
                 fontSize = 14,
-                fontStyle = FontStyle.Bold,
-                fixedHeight = EditorGUIUtility.singleLineHeight + 6f
+                fontStyle = FontStyle.Bold
             };
-        }
 
         private void DrawInitialWorldSelection(SaveLoadManager manager)
         {
@@ -99,11 +94,11 @@ namespace MiniCivilization.World.Editor
             if (worldSaves.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    string.IsNullOrWhiteSpace(manager.InitialWorldFolderName)
+                    string.IsNullOrWhiteSpace(manager.InitialSaveFolderName)
                         ? "No saved worlds exist under WorldSaves."
                         : "The selected initial world no longer exists under WorldSaves.",
                     MessageType.Info);
-                if (!string.IsNullOrWhiteSpace(manager.InitialWorldFolderName)
+                if (!string.IsNullOrWhiteSpace(manager.InitialSaveFolderName)
                     && GUILayout.Button("Use World Generation Settings"))
                 {
                     Undo.RecordObject(manager, "Clear Initial World Save");
@@ -123,7 +118,7 @@ namespace MiniCivilization.World.Editor
                 labels[index + 1] = descriptor.SaveName == descriptor.WorldFolderName
                     ? descriptor.SaveName
                     : $"{descriptor.SaveName} ({descriptor.WorldFolderName})";
-                if (string.Equals(manager.InitialWorldFolderName,
+                if (string.Equals(manager.InitialSaveFolderName,
                         descriptor.WorldFolderName,
                         StringComparison.Ordinal))
                 {

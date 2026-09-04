@@ -728,7 +728,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: aa28f6a5716a4150b80ac77f8d4efafd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Persistence.SaveLoadManager
-  initialWorldFolderName: World 1
+  initialSaveFolderName: Save Test
 --- !u!1 &1910000000
 GameObject:
   m_ObjectHideFlags: 0

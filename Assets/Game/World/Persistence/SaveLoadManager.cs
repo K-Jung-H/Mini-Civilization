@@ -13,7 +13,7 @@ namespace MiniCivilization.World.Persistence
         private const string TemporarySaveName = "Unsaved World";
 
         [Header("Initial Load")]
-        [SerializeField, HideInInspector] private string initialWorldFolderName;
+        [SerializeField, HideInInspector] private string initialSaveFolderName;
 
         private WorldSaveRepository repository;
         private WorldSaveData saveData;
@@ -26,7 +26,7 @@ namespace MiniCivilization.World.Persistence
             : isTemporarySession
                 ? TemporarySaveName
                 : repository.Location.WorldFolderName;
-        internal string InitialWorldFolderName => initialWorldFolderName;
+        internal string InitialSaveFolderName => initialSaveFolderName;
         public bool HasActiveSession => persistence != null;
         public bool IsTemporarySession => isTemporarySession;
         public bool IsSynchronizing => persistence?.IsSynchronizing == true;
@@ -34,7 +34,7 @@ namespace MiniCivilization.World.Persistence
 
         public event Action Saved;
 
-        internal WorldGenerationConfiguration ResolveGeneration(
+        internal WorldGenerationConfiguration OpenOrCreateWorldSession(
             WorldGenerationSettings generationSettings)
         {
             if (repository != null || saveData != null)
@@ -43,7 +43,7 @@ namespace MiniCivilization.World.Persistence
                     "Save Load Manager already has an active World Save session.");
             }
 
-            if (!string.IsNullOrWhiteSpace(initialWorldFolderName))
+            if (!string.IsNullOrWhiteSpace(initialSaveFolderName))
             {
                 if (!TryGetInitialSaveLocation(out var location))
                 {
@@ -59,7 +59,7 @@ namespace MiniCivilization.World.Persistence
                 }
 
                 isTemporarySession = false;
-                return saveData.Generation;
+                return saveData.GenerationConfiguration;
             }
 
             if (generationSettings == null)
@@ -72,13 +72,13 @@ namespace MiniCivilization.World.Persistence
                 Guid.NewGuid(),
                 TemporarySaveName,
                 generationSettings.CreateConfiguration(),
-                new WorldSaveMetadata(
+                new WorldSaveRuntimeState(
                     1,
                     Array.Empty<CellCoordinate>(),
                     Array.Empty<EntityPersistentState>()));
             repository.WriteSaveData(saveData);
             isTemporarySession = true;
-            return saveData.Generation;
+            return saveData.GenerationConfiguration;
         }
 
         internal void Attach(WorldRuntime runtime)
@@ -128,7 +128,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             var destination = WorldSaveRepository.CreateUnique(saveName);
-            RequirePersistence().Promote(
+            RequirePersistence().FinalizeTemporarySave(
                 destination,
                 destination.Location.WorldFolderName);
             isTemporarySession = false;
@@ -153,11 +153,6 @@ namespace MiniCivilization.World.Persistence
         internal void MarkDirty(WorldChangeSet changeSet) =>
             RequirePersistence().MarkDirty(changeSet);
 
-        internal void MarkDirty(
-            WorldData world,
-            IReadOnlyList<CellCoordinate> cells) =>
-            RequirePersistence().MarkDirty(world, cells);
-
         internal IReadOnlyList<WorldSaveDescriptor> GetSavedWorlds() =>
             WorldSaveCatalog.GetWorlds();
 
@@ -172,14 +167,14 @@ namespace MiniCivilization.World.Persistence
                     nameof(descriptor));
             }
 
-            initialWorldFolderName = descriptor.WorldFolderName;
+            initialSaveFolderName = descriptor.WorldFolderName;
         }
 
-        internal void ClearInitialWorld() => initialWorldFolderName = null;
+        internal void ClearInitialWorld() => initialSaveFolderName = null;
 
         internal bool TryGetInitialSaveLocation(out WorldSaveLocation location) =>
             WorldSaveLocation.TryCreate(
-                initialWorldFolderName,
+                initialSaveFolderName,
                 out location);
 
         private void OnDestroy()

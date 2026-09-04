@@ -9,9 +9,9 @@ using Vector3 = UnityEngine.Vector3;
 
 namespace MiniCivilization.World.Persistence
 {
-    internal sealed class WorldSaveMetadata
+    internal sealed class WorldSaveRuntimeState
     {
-        public WorldSaveMetadata(
+        public WorldSaveRuntimeState(
             ulong nextEntityId,
             IReadOnlyList<CellCoordinate> waterFrontier,
             IReadOnlyList<EntityPersistentState> entities)
@@ -203,8 +203,10 @@ namespace MiniCivilization.World.Persistence
             writer.Write(SaveDataMagic);
             writer.Write(saveData.WorldId.ToByteArray());
             WriteString(writer, saveData.SaveName);
-            WriteGenerationConfiguration(writer, saveData.Generation);
-            WriteProgress(writer, saveData.Progress);
+            WriteGenerationConfiguration(
+                writer,
+                saveData.GenerationConfiguration);
+            WriteRuntimeState(writer, saveData.RuntimeState);
         }
 
         public static WorldSaveData ReadSaveData(Stream stream)
@@ -218,13 +220,13 @@ namespace MiniCivilization.World.Persistence
             VerifyHeader(reader, SaveDataMagic);
             var worldId = new Guid(ReadExactBytes(reader, 16));
             var saveName = ReadString(reader);
-            var generation = ReadGenerationConfiguration(reader);
-            var progress = ReadProgress(reader);
+            var generationConfiguration = ReadGenerationConfiguration(reader);
+            var runtimeState = ReadRuntimeState(reader);
             return new WorldSaveData(
                 worldId,
                 saveName,
-                generation,
-                progress);
+                generationConfiguration,
+                runtimeState);
         }
 
         public static void ReadSaveIdentity(
@@ -316,25 +318,27 @@ namespace MiniCivilization.World.Persistence
             return new WorldChunkSnapshot(coordinate, sections);
         }
 
-        private static void WriteProgress(
+        private static void WriteRuntimeState(
             BinaryWriter writer,
-            WorldSaveMetadata metadata)
+            WorldSaveRuntimeState runtimeState)
         {
-            writer.Write(metadata.NextEntityId);
-            WriteCollectionCount(writer, metadata.WaterFrontier.Count);
-            for (var index = 0; index < metadata.WaterFrontier.Count; index++)
+            writer.Write(runtimeState.NextEntityId);
+            WriteCollectionCount(writer, runtimeState.WaterFrontier.Count);
+            for (var index = 0;
+                 index < runtimeState.WaterFrontier.Count;
+                 index++)
             {
-                WriteCellCoordinate(writer, metadata.WaterFrontier[index]);
+                WriteCellCoordinate(writer, runtimeState.WaterFrontier[index]);
             }
 
-            WriteCollectionCount(writer, metadata.Entities.Count);
-            for (var index = 0; index < metadata.Entities.Count; index++)
+            WriteCollectionCount(writer, runtimeState.Entities.Count);
+            for (var index = 0; index < runtimeState.Entities.Count; index++)
             {
-                WriteEntity(writer, metadata.Entities[index]);
+                WriteEntity(writer, runtimeState.Entities[index]);
             }
         }
 
-        private static WorldSaveMetadata ReadProgress(BinaryReader reader)
+        private static WorldSaveRuntimeState ReadRuntimeState(BinaryReader reader)
         {
             var nextEntityId = reader.ReadUInt64();
             var frontier = new CellCoordinate[ReadCollectionCount(reader)];
@@ -355,7 +359,7 @@ namespace MiniCivilization.World.Persistence
                 }
             }
 
-            return new WorldSaveMetadata(nextEntityId, frontier, entities);
+            return new WorldSaveRuntimeState(nextEntityId, frontier, entities);
         }
 
         private static void WriteGenerationConfiguration(

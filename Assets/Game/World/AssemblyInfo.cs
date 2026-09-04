@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("MiniCivilization.World.Editor")]
+[assembly: InternalsVisibleTo("Assembly-CSharp-Editor")]

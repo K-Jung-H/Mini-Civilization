@@ -108,6 +108,24 @@ namespace MiniCivilization.World.Persistence
             HostRootPath,
             WorldSavesDirectoryName);
 
+        internal static void CopyDirectory(string source, string destination)
+        {
+            Directory.CreateDirectory(destination);
+            foreach (var file in Directory.GetFiles(source))
+            {
+                File.Copy(
+                    file,
+                    Path.Combine(destination, Path.GetFileName(file)));
+            }
+
+            foreach (var directory in Directory.GetDirectories(source))
+            {
+                CopyDirectory(
+                    directory,
+                    Path.Combine(destination, Path.GetFileName(directory)));
+            }
+        }
+
         public static bool IsPathWithinRoot(string rootPath, string candidatePath)
         {
             var normalizedRoot = TrimEndingDirectorySeparators(
@@ -285,7 +303,7 @@ namespace MiniCivilization.World.Persistence
                 snapshot);
         }
 
-        public void CopyTo(WorldSaveRepository destination)
+        public void CopyPackageTo(WorldSaveRepository destination)
         {
             if (destination == null)
             {
@@ -307,7 +325,7 @@ namespace MiniCivilization.World.Persistence
 
             try
             {
-                CopyDirectory(
+                WorldSaveStorage.CopyDirectory(
                     Location.WorldDirectoryPath,
                     destination.Location.WorldDirectoryPath);
                 destination.worldId = RequireWorldId();
@@ -423,22 +441,5 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
-        private static void CopyDirectory(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (var file in Directory.GetFiles(source))
-            {
-                File.Copy(
-                    file,
-                    Path.Combine(destination, Path.GetFileName(file)));
-            }
-
-            foreach (var directory in Directory.GetDirectories(source))
-            {
-                CopyDirectory(
-                    directory,
-                    Path.Combine(destination, Path.GetFileName(directory)));
-            }
-        }
     }
 }

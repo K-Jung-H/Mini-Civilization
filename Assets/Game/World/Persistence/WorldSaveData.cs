@@ -8,8 +8,8 @@ namespace MiniCivilization.World.Persistence
         public WorldSaveData(
             Guid worldId,
             string saveName,
-            WorldGenerationConfiguration generation,
-            WorldSaveMetadata progress)
+            WorldGenerationConfiguration generationConfiguration,
+            WorldSaveRuntimeState runtimeState)
         {
             if (worldId == Guid.Empty)
             {
@@ -27,33 +27,33 @@ namespace MiniCivilization.World.Persistence
 
             WorldId = worldId;
             SaveName = saveName;
-            Generation = generation ?? throw new ArgumentNullException(
-                nameof(generation));
-            Progress = progress ?? throw new ArgumentNullException(
-                nameof(progress));
+            GenerationConfiguration = generationConfiguration
+                ?? throw new ArgumentNullException(nameof(generationConfiguration));
+            RuntimeState = runtimeState ?? throw new ArgumentNullException(
+                nameof(runtimeState));
         }
 
         public Guid WorldId { get; }
         public string SaveName { get; }
-        public WorldGenerationConfiguration Generation { get; }
-        public WorldSaveMetadata Progress { get; }
+        public WorldGenerationConfiguration GenerationConfiguration { get; }
+        public WorldSaveRuntimeState RuntimeState { get; }
 
-        public WorldSaveData WithProgress(WorldSaveMetadata progress) => new(
+        public WorldSaveData WithRuntimeState(WorldSaveRuntimeState runtimeState) => new(
             WorldId,
             SaveName,
-            Generation,
-            progress);
+            GenerationConfiguration,
+            runtimeState);
 
         public WorldSaveData WithSaveName(string value) => new(
             WorldId,
             value,
-            Generation,
-            Progress);
+            GenerationConfiguration,
+            RuntimeState);
 
         public WorldSaveData WithWorldId(Guid value) => new(
             value,
             SaveName,
-            Generation,
-            Progress);
+            GenerationConfiguration,
+            RuntimeState);
     }
 }
