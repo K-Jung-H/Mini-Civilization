@@ -492,7 +492,6 @@ namespace MiniCivilization.World.Persistence
             WriteSea(writer, hydrology.Sea);
             WriteBasin(writer, hydrology.Basins);
             WriteRiver(writer, hydrology.River);
-            WriteNaturalEndpoint(writer, hydrology.NaturalEndpoint);
         }
 
         private static HydrologyFeatureSettingsData ReadHydrologySettings(
@@ -501,8 +500,7 @@ namespace MiniCivilization.World.Persistence
             world,
             ReadSea(reader),
             ReadBasin(reader),
-            ReadRiver(reader),
-            ReadNaturalEndpoint(reader));
+            ReadRiver(reader));
 
         private static void WriteNoise(
             BinaryWriter writer,
@@ -772,16 +770,11 @@ namespace MiniCivilization.World.Persistence
             writer.Write(value.CandidateLatticeSpacingCells);
             writer.Write(value.AnchorJitterCells);
             writer.Write(value.Occurrence);
-            WriteRange(writer, value.Length);
-            writer.Write(value.StrokeSampleSpacingCells);
+            writer.Write(value.MinimumNodeCount);
+            writer.Write(value.AverageNodeCount);
+            writer.Write(value.MaximumNodeCount);
             WriteRange(writer, value.NodeTurnDegrees);
-            writer.Write(value.TerrainCorrectionRadiusCells);
-            writer.Write(value.TerrainCorrectionSmoothingPasses);
-            writer.Write(value.TerrainSlopeCost);
-            writer.Write(value.BaseStrokeDeviationCost);
-            writer.Write(value.ElevationChangeCost);
-            writer.Write(value.CorridorDeformationCost);
-            writer.Write(value.CurvatureCost);
+            WriteNoise(writer, value.CurvatureField);
             WriteNoise(writer, value.WidthField);
             WriteRange(writer, value.Width);
             WriteCurve(writer, value.CrossSection);
@@ -799,16 +792,11 @@ namespace MiniCivilization.World.Persistence
                 reader.ReadInt32(),
                 reader.ReadInt32(),
                 ReadFiniteSingle(reader),
-                ReadRange(reader),
+                reader.ReadInt32(),
+                reader.ReadInt32(),
                 reader.ReadInt32(),
                 ReadRange(reader),
-                reader.ReadInt32(),
-                reader.ReadInt32(),
-                ReadFiniteSingle(reader),
-                ReadFiniteSingle(reader),
-                ReadFiniteSingle(reader),
-                ReadFiniteSingle(reader),
-                ReadFiniteSingle(reader),
+                ReadNoise(reader),
                 ReadNoise(reader),
                 ReadRange(reader),
                 ReadCurve(reader),
@@ -819,19 +807,6 @@ namespace MiniCivilization.World.Persistence
                 ReadCurve(reader),
                 ReadNoise(reader),
                 ReadRange(reader));
-
-        private static void WriteNaturalEndpoint(
-            BinaryWriter writer,
-            NaturalEndpointSettingsData value)
-        {
-            writer.Write(value.EndpointTransitionCells);
-            WriteCurve(writer, value.EndpointTransitionRate);
-        }
-
-        private static NaturalEndpointSettingsData ReadNaturalEndpoint(
-            BinaryReader reader) => new(
-            reader.ReadInt32(),
-            ReadCurve(reader));
 
         private static void WriteEntity(
             BinaryWriter writer,

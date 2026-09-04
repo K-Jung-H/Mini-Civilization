@@ -128,11 +128,9 @@ namespace MiniCivilization.World.Generation.Patterns
 
         public int RiverPaddingCells => checked((int)MathF.Ceiling(
             settings.River.AnchorJitterCells
-            + settings.River.Length.Maximum
-            + settings.River.TerrainCorrectionRadiusCells
+            + settings.River.MaximumNodeCount - 1
             + settings.River.Width.Maximum * 0.5f
-            + settings.River.BankMarginCells
-            + settings.NaturalEndpoint.EndpointTransitionCells));
+            + settings.River.BankMarginCells));
 
         public int RiverCandidateSpacingCells =>
             settings.River.CandidateLatticeSpacingCells;
@@ -228,331 +226,135 @@ namespace MiniCivilization.World.Generation.Patterns
                 gridZ,
                 WaterMapDrawingMath.DeriveSeed(featureSeed, "anchor-z"))
                 * river.AnchorJitterCells;
-            var direction = WaterMapDrawingMath.Value01(
+            var nodeCount = ResolveRiverNodeCount(
                 gridX,
                 gridZ,
-                WaterMapDrawingMath.DeriveSeed(featureSeed, "direction"))
-                * MathF.PI * 2f;
-            var length = WaterMapDrawingMath.Lerp(
-                river.Length.Minimum,
-                river.Length.Maximum,
-                WaterMapDrawingMath.Value01(
-                    gridX,
-                    gridZ,
-                    WaterMapDrawingMath.DeriveSeed(featureSeed, "length")));
-            var points = BuildSeedNodePoints(
-                new WaterMapPoint(anchorX, anchorZ),
-                direction,
-                length,
                 featureSeed);
-
-            var terrainAwarePoints = BuildTerrainAwareRiverPoints(
-                points,
-                featureSeed,
-                terrain);
+            var bone = BuildMainStream(
+                new WaterMapPoint(anchorX, anchorZ),
+                nodeCount,
+                featureSeed);
             return new RiverWaterBrush(
                 key,
                 featureSeed,
-                terrainAwarePoints,
-                terrainAwarePoints[^1].DistanceFromStart,
+                bone,
+                bone[^1].DistanceFromStart,
                 river,
-                settings.NaturalEndpoint,
                 settings.Sea.SurfaceHeight,
                 terrain);
         }
 
-        private WaterMapRiverPoint[] BuildSeedNodePoints(
-            WaterMapPoint anchor,
-            float initialDirection,
-            float length,
+        private int ResolveRiverNodeCount(
+            int gridX,
+            int gridZ,
             int featureSeed)
         {
             var river = settings.River;
-            var nodeCount = Math.Max(
-                2,
-                checked((int)MathF.Ceiling(length
-                    / river.StrokeSampleSpacingCells) + 1));
-            var result = new WaterMapRiverPoint[nodeCount];
-            var point = anchor;
-            var direction = initialDirection;
-            var distance = 0f;
-            result[0] = new WaterMapRiverPoint(point, distance);
-            for (var index = 1; index < nodeCount; index++)
+            if (river.MinimumNodeCount == river.MaximumNodeCount
+                || river.AverageNodeCount == river.MinimumNodeCount)
             {
-                var remaining = length - distance;
-                var step = Math.Min(
-                    river.StrokeSampleSpacingCells,
-                    remaining);
-                if (index > 1)
-                {
-                    var turnDegrees = WaterMapDrawingMath.Lerp(
-                        river.NodeTurnDegrees.Minimum,
-                        river.NodeTurnDegrees.Maximum,
-                        WaterMapDrawingMath.Value01(
-                            index,
-                            featureSeed,
-                            WaterMapDrawingMath.DeriveSeed(
-                                featureSeed,
-                                "node-turn-magnitude")));
-                    var turnSign = WaterMapDrawingMath.SignedValue01(
-                        index,
+                return river.MinimumNodeCount;
+            }
+
+            if (river.AverageNodeCount == river.MaximumNodeCount)
+            {
+                return river.MaximumNodeCount;
+            }
+
+            var average = (river.AverageNodeCount - river.MinimumNodeCount)
+                / (float)(river.MaximumNodeCount - river.MinimumNodeCount);
+            var distributionExponent = (1f - average) / average;
+            var random = WaterMapDrawingMath.Value01(
+                gridX,
+                gridZ,
+                WaterMapDrawingMath.DeriveSeed(featureSeed, "node-count"));
+            return Math.Clamp(
+                (int)MathF.Round(WaterMapDrawingMath.Lerp(
+                    river.MinimumNodeCount,
+                    river.MaximumNodeCount,
+                    MathF.Pow(random, distributionExponent))),
+                river.MinimumNodeCount,
+                river.MaximumNodeCount);
+        }
+
+        private RiverBoneNode[] BuildMainStream(
+            WaterMapPoint anchor,
+            int nodeCount,
+            int featureSeed)
+        {
+            var river = settings.River;
+            var result = new RiverBoneNode[nodeCount];
+            var point = new WaterMapPoint(
+                RoundToMapCell(anchor.X),
+                RoundToMapCell(anchor.Z));
+            var direction = CreateInitialMainDirection(featureSeed);
+            var turnRadians = WaterMapDrawingMath.Lerp(
+                    river.NodeTurnDegrees.Minimum,
+                    river.NodeTurnDegrees.Maximum,
+                    WaterMapDrawingMath.Value01(
                         featureSeed,
+                        0,
                         WaterMapDrawingMath.DeriveSeed(
                             featureSeed,
-                            "node-turn-sign"));
-                    direction += (turnSign < 0f ? -1f : 1f)
-                        * turnDegrees * MathF.PI / 180f;
-                }
-
-                point = new WaterMapPoint(
-                    point.X + MathF.Cos(direction) * step,
-                    point.Z + MathF.Sin(direction) * step);
-                distance += step;
-                result[index] = new WaterMapRiverPoint(point, distance);
-            }
-
-            return result;
-        }
-
-        private WaterMapRiverPoint[] BuildTerrainAwareRiverPoints(
-            IReadOnlyList<WaterMapRiverPoint> basicPoints,
-            int featureSeed,
-            ITerrainPatternMapReader terrain)
-        {
-            var candidates = new RiverNodeCandidate[basicPoints.Count][];
-            var state = new RiverNodeCandidate[basicPoints.Count];
-            for (var index = 0; index < basicPoints.Count; index++)
-            {
-                candidates[index] = CreateRiverNodeCandidates(
-                    basicPoints,
-                    index,
-                    featureSeed,
-                    terrain);
-                state[index] = FindBaseCandidate(candidates[index]);
-            }
-
-            for (var pass = 0;
-                 pass <= settings.River.TerrainCorrectionSmoothingPasses;
-                 pass++)
-            {
-                var next = new RiverNodeCandidate[state.Length];
-                for (var index = 0; index < next.Length; index++)
-                {
-                    var previous = state[Math.Max(0, index - 1)];
-                    var following = state[Math.Min(state.Length - 1, index + 1)];
-                    next[index] = SelectRiverNodeCandidate(
-                        candidates[index],
-                        previous,
-                        following);
-                }
-
-                state = next;
-            }
-
-            var result = new WaterMapRiverPoint[state.Length];
+                            "turn-amplitude")))
+                * MathF.PI / 180f;
             var distance = 0f;
-            for (var index = 0; index < result.Length; index++)
+            result[0] = new RiverBoneNode(point, distance);
+            for (var index = 1; index < nodeCount; index++)
             {
-                if (index > 0)
-                {
-                    distance += WaterMapDrawingMath.Distance(
-                        result[index - 1].Point,
-                        state[index].Point);
-                }
-
-                result[index] = new WaterMapRiverPoint(state[index].Point, distance);
+                var curvature = WaterMapDrawingMath.SampleSigned(
+                    index,
+                    0,
+                    river.CurvatureField,
+                    WaterMapDrawingMath.DeriveSeed(featureSeed, "curvature"));
+                direction = TurnForward(direction, curvature * turnRadians);
+                var previous = point;
+                point = new WaterMapPoint(
+                    RoundToMapCell(point.X + direction.X),
+                    RoundToMapCell(point.Z + direction.Z));
+                distance += WaterMapDrawingMath.Distance(previous, point);
+                result[index] = new RiverBoneNode(point, distance);
             }
 
             return result;
         }
 
-        private RiverNodeCandidate[] CreateRiverNodeCandidates(
-            IReadOnlyList<WaterMapRiverPoint> basicPoints,
-            int index,
-            int featureSeed,
-            ITerrainPatternMapReader terrain)
+        private static WaterMapPoint CreateInitialMainDirection(int featureSeed)
         {
-            var river = settings.River;
-            var normal = GetBaseNodeNormal(basicPoints, index);
-            var basePoint = basicPoints[index].Point;
-            var result = new List<RiverNodeCandidate>();
-            var used = new HashSet<long>();
-            for (var offset = -river.TerrainCorrectionRadiusCells;
-                 offset <= river.TerrainCorrectionRadiusCells;
-                 offset++)
-            {
-                var x = RoundCell(basePoint.X + normal.X * offset);
-                var z = RoundCell(basePoint.Z + normal.Z * offset);
-                if (!used.Add(CoordinateKey(x, z)))
-                {
-                    continue;
-                }
-
-                var point = new WaterMapPoint(x, z);
-                var center = terrain.GetCell(x, z);
-                result.Add(new RiverNodeCandidate(
-                    point,
-                    offset,
-                    center.SurfaceHeight,
-                    center.Slope,
-                    EstimateCorridorDeformation(
-                        point,
-                        normal,
-                        featureSeed,
-                        terrain)));
-            }
-
-            result.Sort((left, right) => left.CompareTo(right));
-            return result.ToArray();
+            var angle = WaterMapDrawingMath.Value01(
+                    featureSeed,
+                    0,
+                    WaterMapDrawingMath.DeriveSeed(featureSeed, "direction"))
+                * MathF.PI * 2f;
+            return EmphasizeDominantAxis(new WaterMapPoint(
+                MathF.Cos(angle),
+                MathF.Sin(angle)));
         }
 
-        private RiverNodeCandidate SelectRiverNodeCandidate(
-            IReadOnlyList<RiverNodeCandidate> candidates,
-            RiverNodeCandidate previous,
-            RiverNodeCandidate following)
+        private static WaterMapPoint TurnForward(
+            WaterMapPoint direction,
+            float turnRadians)
         {
-            var best = candidates[0];
-            var bestCost = EvaluateRiverNodeCost(best, previous, following);
-            for (var index = 1; index < candidates.Count; index++)
-            {
-                var candidate = candidates[index];
-                var cost = EvaluateRiverNodeCost(candidate, previous, following);
-                if (cost < bestCost
-                    || cost == bestCost
-                    && candidate.CompareTo(best) < 0)
-                {
-                    best = candidate;
-                    bestCost = cost;
-                }
-            }
-
-            return best;
+            var amount = MathF.Tan(turnRadians);
+            return Normalize(new WaterMapPoint(
+                direction.X - direction.Z * amount,
+                direction.Z + direction.X * amount));
         }
 
-        private float EvaluateRiverNodeCost(
-            RiverNodeCandidate candidate,
-            RiverNodeCandidate previous,
-            RiverNodeCandidate following)
+        private static WaterMapPoint EmphasizeDominantAxis(
+            WaterMapPoint direction) => Normalize(new WaterMapPoint(
+            direction.X * MathF.Abs(direction.X),
+            direction.Z * MathF.Abs(direction.Z)));
+
+        private static WaterMapPoint Normalize(WaterMapPoint value)
         {
-            var river = settings.River;
-            var neighborHeight = (previous.SurfaceHeight
-                + following.SurfaceHeight) * 0.5f;
-            var neighborOffset = (previous.Offset + following.Offset) * 0.5f;
-            return candidate.Slope / WorldGrid.HeightStepsPerCell
-                * river.TerrainSlopeCost
-                + MathF.Abs(candidate.Offset) * river.BaseStrokeDeviationCost
-                + MathF.Abs(candidate.SurfaceHeight - neighborHeight)
-                    / WorldGrid.HeightStepsPerCell
-                    * river.ElevationChangeCost
-                + candidate.CorridorDeformation
-                    / WorldGrid.HeightStepsPerCell
-                    * river.CorridorDeformationCost
-                + MathF.Abs(candidate.Offset - neighborOffset)
-                    * river.CurvatureCost;
+            var length = MathF.Sqrt(value.X * value.X + value.Z * value.Z);
+            return new WaterMapPoint(value.X / length, value.Z / length);
         }
 
-        private RiverNodeCandidate FindBaseCandidate(
-            IReadOnlyList<RiverNodeCandidate> candidates)
-        {
-            var best = candidates[0];
-            for (var index = 1; index < candidates.Count; index++)
-            {
-                var candidate = candidates[index];
-                if (MathF.Abs(candidate.Offset) < MathF.Abs(best.Offset)
-                    || MathF.Abs(candidate.Offset) == MathF.Abs(best.Offset)
-                    && candidate.CompareTo(best) < 0)
-                {
-                    best = candidate;
-                }
-            }
-
-            return best;
-        }
-
-        private float EstimateCorridorDeformation(
-            WaterMapPoint point,
-            WaterMapPoint normal,
-            int featureSeed,
-            ITerrainPatternMapReader terrain)
-        {
-            var river = settings.River;
-            var center = terrain.GetCell(RoundCell(point.X), RoundCell(point.Z));
-            var width = ResolveRiverRange(
-                point,
-                river.WidthField,
-                river.Width,
-                featureSeed,
-                "width");
-            var inset = ResolveRiverRange(
-                point,
-                river.WidthField,
-                river.WaterInset,
-                featureSeed,
-                "inset");
-            var depth = ResolveRiverRange(
-                point,
-                river.WidthField,
-                river.Depth,
-                featureSeed,
-                "depth");
-            var bankOffset = width * 0.5f + river.BankMarginCells;
-            var left = terrain.GetCell(
-                RoundCell(point.X + normal.X * bankOffset),
-                RoundCell(point.Z + normal.Z * bankOffset));
-            var right = terrain.GetCell(
-                RoundCell(point.X - normal.X * bankOffset),
-                RoundCell(point.Z - normal.Z * bankOffset));
-            var rawSurface = center.HasSeaPattern
-                ? settings.Sea.SurfaceHeight
-                : center.SurfaceHeight - inset;
-            var containedSurface = left.HasSeaPattern || right.HasSeaPattern
-                ? rawSurface
-                : Math.Min(
-                    rawSurface,
-                    Math.Min(
-                        ToFullyFilledHeight(left.SurfaceHeight),
-                        ToFullyFilledHeight(right.SurfaceHeight)));
-            return MathF.Abs(center.SurfaceHeight - (containedSurface - depth));
-        }
-
-        private static WaterMapPoint GetBaseNodeNormal(
-            IReadOnlyList<WaterMapRiverPoint> points,
-            int index)
-        {
-            var previous = points[Math.Max(0, index - 1)].Point;
-            var following = points[Math.Min(points.Count - 1, index + 1)].Point;
-            var deltaX = following.X - previous.X;
-            var deltaZ = following.Z - previous.Z;
-            var length = MathF.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
-            return length > 0f
-                ? new WaterMapPoint(-deltaZ / length, deltaX / length)
-                : new WaterMapPoint(0f, 1f);
-        }
-
-        private static int RoundCell(float value) => checked((int)MathF.Round(
+        private static int RoundToMapCell(float value) => checked((int)MathF.Round(
             value,
             MidpointRounding.AwayFromZero));
-
-        private static float ToFullyFilledHeight(float surfaceHeight)
-        {
-            var units = Math.Max(0, RoundCell(surfaceHeight));
-            return units / WorldGrid.HeightStepsPerCell
-                * WorldGrid.HeightStepsPerCell;
-        }
-
-        private static float ResolveRiverRange(
-            WaterMapPoint point,
-            TerrainNoiseFieldData field,
-            TerrainRangeData range,
-            int featureSeed,
-            string channel) => WaterMapDrawingMath.Lerp(
-            range.Minimum,
-            range.Maximum,
-            WaterMapDrawingMath.SampleNormalized(
-                point.X,
-                point.Z,
-                field,
-                WaterMapDrawingMath.DeriveSeed(featureSeed, channel)));
 
         private int ResolveBasinArea(int gridX, int gridZ) => Math.Clamp(
             (int)MathF.Round(WaterMapDrawingMath.Lerp(
@@ -949,34 +751,6 @@ namespace MiniCivilization.World.Generation.Patterns
             }
         }
 
-        private readonly struct RiverNodeCandidate
-        {
-            public RiverNodeCandidate(
-                WaterMapPoint point,
-                int offset,
-                float surfaceHeight,
-                float slope,
-                float corridorDeformation)
-            {
-                Point = point;
-                Offset = offset;
-                SurfaceHeight = surfaceHeight;
-                Slope = slope;
-                CorridorDeformation = corridorDeformation;
-            }
-
-            public WaterMapPoint Point { get; }
-            public int Offset { get; }
-            public float SurfaceHeight { get; }
-            public float Slope { get; }
-            public float CorridorDeformation { get; }
-
-            public int CompareTo(RiverNodeCandidate other)
-            {
-                var x = Point.X.CompareTo(other.Point.X);
-                return x != 0 ? x : Point.Z.CompareTo(other.Point.Z);
-            }
-        }
     }
 
     internal sealed class BasinWaterBrush : IWaterMapBrush
@@ -1095,29 +869,26 @@ namespace MiniCivilization.World.Generation.Patterns
     internal sealed class RiverWaterBrush : IWaterMapBrush
     {
         private readonly int featureSeed;
-        private readonly WaterMapRiverPoint[] points;
+        private readonly RiverBoneNode[] bone;
         private readonly float totalDistance;
         private readonly RiverFeatureSettingsData riverSettings;
-        private readonly NaturalEndpointSettingsData endpointSettings;
         private readonly int seaSurfaceHeight;
         private readonly RiverWaterProfile[] profiles;
 
         public RiverWaterBrush(
             HydrologyFeatureKey key,
             int featureSeed,
-            WaterMapRiverPoint[] points,
+            RiverBoneNode[] bone,
             float totalDistance,
             RiverFeatureSettingsData riverSettings,
-            NaturalEndpointSettingsData endpointSettings,
             int seaSurfaceHeight,
             ITerrainPatternMapReader terrain)
         {
             Key = key;
             this.featureSeed = featureSeed;
-            this.points = points ?? throw new ArgumentNullException(nameof(points));
+            this.bone = bone ?? throw new ArgumentNullException(nameof(bone));
             this.totalDistance = totalDistance;
             this.riverSettings = riverSettings;
-            this.endpointSettings = endpointSettings;
             this.seaSurfaceHeight = seaSurfaceHeight;
             profiles = BuildProfiles(terrain ?? throw new ArgumentNullException(nameof(terrain)));
         }
@@ -1188,24 +959,24 @@ namespace MiniCivilization.World.Generation.Patterns
 
         private RiverWaterProfile[] BuildProfiles(ITerrainPatternMapReader terrain)
         {
-            var rawSurfaces = new float[points.Length];
-            var containedSurfaces = new float[points.Length];
-            var widths = new float[points.Length];
-            var bedDepths = new float[points.Length];
-            var waterDepthBases = new float[points.Length];
-            for (var index = 0; index < points.Length; index++)
+            var rawSurfaces = new float[bone.Length];
+            var containedSurfaces = new float[bone.Length];
+            var widths = new float[bone.Length];
+            var bedDepths = new float[bone.Length];
+            var waterDepthBases = new float[bone.Length];
+            for (var index = 0; index < bone.Length; index++)
             {
-                var point = points[index];
-                var natural = GetNaturalProgress(point.DistanceFromStart);
-                var width = ResolveWidth(point.Point) * natural;
-                var depth = ResolveDepth(point.Point);
+                var point = bone[index];
+                var progress = point.DistanceFromStart / totalDistance;
+                var width = ResolveWidth(point.Point, progress);
+                var depth = ResolveDepth(point.Point, progress);
                 var inset = ResolveInset(point.Point);
                 var center = terrain.GetCell(
                     checked((int)MathF.Round(point.Point.X)),
                     checked((int)MathF.Round(point.Point.Z)));
                 var rawSurface = center.HasSeaPattern
                     ? seaSurfaceHeight
-                    : center.SurfaceHeight - inset * natural;
+                    : center.SurfaceHeight - inset;
                 rawSurfaces[index] = rawSurface;
                 containedSurfaces[index] = ResolveContainedWaterSurface(
                     terrain,
@@ -1213,17 +984,17 @@ namespace MiniCivilization.World.Generation.Patterns
                     width,
                     rawSurface);
                 widths[index] = width;
-                bedDepths[index] = depth * natural;
-                waterDepthBases[index] = (depth - inset) * natural;
+                bedDepths[index] = depth;
+                waterDepthBases[index] = Math.Max(0f, depth - inset);
             }
 
             var surfaces = BuildWaterProfile(rawSurfaces, containedSurfaces);
-            var result = new RiverWaterProfile[points.Length];
+            var result = new RiverWaterProfile[bone.Length];
             for (var index = 0; index < result.Length; index++)
             {
                 result[index] = new RiverWaterProfile(
-                    points[index].Point,
-                    points[index].DistanceFromStart,
+                    bone[index].Point,
+                    bone[index].DistanceFromStart,
                     surfaces[index],
                     widths[index],
                     bedDepths[index],
@@ -1244,7 +1015,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 var surface = rawSurface;
                 for (var source = index;
                      source >= 0
-                     && points[index].DistanceFromStart - points[source].DistanceFromStart
+                     && bone[index].DistanceFromStart - bone[source].DistanceFromStart
                         <= riverSettings.DropTransitionCells;
                      source--)
                 {
@@ -1252,13 +1023,13 @@ namespace MiniCivilization.World.Generation.Patterns
                         surface,
                         rawSurface,
                         containedSurfaces[source],
-                        points[index].DistanceFromStart
-                            - points[source].DistanceFromStart);
+                        bone[index].DistanceFromStart
+                            - bone[source].DistanceFromStart);
                 }
 
                 for (var source = index + 1;
                      source < profile.Length
-                     && points[source].DistanceFromStart - points[index].DistanceFromStart
+                     && bone[source].DistanceFromStart - bone[index].DistanceFromStart
                         <= riverSettings.DropTransitionCells;
                      source++)
                 {
@@ -1266,8 +1037,8 @@ namespace MiniCivilization.World.Generation.Patterns
                         surface,
                         rawSurface,
                         containedSurfaces[source],
-                        points[source].DistanceFromStart
-                            - points[index].DistanceFromStart);
+                        bone[source].DistanceFromStart
+                            - bone[index].DistanceFromStart);
                 }
 
                 profile[index] = surface;
@@ -1305,14 +1076,14 @@ namespace MiniCivilization.World.Generation.Patterns
                 return rawSurface;
             }
 
-            var previous = points[Math.Max(0, index - 1)].Point;
-            var next = points[Math.Min(points.Length - 1, index + 1)].Point;
+            var previous = bone[Math.Max(0, index - 1)].Point;
+            var next = bone[Math.Min(bone.Length - 1, index + 1)].Point;
             var deltaX = next.X - previous.X;
             var deltaZ = next.Z - previous.Z;
             var length = MathF.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
             var normalX = length > 0f ? -deltaZ / length : 0f;
             var normalZ = length > 0f ? deltaX / length : 1f;
-            var center = points[index].Point;
+            var center = bone[index].Point;
             var bankOffset = width * 0.5f + riverSettings.BankMarginCells;
             var left = terrain.GetCell(
                 checked((int)MathF.Round(center.X + normalX * bankOffset)),
@@ -1341,25 +1112,51 @@ namespace MiniCivilization.World.Generation.Patterns
                 * WorldGrid.HeightStepsPerCell;
         }
 
-        private float ResolveWidth(WaterMapPoint point) =>
-            WaterMapDrawingMath.Lerp(
-                riverSettings.Width.Minimum,
-                riverSettings.Width.Maximum,
-                WaterMapDrawingMath.SampleNormalized(
-                    point.X,
-                    point.Z,
-                    riverSettings.WidthField,
-                    WaterMapDrawingMath.DeriveSeed(featureSeed, "width")));
+        private float ResolveWidth(WaterMapPoint point, float progress) =>
+            ResolveProfileRange(
+                point,
+                progress,
+                riverSettings.Width,
+                "width");
 
-        private float ResolveDepth(WaterMapPoint point) =>
-            WaterMapDrawingMath.Lerp(
-                riverSettings.Depth.Minimum,
-                riverSettings.Depth.Maximum,
-                WaterMapDrawingMath.SampleNormalized(
+        private float ResolveDepth(WaterMapPoint point, float progress) =>
+            ResolveProfileRange(
+                point,
+                progress,
+                riverSettings.Depth,
+                "depth");
+
+        private float ResolveProfileRange(
+            WaterMapPoint point,
+            float progress,
+            TerrainRangeData range,
+            string channel)
+        {
+            var body = WaterMapDrawingMath.Lerp(
+                range.Minimum,
+                range.Maximum,
+                CenterBias(WaterMapDrawingMath.SampleNormalized(
                     point.X,
                     point.Z,
                     riverSettings.WidthField,
-                    WaterMapDrawingMath.DeriveSeed(featureSeed, "depth")));
+                    WaterMapDrawingMath.DeriveSeed(
+                        featureSeed,
+                        $"{channel}-body"))));
+            var terminus = WaterMapDrawingMath.Lerp(
+                range.Minimum,
+                range.Maximum,
+                LowerBias(WaterMapDrawingMath.SampleNormalized(
+                    point.X,
+                    point.Z,
+                    riverSettings.WidthField,
+                    WaterMapDrawingMath.DeriveSeed(
+                        featureSeed,
+                        $"{channel}-terminus"))));
+            return WaterMapDrawingMath.Lerp(
+                body,
+                terminus,
+                GetTerminusInfluence(progress));
+        }
 
         private float ResolveInset(WaterMapPoint point) =>
             WaterMapDrawingMath.Lerp(
@@ -1371,25 +1168,28 @@ namespace MiniCivilization.World.Generation.Patterns
                     riverSettings.WidthField,
                     WaterMapDrawingMath.DeriveSeed(featureSeed, "inset")));
 
-        private float GetNaturalProgress(float distanceFromStart) => Math.Min(
-            WaterMapDrawingMath.EvaluateEndpointProgress(
-                distanceFromStart,
-                endpointSettings),
-            WaterMapDrawingMath.EvaluateEndpointProgress(
-                totalDistance - distanceFromStart,
-                endpointSettings));
+        private static float CenterBias(float value)
+        {
+            var signed = value * 2f - 1f;
+            return 0.5f + 0.5f * signed * signed * signed;
+        }
+
+        private static float LowerBias(float value) => value * value;
+
+        private static float GetTerminusInfluence(float progress) =>
+            1f - MathF.Sin(Math.Clamp(progress, 0f, 1f) * MathF.PI);
 
         private WaterMapNearestSegment FindNearestSegment(int x, int z)
         {
             var point = new WaterMapPoint(x, z);
             var best = WaterMapNearestSegment.None;
-            for (var index = 0; index < points.Length - 1; index++)
+            for (var index = 0; index < bone.Length - 1; index++)
             {
                 var candidate = WaterMapNearestSegment.Create(
                     index,
                     point,
-                    points[index].Point,
-                    points[index + 1].Point);
+                    bone[index].Point,
+                    bone[index + 1].Point);
                 if (candidate.Distance < best.Distance)
                 {
                     best = candidate;
@@ -1412,9 +1212,9 @@ namespace MiniCivilization.World.Generation.Patterns
         public float Z { get; }
     }
 
-    internal readonly struct WaterMapRiverPoint
+    internal readonly struct RiverBoneNode
     {
-        public WaterMapRiverPoint(WaterMapPoint point, float distanceFromStart)
+        public RiverBoneNode(WaterMapPoint point, float distanceFromStart)
         {
             Point = point;
             DistanceFromStart = distanceFromStart;
@@ -1528,12 +1328,6 @@ namespace MiniCivilization.World.Generation.Patterns
                 seed,
                 unchecked((uint)seed)));
 
-        public static float EvaluateEndpointProgress(
-            float distance,
-            NaturalEndpointSettingsData endpoint) => EvaluateIntegratedRate(
-            Math.Clamp(distance / endpoint.EndpointTransitionCells, 0f, 1f),
-            endpoint.EndpointTransitionRate);
-
         public static float Distance(WaterMapPoint left, WaterMapPoint right)
         {
             var x = right.X - left.X;
@@ -1565,48 +1359,5 @@ namespace MiniCivilization.World.Generation.Patterns
             TerrainNoiseFieldData field,
             int seed) => PatternNoise.SampleSigned(x, z, field, seed);
 
-        private static float EvaluateIntegratedRate(
-            float progress,
-            TerrainCurveData curve)
-        {
-            var total = IntegrateCurve(1f, curve);
-            return total <= 0f
-                ? progress
-                : IntegrateCurve(progress, curve) / total;
-        }
-
-        private static float IntegrateCurve(float progress, TerrainCurveData curve)
-        {
-            progress = Math.Clamp(progress, 0f, 1f);
-            var segment = Math.Min(3, (int)(progress * 4f));
-            var result = 0f;
-            for (var index = 0; index < segment; index++)
-            {
-                result += IntegrateCurveSegment(
-                    1f,
-                    GetCurveValue(curve, index),
-                    GetCurveValue(curve, index + 1)) * 0.25f;
-            }
-
-            var local = progress * 4f - segment;
-            return result + IntegrateCurveSegment(
-                local,
-                GetCurveValue(curve, segment),
-                GetCurveValue(curve, Math.Min(segment + 1, 4))) * 0.25f;
-        }
-
-        private static float IntegrateCurveSegment(float progress, float from, float to) =>
-            from * progress + (to - from)
-            * (progress * progress * progress
-                - 0.5f * progress * progress * progress * progress);
-
-        private static float GetCurveValue(TerrainCurveData curve, int index) => index switch
-        {
-            0 => curve.AtZero,
-            1 => curve.AtQuarter,
-            2 => curve.AtHalf,
-            3 => curve.AtThreeQuarters,
-            _ => curve.AtOne
-        };
     }
 }

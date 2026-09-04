@@ -108,20 +108,19 @@ MonoBehaviour:
     candidateLatticeSpacingCells: 128
     anchorJitterCells: 32
     occurrence: 0.45
-    lengthCells:
-      minimum: 28
-      maximum: 112
-    strokeSampleSpacingCells: 4
+    minimumNodeCount: 28
+    averageNodeCount: 70
+    maximumNodeCount: 112
     nodeTurnDegrees:
       minimum: 3
       maximum: 18
-    terrainCorrectionRadiusCells: 6
-    terrainCorrectionSmoothingPasses: 2
-    terrainSlopeCost: 1
-    baseStrokeDeviationCost: 0.4
-    elevationChangeCost: 0.4
-    corridorDeformationCost: 0.5
-    curvatureCost: 0.8
+    curvatureField:
+      mode: 0
+      scale: 0.025
+      layers: 3
+      frequencySpacing: 2
+      persistence: 0.45
+      octaveSeedStride: 1013
     widthField:
       mode: 0
       scale: 0.025
@@ -162,11 +161,3 @@ MonoBehaviour:
     riverbedAmplitudeCells:
       minimum: 0.05
       maximum: 0.3
-  naturalEndpoint:
-    endpointTransitionCells: 16
-    endpointTransitionRate:
-      atZero: 0
-      atQuarter: 1
-      atHalf: 2
-      atThreeQuarters: 2
-      atOne: 1

@@ -79,16 +79,11 @@ namespace MiniCivilization.World.Generation.Patterns
         [SerializeField] private int candidateLatticeSpacingCells;
         [SerializeField] private int anchorJitterCells;
         [SerializeField] private float occurrence;
-        [SerializeField] private PatternRange lengthCells;
-        [SerializeField] private int strokeSampleSpacingCells;
+        [SerializeField] private int minimumNodeCount;
+        [SerializeField] private int averageNodeCount;
+        [SerializeField] private int maximumNodeCount;
         [SerializeField] private PatternRange nodeTurnDegrees;
-        [SerializeField] private int terrainCorrectionRadiusCells;
-        [SerializeField] private int terrainCorrectionSmoothingPasses;
-        [SerializeField] private float terrainSlopeCost;
-        [SerializeField] private float baseStrokeDeviationCost;
-        [SerializeField] private float elevationChangeCost;
-        [SerializeField] private float corridorDeformationCost;
-        [SerializeField] private float curvatureCost;
+        [SerializeField] private PatternNoiseField curvatureField;
         [SerializeField] private PatternNoiseField widthField;
         [SerializeField] private PatternRange widthCells;
         [SerializeField] private PatternCurve crossSection;
@@ -104,16 +99,11 @@ namespace MiniCivilization.World.Generation.Patterns
             candidateLatticeSpacingCells,
             anchorJitterCells,
             occurrence,
-            lengthCells.CreateData(),
-            strokeSampleSpacingCells,
+            minimumNodeCount,
+            averageNodeCount,
+            maximumNodeCount,
             nodeTurnDegrees.CreateData(),
-            terrainCorrectionRadiusCells,
-            terrainCorrectionSmoothingPasses,
-            terrainSlopeCost,
-            baseStrokeDeviationCost,
-            elevationChangeCost,
-            corridorDeformationCost,
-            curvatureCost,
+            curvatureField.CreateData(),
             widthField.CreateData(),
             widthCells.CreateData(),
             crossSection.CreateData(),
@@ -126,17 +116,6 @@ namespace MiniCivilization.World.Generation.Patterns
             riverbedAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
     }
 
-    [Serializable]
-    public struct NaturalEndpointSettings
-    {
-        [SerializeField] private int endpointTransitionCells;
-        [SerializeField] private PatternCurve endpointTransitionRate;
-
-        internal NaturalEndpointSettingsData CreateData() => new(
-            endpointTransitionCells,
-            endpointTransitionRate.CreateData());
-    }
-
     [CreateAssetMenu(
         fileName = "HydrologyFeatureSettings",
         menuName = "Mini Civilization/World/Hydrology Feature Settings")]
@@ -145,15 +124,13 @@ namespace MiniCivilization.World.Generation.Patterns
         [SerializeField] private SeaFeatureSettings sea;
         [SerializeField] private BasinFeatureSettings basins;
         [SerializeField] private RiverFeatureSettings river;
-        [SerializeField] private NaturalEndpointSettings naturalEndpoint;
 
         public HydrologyFeatureSettingsData CreateData(
             WorldSettingsData world) => new(
             world ?? throw new ArgumentNullException(nameof(world)),
             sea.CreateData(),
             basins.CreateData(),
-            river.CreateData(),
-            naturalEndpoint.CreateData());
+            river.CreateData());
     }
 
     public readonly struct BasinFeatureSettingsData
@@ -288,16 +265,11 @@ namespace MiniCivilization.World.Generation.Patterns
             int candidateLatticeSpacingCells,
             int anchorJitterCells,
             float occurrence,
-            TerrainRangeData length,
-            int strokeSampleSpacingCells,
+            int minimumNodeCount,
+            int averageNodeCount,
+            int maximumNodeCount,
             TerrainRangeData nodeTurnDegrees,
-            int terrainCorrectionRadiusCells,
-            int terrainCorrectionSmoothingPasses,
-            float terrainSlopeCost,
-            float baseStrokeDeviationCost,
-            float elevationChangeCost,
-            float corridorDeformationCost,
-            float curvatureCost,
+            TerrainNoiseFieldData curvatureField,
             TerrainNoiseFieldData widthField,
             TerrainRangeData width,
             TerrainCurveData crossSection,
@@ -314,17 +286,11 @@ namespace MiniCivilization.World.Generation.Patterns
                 || !float.IsFinite(occurrence)
                 || occurrence < 0f
                 || occurrence > 1f
-                || length.Minimum <= 0f
-                || strokeSampleSpacingCells <= 0
+                || minimumNodeCount < 2
+                || averageNodeCount < minimumNodeCount
+                || averageNodeCount > maximumNodeCount
                 || nodeTurnDegrees.Minimum < 0f
                 || nodeTurnDegrees.Maximum >= 90f
-                || terrainCorrectionRadiusCells < 0
-                || terrainCorrectionSmoothingPasses < 0
-                || !float.IsFinite(terrainSlopeCost) || terrainSlopeCost < 0f
-                || !float.IsFinite(baseStrokeDeviationCost) || baseStrokeDeviationCost < 0f
-                || !float.IsFinite(elevationChangeCost) || elevationChangeCost < 0f
-                || !float.IsFinite(corridorDeformationCost) || corridorDeformationCost < 0f
-                || !float.IsFinite(curvatureCost) || curvatureCost < 0f
                 || width.Minimum <= 0f
                 || depth.Minimum <= 0f
                 || waterInset.Minimum < 0f
@@ -339,16 +305,11 @@ namespace MiniCivilization.World.Generation.Patterns
             CandidateLatticeSpacingCells = candidateLatticeSpacingCells;
             AnchorJitterCells = anchorJitterCells;
             Occurrence = occurrence;
-            Length = length;
-            StrokeSampleSpacingCells = strokeSampleSpacingCells;
+            MinimumNodeCount = minimumNodeCount;
+            AverageNodeCount = averageNodeCount;
+            MaximumNodeCount = maximumNodeCount;
             NodeTurnDegrees = nodeTurnDegrees;
-            TerrainCorrectionRadiusCells = terrainCorrectionRadiusCells;
-            TerrainCorrectionSmoothingPasses = terrainCorrectionSmoothingPasses;
-            TerrainSlopeCost = terrainSlopeCost;
-            BaseStrokeDeviationCost = baseStrokeDeviationCost;
-            ElevationChangeCost = elevationChangeCost;
-            CorridorDeformationCost = corridorDeformationCost;
-            CurvatureCost = curvatureCost;
+            CurvatureField = curvatureField;
             WidthField = widthField;
             Width = width;
             CrossSection = crossSection;
@@ -364,16 +325,11 @@ namespace MiniCivilization.World.Generation.Patterns
         public int CandidateLatticeSpacingCells { get; }
         public int AnchorJitterCells { get; }
         public float Occurrence { get; }
-        public TerrainRangeData Length { get; }
-        public int StrokeSampleSpacingCells { get; }
+        public int MinimumNodeCount { get; }
+        public int AverageNodeCount { get; }
+        public int MaximumNodeCount { get; }
         public TerrainRangeData NodeTurnDegrees { get; }
-        public int TerrainCorrectionRadiusCells { get; }
-        public int TerrainCorrectionSmoothingPasses { get; }
-        public float TerrainSlopeCost { get; }
-        public float BaseStrokeDeviationCost { get; }
-        public float ElevationChangeCost { get; }
-        public float CorridorDeformationCost { get; }
-        public float CurvatureCost { get; }
+        public TerrainNoiseFieldData CurvatureField { get; }
         public TerrainNoiseFieldData WidthField { get; }
         public TerrainRangeData Width { get; }
         public TerrainCurveData CrossSection { get; }
@@ -386,46 +342,23 @@ namespace MiniCivilization.World.Generation.Patterns
         public TerrainRangeData RiverbedAmplitude { get; }
     }
 
-    public readonly struct NaturalEndpointSettingsData
-    {
-        public NaturalEndpointSettingsData(
-            int endpointTransitionCells,
-            TerrainCurveData endpointTransitionRate)
-        {
-            if (endpointTransitionCells <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(endpointTransitionCells));
-            }
-
-            EndpointTransitionCells = endpointTransitionCells;
-            EndpointTransitionRate = endpointTransitionRate;
-        }
-
-        public int EndpointTransitionCells { get; }
-        public TerrainCurveData EndpointTransitionRate { get; }
-    }
-
     public sealed class HydrologyFeatureSettingsData
     {
         public HydrologyFeatureSettingsData(
             WorldSettingsData world,
             SeaFeatureSettingsData sea,
             BasinFeatureSettingsData basins,
-            RiverFeatureSettingsData river,
-            NaturalEndpointSettingsData naturalEndpoint)
+            RiverFeatureSettingsData river)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
             Sea = sea;
             Basins = basins;
             River = river;
-            NaturalEndpoint = naturalEndpoint;
         }
 
         public WorldSettingsData World { get; }
         public SeaFeatureSettingsData Sea { get; }
         public BasinFeatureSettingsData Basins { get; }
         public RiverFeatureSettingsData River { get; }
-        public NaturalEndpointSettingsData NaturalEndpoint { get; }
     }
 }

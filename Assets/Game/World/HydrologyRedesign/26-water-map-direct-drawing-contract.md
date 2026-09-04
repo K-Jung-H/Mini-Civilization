@@ -28,7 +28,7 @@ Feature 의존성 그래프, 요청별 계획, Snapshot이 아니다.
 ```text
 WaterMap Tile Core
   → 교차 가능한 Basin 후보의 Seed·크기·도형 직접 평가
-  → 교차 가능한 River 후보의 Seed·기본 Stroke 직접 평가
+  → 교차 가능한 River 후보의 Seed·MainStream Bone 직접 평가
   → 각 Cell에서 Sea, Basin, River를 순서대로 Drawing
   → HydrologyPatternCell 기록 및 seal
 ```
@@ -48,7 +48,8 @@ Chunk 생성 순서, Debugger 접근 순서와 무관해야 한다.
 
 - Brush는 후보 좌표·Seed·설정과 유한한 TerrainMap 입력으로 한 번 확정되는 도형 데이터다.
   Basin은 연결된 footprint, 일정 수면, 내부 거리와 해안 전이를 기록하고 River는 중심
-  수면과 양쪽 제방으로 제한된 profile을 기록한다.
+  수면과 양쪽 제방으로 제한된 profile을 기록한다. River의 MainStream Bone은 Brush 내부
+  생성·Skinning용 도형이며 WaterMap Tile에는 기록하지 않는다.
 - 같은 `HydrologyFeatureKey`의 Brush는 Runtime 동안 한 번만 만들어 재사용한다. Catalog는
   Graph, Endpoint, 후보 경쟁, 요청별 계획을 보관하지 않는다.
 - Tile마다 남는 것은 최종 `HydrologyPatternCell`뿐이다. Brush는 새 Tile이 처음 필요할 때
@@ -90,38 +91,37 @@ Basin 후보 격자 좌표
 
 ```text
 River 후보 격자 좌표
-→ Seed 기반 발생 여부·Anchor·길이·곡선·폭·깊이
-→ 독립적인 bounded 기본 Node 열
-→ 각 Node의 유한한 절대 좌표 후보군
-→ TerrainMap을 읽는 대칭 Terrain 보정
-→ 최종 Node 열·Corridor Profile 확정
-→ 양 Terminus의 Natural 전이와 WaterMap Drawing
+→ Seed 기반 발생 여부·Anchor·Node 수·최초 주 방향·곡률
+→ 독립적인 MainStream Bone Node 열
+→ Node 위치별 Width / Depth Profile
+→ Bone Skinning으로 최종 River 영역 WaterMap Drawing
 ```
 
-- 기본 Node 열은 Seed, Anchor, 총 길이, 최초 방향, Node별 회전 성향으로 결정된다. 최초
-  Node는 Anchor이고 이후 기본 Node는 직전 기본 Node의 기하 방향에서만 진행한다. 회전은
-  `NodeTurnDegrees`보다 작으므로 인접 Node 방향을 역전하지 않는다. 이 과정은 Terrain을
-  읽지 않는 Seed 도형 생성이며 Bézier·A*·경로 탐색이 아니다.
-- Node는 Chunk·Tile에 속하지 않는 절대 좌표 도형이며 Endpoint Graph, 다른 River 경로,
-  Basin 경쟁 결과를 읽지 않는다. Seed 길이에 도달하면 더 이상 Node를 만들지 않고 양 끝은
-  Natural Endpoint가 된다.
-- 각 기본 Node는 법선 방향의 `TerrainCorrectionRadiusCells` 안에서 유한한 절대 좌표 후보를
-  가진다. 후보 비용은 급경사, 기본 Stroke 이탈, 인접 기준 높이 변화, 예상 Corridor
-  절삭·성토량, 곡률 급변만 사용한다. 높은 고도 자체는 비용이 아니다.
-- 보정은 이전 Node를 따라 다음 Node를 탐색하지 않는다. 모든 Node는 직전 전체 Node 상태만
-  읽고, 명시된 `TerrainCorrectionSmoothingPasses` 횟수만 대칭적으로 갱신한다. 동점은 절대
-  좌표로 해소한다.
-- 최종 Node 열은 River Brush에 한 번 확정된다. 각 WaterMap Cell은 가까운 확정 Stroke 구간의
-  폭·단면·깊이와 Natural 전이만 평가한다.
+- MainStream Bone은 Seed, Anchor, `Minimum / Average / Maximum Node Count`, 최초 주 방향,
+  연속 곡률 Field로 결정된다. Node 수는 강의 길이이며, 최초 Node는 Anchor다. 이후 Node는
+  직전 진행 벡터에 횡방향 곡률만 더해 생성한다. 새 벡터는 직전 벡터와 항상 90도보다 작은
+  각을 이루므로 진행을 역전하지 않는다. 이 과정은 Terrain을 읽지 않는 Seed 도형 생성이며
+  Bézier·A*·경로 탐색이 아니다.
+- Node 좌표는 HydrologyMap Cell 격자로 확정된다. Bone 자체는 Map에 기록되지 않지만, 인접
+  Bone Node를 연결하는 중심선은 최소 폭에서도 빈 Cell 없이 Skinning할 수 있다.
+- 최초 진행 벡터는 더 큰 X/Z 성분을 강조해 주 방향을 만들고, 이후의 부드러운 곡률 변화가
+  직선·완만한 곡선·S자 경로를 만든다. 경로 생성 뒤에는 방향이 WaterMap이나 WorldCell에
+  기록되거나 해석되지 않는다.
+- Bone은 Chunk·Tile에 속하지 않는 절대 좌표 도형이며 Endpoint Graph, 다른 River 경로,
+  Basin 경쟁 결과를 읽지 않는다. Terrain 후보 보정, 보정 pass, 경로 비용은 River 생성에
+  사용하지 않는다.
+- 각 Bone Node에는 `MinimumWidth ~ MaximumWidth`와 양수 Depth 범위 안의 연속 Profile이
+  정해진다. 중앙부는 중간 폭이 자주 나타나고, Terminus 쪽은 낮은 폭으로 편향되지만 최소
+  폭이나 0으로 강제되지 않는다.
+- 각 WaterMap Cell은 가까운 Bone 연결 구간과 그 위치의 Profile만 평가하여 Skinning한다.
+  WaterMap에는 폭·깊이까지 반영된 최종 River Cell만 기록된다.
 - River 수면은 최종 중심 TerrainMap 표면의 inset을 기준으로 하고 양쪽 제방의 완전 Cell
   높이를 넘지 않는다. 낮은 제방 구간은 `DropTransition` S자 전이로 인접 profile까지
   낮아진다. River 바닥은 이 수면과 Corridor 절삭 깊이 중 더 낮은 `groundHeight`다.
-- Natural Endpoint는 합의된 `0 → 1 → 2 → 2 → 1` 적분형 전이로 폭·깊이·수면·Corridor를
-  함께 dry Terrain까지 감쇠한다.
 - River는 Sea나 Basin이 없는 Cell에만 기록한다. 이 단계는 River–Water Join을 만들거나,
   Cell/Chunk/WaterCell을 연결하지 않는다.
 - River Join 규칙은 저장/로드와 함께 별도 확장 단계에서만 도입한다. 그 전에는 모든
-  Terminus가 Natural 전이로 종료한다.
+  Terminus가 양수 폭·깊이를 가진 독립 Stroke로 종료한다.
 
 ## Tile과 ChunkData의 경계
 
