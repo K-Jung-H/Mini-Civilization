@@ -368,6 +368,7 @@ namespace MiniCivilization.World.Persistence
             WriteWorldSettings(writer, configuration.World);
             WriteTerrainSettings(writer, configuration.Terrain);
             WriteHydrologySettings(writer, configuration.Hydrology);
+            WriteClimateSettings(writer, configuration.Climate);
             writer.Write(configuration.UpdateRangeChunks);
             writer.Write(configuration.RenderRangeChunks);
             writer.Write(configuration.PrepareRangeChunks);
@@ -382,6 +383,7 @@ namespace MiniCivilization.World.Persistence
             var world = ReadWorldSettings(reader);
             var terrain = ReadTerrainSettings(reader);
             var hydrology = ReadHydrologySettings(reader, world);
+            var climate = ReadClimateSettings(reader);
             var patternTiles = new PatternTileGridSettingsData(
                 world,
                 terrain.PatternTileChunkSpan);
@@ -394,7 +396,53 @@ namespace MiniCivilization.World.Persistence
                 reader.ReadInt32(),
                 reader.ReadInt32(),
                 reader.ReadInt32(),
-                reader.ReadInt32());
+                reader.ReadInt32(), climate: climate);
+        }
+
+        private static void WriteClimateSettings(BinaryWriter writer, ClimateSettings value)
+        {
+            writer.Write(value.TemperatureRegionScaleCells);
+            writer.Write(value.MoistureRegionScaleCells);
+            writer.Write(value.AltitudeCoolingPerCell);
+            writer.Write(value.AltitudeReferenceHeight);
+            writer.Write(value.ColdThreshold);
+            writer.Write(value.HotThreshold);
+            writer.Write(value.DryThreshold);
+            writer.Write(value.ForestThreshold);
+            writer.Write(value.WetlandThreshold);
+            writer.Write(value.WetlandMaximumHeight);
+            writer.Write(value.MountainMinimumHeight);
+            writer.Write(value.MountainMinimumSlope);
+            writer.Write(value.HydrologyRules.Length);
+            foreach (var rule in value.HydrologyRules)
+            {
+                writer.Write((byte)rule.Biome); writer.Write(rule.BasinOccurrence);
+                writer.Write(rule.BasinArea); writer.Write(rule.RiverOccurrence);
+            }
+        }
+        private static ClimateSettings ReadClimateSettings(BinaryReader reader)
+        {
+            var value = new ClimateSettings {
+                TemperatureRegionScaleCells = reader.ReadSingle(),
+                MoistureRegionScaleCells = reader.ReadSingle(),
+                AltitudeCoolingPerCell = reader.ReadSingle(),
+                AltitudeReferenceHeight = reader.ReadSingle(),
+                ColdThreshold = reader.ReadSingle(),
+                HotThreshold = reader.ReadSingle(),
+                DryThreshold = reader.ReadSingle(),
+                ForestThreshold = reader.ReadSingle(),
+                WetlandThreshold = reader.ReadSingle(),
+                WetlandMaximumHeight = reader.ReadSingle(),
+                MountainMinimumHeight = reader.ReadSingle(),
+                MountainMinimumSlope = reader.ReadSingle(),
+            };
+            int count = reader.ReadInt32();
+            if (count < 0 || count > 256) throw new InvalidDataException("Invalid climate rule count.");
+            value.HydrologyRules = new BiomeHydrologyRule[count];
+            for (int i = 0; i < count; i++) value.HydrologyRules[i] = new BiomeHydrologyRule {
+                Biome = (TerrainBiome)reader.ReadByte(), BasinOccurrence = reader.ReadSingle(),
+                BasinArea = reader.ReadSingle(), RiverOccurrence = reader.ReadSingle() };
+            return value.Snapshot();
         }
 
         private static void WriteWorldSettings(

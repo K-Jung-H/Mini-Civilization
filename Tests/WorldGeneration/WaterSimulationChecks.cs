@@ -164,7 +164,8 @@ internal static class WaterSimulationChecks
                     heights.HasWater ? WaterType.River : WaterType.None, 0, 1, 0);
             }
             materializer.Materialize(world, chunk, new PatternTilePair(
-                new TerrainPatternTile(key,bounds,terrain),
+                new ClimatePatternTile(new TerrainPatternTile(key,bounds,terrain),
+                    new ClimateNoiseMap(1, "temperature", 512), new ClimateNoiseMap(1, "moisture", 640), new ClimateSettings()),
                 new HydrologyPatternTile(key,bounds,new[] { feature },hydro)));
             for (var z = bounds.MinimumZ; z < bounds.MaximumZExclusive; z++)
             for (var x = bounds.MinimumX; x < bounds.MaximumXExclusive; x++)

@@ -21,6 +21,40 @@ namespace MiniCivilization.World.Generation.Patterns
         private readonly Dictionary<PatternTileKey, TerrainBuild>
             terrainBuilds = new();
         private long revision;
+        private readonly Dictionary<PatternTileKey, Lazy<ClimatePatternTile>> climateTiles = new();
+        public ClimatePatternTile GetOrBuildClimate(PatternTileKey key, Func<ClimatePatternTile> build)
+        {
+            Lazy<ClimatePatternTile> entry;
+            lock (gate)
+            {
+                if (!climateTiles.TryGetValue(key, out entry))
+                {
+                    entry = new Lazy<ClimatePatternTile>(() => {
+                        var tile = build();
+                        lock (gate) revision++;
+                        return tile;
+                    }, LazyThreadSafetyMode.ExecutionAndPublication);
+                    climateTiles.Add(key, entry);
+                }
+            }
+            try { return entry.Value; }
+            catch
+            {
+                lock (gate)
+                    if (climateTiles.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
+                        climateTiles.Remove(key);
+                throw;
+            }
+        }
+        public bool TryGetClimate(PatternTileKey key, out ClimatePatternTile tile)
+        {
+            lock (gate)
+            {
+                if (climateTiles.TryGetValue(key, out var entry) && entry.IsValueCreated)
+                { tile = entry.Value; return true; }
+            }
+            tile = null; return false;
+        }
 
         internal WaterBrushCatalog WaterBrushes { get; } = new();
 
@@ -82,9 +116,10 @@ namespace MiniCivilization.World.Generation.Patterns
             lock (gate)
             {
                 if (terrainTiles.TryGetValue(key, out var terrain)
-                    && hydrologyTiles.TryGetValue(key, out var hydrology))
+                    && hydrologyTiles.TryGetValue(key, out var hydrology)
+                    && TryGetClimate(key, out var climate))
                 {
-                    pair = new PatternTilePair(terrain, hydrology);
+                    pair = new PatternTilePair(climate, hydrology);
                     return true;
                 }
             }
@@ -192,6 +227,8 @@ namespace MiniCivilization.World.Generation.Patterns
             {
                 if (terrainBuilds.Count != 0) return;
                 var removed = false;
+                foreach (var key in new List<PatternTileKey>(climateTiles.Keys))
+                    if (!required.Contains(key)) removed |= climateTiles.Remove(key);
                 foreach (var key in new List<PatternTileKey>(hydrologyTiles.Keys))
                     if (!required.Contains(key)) removed |= hydrologyTiles.Remove(key);
                 foreach (var key in new List<PatternTileKey>(terrainTiles.Keys))

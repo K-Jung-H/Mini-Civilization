@@ -35,7 +35,7 @@ namespace MiniCivilization.World.Generation.Patterns
                     nameof(settings));
             }
 
-            brushFactory = new WaterBrushFactory(settings);
+            brushFactory = new WaterBrushFactory(settings, terrain as IClimatePatternMapReader);
             collector = new HydrologyContributionCollector(settings, terrain);
             painter = new WaterMapPainter();
         }
@@ -81,8 +81,8 @@ namespace MiniCivilization.World.Generation.Patterns
                 cancellationToken.ThrowIfCancellationRequested();
                 for (var gridX = minimumGridX; gridX <= maximumGridX; gridX++)
                 {
-                    if (!brushFactory.IsBasinCandidate(gridX, gridZ)
-                        || !brushFactory.CanBasinAffect(gridX, gridZ, bounds))
+                    if (!brushFactory.CanBasinAffect(gridX, gridZ, bounds)
+                        || !brushFactory.IsBasinCandidate(gridX, gridZ))
                     {
                         continue;
                     }
@@ -139,8 +139,8 @@ namespace MiniCivilization.World.Generation.Patterns
                 cancellationToken.ThrowIfCancellationRequested();
                 for (var gridX = minimumGridX; gridX <= maximumGridX; gridX++)
                 {
-                    if (!brushFactory.IsRiverCandidate(gridX, gridZ)
-                        || !brushFactory.CanRiverAffect(gridX, gridZ, bounds))
+                    if (!brushFactory.CanRiverAffect(gridX, gridZ, bounds)
+                        || !brushFactory.IsRiverCandidate(gridX, gridZ))
                     {
                         continue;
                     }

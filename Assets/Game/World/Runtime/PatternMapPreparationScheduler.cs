@@ -12,6 +12,7 @@ namespace MiniCivilization.World.Runtime
         private readonly TerrainPatternTileBuilder terrainBuilder;
         private readonly HydrologyPatternDrawer hydrologyDrawer;
         private readonly int maximumConcurrentBuilds;
+        private readonly ClimatePatternMapReader climate;
         private readonly CancellationTokenSource cancellation = new();
         private readonly Dictionary<PatternTileKey, Task<TerrainPatternTile>>
             terrainBuilds = new();
@@ -30,8 +31,9 @@ namespace MiniCivilization.World.Runtime
             PatternMapStore store,
             TerrainPatternTileBuilder terrainBuilder,
             HydrologyPatternDrawer hydrologyDrawer,
-            int maximumConcurrentBuilds)
+            int maximumConcurrentBuilds, ClimatePatternMapReader climate)
         {
+            this.climate = climate ?? throw new ArgumentNullException(nameof(climate));
             this.store = store ?? throw new ArgumentNullException(nameof(store));
             this.terrainBuilder = terrainBuilder
                 ?? throw new ArgumentNullException(nameof(terrainBuilder));
@@ -199,7 +201,7 @@ namespace MiniCivilization.World.Runtime
 
             var token = cancellation.Token;
             hydrologyBuilds.Add(key, Task.Run(
-                () => hydrologyDrawer.Draw(key, token),
+                () => { climate.Build(key, token); return hydrologyDrawer.Draw(key, token); },
                 token));
         }
 

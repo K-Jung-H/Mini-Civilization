@@ -108,10 +108,10 @@ namespace MiniCivilization.World.Runtime
             var terrainBuilder = new TerrainPatternTileBuilder(
                 configuration.PatternTiles,
                 configuration.Terrain);
-            var terrainMap = new TerrainPatternMapReader(
+            var terrainMap = new ClimatePatternMapReader(
                 configuration.PatternTiles,
                 runtime.PatternMaps,
-                terrainBuilder);
+                terrainBuilder, configuration.Climate);
             var hydrologyDrawer = new HydrologyPatternDrawer(
                 configuration.PatternTiles,
                 configuration.Hydrology,
@@ -121,7 +121,7 @@ namespace MiniCivilization.World.Runtime
                 runtime.PatternMaps,
                 terrainBuilder,
                 hydrologyDrawer,
-                configuration.MapBuildConcurrency);
+                configuration.MapBuildConcurrency, terrainMap);
             materializer = new PatternChunkMaterializer(
                 configuration.PatternTiles);
             this.persistence = persistence;

@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.WorldGenerationSettings
   seed: 13
   worldType: 1
-  cellSize: 1
+  cellSize: 0.5
   chunkCellCountXZ: 8
   chunkSectionCellCountY: 10
   initialChunkCountXZ: 15
@@ -26,12 +26,30 @@ MonoBehaviour:
   minimumSpreadAmount: 0.05
   dissipationAmountLoss: 0.05
   updateRangeChunks: 5
-  renderRangeChunks: 7
-  prepareRangeChunks: 10
+  renderRangeChunks: 15
+  prepareRangeChunks: 20
   chunkPreparePerFrame: 1
-  mapBuildConcurrency: 2
   chunkActivatePerFrame: 1
   chunkUnloadPerFrame: 1
   meshPatchPerFrame: 2
+  mapBuildConcurrency: 2
   terrain: {fileID: 11400000, guid: 02c64171b2294cf4951c0624d7948638, type: 2}
   hydrology: {fileID: 11400000, guid: 6fc8ee87425c4800b4e1d76ffeba57c1, type: 2}
+  climate:
+    TemperatureRegionScaleCells: 512
+    MoistureRegionScaleCells: 640
+    AltitudeCoolingPerCell: 0.003
+    AltitudeReferenceHeight: 20
+    ColdThreshold: 0.3
+    HotThreshold: 0.65
+    DryThreshold: 0.35
+    ForestThreshold: 0.6
+    WetlandThreshold: 0.75
+    WetlandMaximumHeight: 22
+    MountainMinimumHeight: 55
+    MountainMinimumSlope: 0.75
+    HydrologyRules:
+    - Biome: 3
+      BasinOccurrence: 0.2
+      BasinArea: 0.4
+      RiverOccurrence: 0.3

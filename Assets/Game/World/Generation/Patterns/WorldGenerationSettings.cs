@@ -18,8 +18,9 @@ namespace MiniCivilization.World.Generation.Patterns
             int mapBuildConcurrency,
             int chunkActivatePerFrame = 1,
             int chunkUnloadPerFrame = 1,
-            int meshPatchPerFrame = 2)
+            int meshPatchPerFrame = 2, ClimateSettings climate = null)
         {
+            climateSettings = (climate ?? new ClimateSettings()).Snapshot();
             World = world ?? throw new ArgumentNullException(nameof(world));
             Terrain = terrain ?? throw new ArgumentNullException(nameof(terrain));
             Hydrology = hydrology ?? throw new ArgumentNullException(nameof(hydrology));
@@ -59,6 +60,8 @@ namespace MiniCivilization.World.Generation.Patterns
             MapBuildConcurrency = mapBuildConcurrency;
         }
 
+        private readonly ClimateSettings climateSettings;
+        public ClimateSettings Climate => climateSettings.Snapshot();
         public WorldSettingsData World { get; }
         public TerrainPatternSettingsData Terrain { get; }
         public HydrologyFeatureSettingsData Hydrology { get; }
@@ -115,13 +118,14 @@ namespace MiniCivilization.World.Generation.Patterns
         [Header("Pattern Sources")]
         [SerializeField] private TerrainPatternSettings terrain;
         [SerializeField] private HydrologyFeatureSettings hydrology;
+        [SerializeField] private ClimateSettings climate = new();
 
         // Streaming limits belong to the current machine, not the saved terrain definition.
         public WorldGenerationConfiguration ApplyStreamingSettings(WorldGenerationConfiguration saved) => new(
             saved.World, saved.Terrain, saved.Hydrology, saved.PatternTiles,
             updateRangeChunks, renderRangeChunks, prepareRangeChunks,
             chunkPreparePerFrame, mapBuildConcurrency,
-            chunkActivatePerFrame, chunkUnloadPerFrame, meshPatchPerFrame);
+            chunkActivatePerFrame, chunkUnloadPerFrame, meshPatchPerFrame, saved.Climate);
 
         public WorldGenerationConfiguration CreateConfiguration()
         {
@@ -170,7 +174,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 mapBuildConcurrency,
                 chunkActivatePerFrame,
                 chunkUnloadPerFrame,
-                meshPatchPerFrame);
+                meshPatchPerFrame, climate);
         }
     }
 }

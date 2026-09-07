@@ -9,11 +9,13 @@ namespace MiniCivilization.World.Generation.Patterns
     internal sealed class WaterBrushFactory
     {
         private readonly HydrologyFeatureSettingsData settings;
+        private readonly IClimatePatternMapReader climate;
         private readonly int basinSeed;
         private readonly int riverSeed;
 
-        public WaterBrushFactory(HydrologyFeatureSettingsData settings)
+        public WaterBrushFactory(HydrologyFeatureSettingsData settings, IClimatePatternMapReader climate = null)
         {
+            this.climate = climate;
             this.settings = settings ?? throw new ArgumentNullException(nameof(settings));
             basinSeed = WaterMapDrawingMath.DeriveSeed(
                 settings.World.Seed,
@@ -38,13 +40,20 @@ namespace MiniCivilization.World.Generation.Patterns
         public int RiverCandidateSpacingCells =>
             settings.River.CandidateLatticeSpacingCells;
 
-        public bool IsBasinCandidate(int gridX, int gridZ) =>
-            WaterMapDrawingMath.Value01(gridX, gridZ, basinSeed)
-            < settings.Basins.Occurrence;
+        public bool IsBasinCandidate(int gridX, int gridZ)
+        {
+            var chance = WaterMapDrawingMath.Value01(gridX, gridZ, basinSeed);
+            return chance < settings.Basins.Occurrence
+                && chance < settings.Basins.Occurrence * BasinRule(gridX, gridZ).BasinOccurrence;
+        }
 
-        public bool IsRiverCandidate(int gridX, int gridZ) =>
-            WaterMapDrawingMath.Value01(gridX, gridZ, riverSeed)
-            < settings.River.Occurrence;
+        public bool IsRiverCandidate(int gridX, int gridZ)
+        {
+            var chance = WaterMapDrawingMath.Value01(gridX, gridZ, riverSeed);
+            return chance < settings.River.Occurrence
+                && chance < settings.River.Occurrence * (climate?.GetHydrologyRule(
+                    checked(gridX * RiverCandidateSpacingCells), checked(gridZ * RiverCandidateSpacingCells)).RiverOccurrence ?? 1f);
+        }
 
         public HydrologyFeatureKey GetBasinKey(int gridX, int gridZ)
         {
@@ -142,7 +151,7 @@ namespace MiniCivilization.World.Generation.Patterns
         {
             var radius = Math.Min(
                 settings.Basins.MaximumReachCells,
-                ResolveBasinArea(gridX, gridZ) - 1)
+                ResolveUnscaledBasinArea(gridX, gridZ) - 1)
                 + settings.Basins.ShoreTransitionCells;
             return CanReach(
                 (long)gridX * BasinCandidateSpacingCells,
@@ -545,16 +554,19 @@ namespace MiniCivilization.World.Generation.Patterns
             value,
             MidpointRounding.AwayFromZero));
 
+        private BiomeHydrologyRule BasinRule(int x, int z) => climate?.GetHydrologyRule(
+            checked(x * BasinCandidateSpacingCells), checked(z * BasinCandidateSpacingCells))
+            ?? new BiomeHydrologyRule { BasinOccurrence = 1, BasinArea = 1, RiverOccurrence = 1 };
+
         private int ResolveBasinArea(int gridX, int gridZ) => Math.Clamp(
-            (int)MathF.Round(WaterMapDrawingMath.Lerp(
-                settings.Basins.Area.Minimum,
-                settings.Basins.Area.Maximum,
-                WaterMapDrawingMath.Value01(
-                    gridX,
-                    gridZ,
+            (int)MathF.Round(ResolveUnscaledBasinArea(gridX, gridZ) * BasinRule(gridX, gridZ).BasinArea),
+            1, checked((int)MathF.Ceiling(settings.Basins.Area.Maximum)));
+
+        private int ResolveUnscaledBasinArea(int gridX, int gridZ) => Math.Clamp(
+            (int)MathF.Round(WaterMapDrawingMath.Lerp(settings.Basins.Area.Minimum,
+                settings.Basins.Area.Maximum, WaterMapDrawingMath.Value01(gridX, gridZ,
                     WaterMapDrawingMath.DeriveSeed(basinSeed, "area")))),
-            1,
-            checked((int)MathF.Ceiling(settings.Basins.Area.Maximum)));
+            1, checked((int)MathF.Ceiling(settings.Basins.Area.Maximum)));
 
         private BasinDrawingGeometry BuildBasinGeometry(
             int ownerX,

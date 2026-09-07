@@ -7,15 +7,17 @@ namespace MiniCivilization.World.Generation.Patterns
     public readonly struct PatternTilePair
     {
         public PatternTilePair(
-            TerrainPatternTile terrain,
+            ClimatePatternTile climate,
             HydrologyPatternTile hydrology)
         {
-            PatternTileComposition.ValidatePair(terrain, hydrology);
-            Terrain = terrain;
+            if (climate == null) throw new ArgumentNullException(nameof(climate));
+            PatternTileComposition.ValidatePair(climate.Terrain, hydrology);
+            Climate = climate;
             Hydrology = hydrology;
         }
 
-        public TerrainPatternTile Terrain { get; }
+        public ClimatePatternTile Climate { get; }
+        public TerrainPatternTile Terrain => Climate.Terrain;
         public HydrologyPatternTile Hydrology { get; }
     }
 
@@ -113,6 +115,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 tile.Hydrology,
                 x,
                 z);
+            var climate = tile.Climate.GetCell(x, z);
             var heights = PatternHeightQuantization.FromCurrentPattern(pattern);
             heights.ValidateWorldHeight(world.Height);
             var groundHeight = heights.Ground;
@@ -126,6 +129,8 @@ namespace MiniCivilization.World.Generation.Patterns
                 var solidHeight = heights.SolidAt(y);
                 var cell = new CellData
                 {
+                    Biome = new CellBiome(climate.Climate, climate.Biome,
+                        hasWater ? (WaterBiome)pattern.Hydrology.WaterType : WaterBiome.None),
                     Terrain = new TerrainData
                     {
                         Material = solidHeight > 0

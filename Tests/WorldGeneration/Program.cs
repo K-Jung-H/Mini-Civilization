@@ -84,6 +84,7 @@ Require(PatternHeightQuantization.Round(1.5f) == 2 && PatternHeightQuantization.
     "rounding compatibility");
 Console.WriteLine("PASS integer column contract, map roundtrip, capacity/volume, Amount, invalid and shallow heights");
 var asset = LoadSettings<TerrainPatternSettings>(Path.Combine(root, "Assets/Game/World/Settings/TerrainPatternSettings.asset"));
+ClimateChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 HydrologyChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 StreamingChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 foreach (var seed in new[] { 0, 1, -1 })

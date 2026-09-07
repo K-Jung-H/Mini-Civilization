@@ -3,19 +3,24 @@ using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Generation.Patterns;
 using MiniCivilization.World.Presentation;
+using MiniCivilization.World.Runtime;
 using UnityEditor;
 using UnityEngine;
 
 namespace MiniCivilization.World.Editor
 {
+    [InitializeOnLoad]
     [CustomEditor(typeof(WorldTerrainPatternDebugger))]
     public sealed class WorldTerrainPatternDebuggerEditor : UnityEditor.Editor
     {
         private enum PatternMapLayer : byte
         {
-            Terrain,
+            Combined,
+            Climate,
             Hydrology,
-            Combined
+            Terrain,
+            Temperature,
+            Moisture
         }
 
         private readonly struct PatternMapPixel
@@ -46,40 +51,128 @@ namespace MiniCivilization.World.Editor
         };
 
         private WorldTerrainPatternDebugger debugger;
-        private Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile;
-        private TerrainPatternCell[] terrainSamples;
-        private HydrologyPatternCell[] hydrologySamples;
-        private bool[] terrainAvailable;
-        private bool[] hydrologyAvailable;
-        private Color[] mapColors;
-        private Texture2D mapTexture;
-        private PatternTileBounds viewport;
-        private int pixelsPerChunk;
-        private int mapLevel;
-        private Vector2Int selectedCenterChunk;
-        private bool hasSelectedCenter;
-        private PatternMapLayer layer;
-        private string mapError;
-        private long observedRevision = -1;
-        private int terrainTileCount;
-        private int hydrologyTileCount;
-        private int combinedTileCount;
+        // Inspector instances are transient; previews belong to a debugger's runtime world.
+        private sealed class PreviewState
+        {
+            public WorldTerrainPatternDebugger Owner;
+            public WorldManager Manager;
+            public WorldRuntime Runtime;
+            public Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile;
+            public TerrainPatternCell[] terrainSamples;
+            public ClimatePatternCell[] climateSamples;
+            public float[] temperatureSamples;
+            public float[] moistureSamples;
+            public bool[] climateAvailable;
+            public HydrologyPatternCell[] hydrologySamples;
+            public bool[] terrainAvailable;
+            public bool[] hydrologyAvailable;
+            public Color[] mapColors;
+            public Texture2D mapTexture;
+            public PatternTileBounds viewport;
+            public int pixelsPerChunk;
+            public int mapLevel;
+            public Vector2Int selectedCenterChunk;
+            public bool hasSelectedCenter;
+            public PatternMapLayer layer;
+            public string mapError;
+            public long observedRevision = -1;
+            public int terrainTileCount;
+            public int hydrologyTileCount;
+            public int combinedTileCount;
+        }
+        private static readonly Dictionary<int, PreviewState> Previews = new();
+        private PreviewState preview;
+        private Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile { get => preview.pixelsByTile; set => preview.pixelsByTile = value; }
+        private TerrainPatternCell[] terrainSamples { get => preview.terrainSamples; set => preview.terrainSamples = value; }
+        private ClimatePatternCell[] climateSamples { get => preview.climateSamples; set => preview.climateSamples = value; }
+        private float[] temperatureSamples { get => preview.temperatureSamples; set => preview.temperatureSamples = value; }
+        private float[] moistureSamples { get => preview.moistureSamples; set => preview.moistureSamples = value; }
+        private bool[] climateAvailable { get => preview.climateAvailable; set => preview.climateAvailable = value; }
+        private HydrologyPatternCell[] hydrologySamples { get => preview.hydrologySamples; set => preview.hydrologySamples = value; }
+        private bool[] terrainAvailable { get => preview.terrainAvailable; set => preview.terrainAvailable = value; }
+        private bool[] hydrologyAvailable { get => preview.hydrologyAvailable; set => preview.hydrologyAvailable = value; }
+        private Color[] mapColors { get => preview.mapColors; set => preview.mapColors = value; }
+        private Texture2D mapTexture { get => preview.mapTexture; set => preview.mapTexture = value; }
+        private PatternTileBounds viewport { get => preview.viewport; set => preview.viewport = value; }
+        private int pixelsPerChunk { get => preview.pixelsPerChunk; set => preview.pixelsPerChunk = value; }
+        private int mapLevel { get => preview.mapLevel; set => preview.mapLevel = value; }
+        private Vector2Int selectedCenterChunk { get => preview.selectedCenterChunk; set => preview.selectedCenterChunk = value; }
+        private bool hasSelectedCenter { get => preview.hasSelectedCenter; set => preview.hasSelectedCenter = value; }
+        private PatternMapLayer layer { get => preview.layer; set => preview.layer = value; }
+        private string mapError { get => preview.mapError; set => preview.mapError = value; }
+        private long observedRevision { get => preview.observedRevision; set => preview.observedRevision = value; }
+        private int terrainTileCount { get => preview.terrainTileCount; set => preview.terrainTileCount = value; }
+        private int hydrologyTileCount { get => preview.hydrologyTileCount; set => preview.hydrologyTileCount = value; }
+        private int combinedTileCount { get => preview.combinedTileCount; set => preview.combinedTileCount = value; }
+
+        static WorldTerrainPatternDebuggerEditor()
+        {
+            EditorApplication.update += PrunePreviews;
+            AssemblyReloadEvents.beforeAssemblyReload += ReleasePreviews;
+            EditorApplication.playModeStateChanged += state => {
+                if (state == PlayModeStateChange.ExitingPlayMode) ReleasePreviews();
+            };
+        }
+
+        private static void ReleasePreview(PreviewState state)
+        {
+            if (state.Manager != null
+                && ReferenceEquals(state.Manager.CurrentWorldRuntime, state.Runtime))
+                state.Manager.ClearDebuggerPatternMapDemand();
+            if (state.mapTexture != null) DestroyImmediate(state.mapTexture);
+        }
+
+        private static void ReleasePreviews()
+        {
+            foreach (var state in Previews.Values) ReleasePreview(state);
+            Previews.Clear();
+        }
+
+        private static void PrunePreviews()
+        {
+            List<int> expired = null;
+            foreach (var entry in Previews)
+            {
+                var state = entry.Value;
+                if (state.Owner != null && state.Manager != null
+                    && state.Owner.WorldManager == state.Manager
+                    && ReferenceEquals(state.Manager.CurrentWorldRuntime, state.Runtime)) continue;
+                ReleasePreview(state);
+                (expired ??= new List<int>()).Add(entry.Key);
+            }
+            if (expired != null) foreach (var key in expired) Previews.Remove(key);
+        }
+
+        private void EnsurePreview()
+        {
+            var runtime = debugger.WorldManager != null ? debugger.WorldManager.CurrentWorldRuntime : null;
+            int key = debugger.GetInstanceID();
+            if (Previews.TryGetValue(key, out var state) && state.Manager == debugger.WorldManager
+                && ReferenceEquals(state.Runtime, runtime))
+            {
+                preview = state;
+                return;
+            }
+            if (state != null) ReleasePreview(state);
+            preview = new PreviewState { Owner = debugger, Manager = debugger.WorldManager, Runtime = runtime };
+            Previews[key] = preview;
+        }
 
         private void OnEnable()
         {
             debugger = (WorldTerrainPatternDebugger)target;
+            EnsurePreview();
             EditorApplication.update += RefreshPatternMap;
         }
 
         private void OnDisable()
         {
             EditorApplication.update -= RefreshPatternMap;
-            debugger?.WorldManager?.ClearDebuggerPatternMapDemand();
-            DestroyMapTexture();
         }
 
         public override void OnInspectorGUI()
         {
+            EnsurePreview();
             EditorGUI.BeginChangeCheck();
             DrawDefaultInspector();
             if (EditorGUI.EndChangeCheck())
@@ -173,13 +266,17 @@ namespace MiniCivilization.World.Editor
 
             var selectedLayer = GUILayout.Toolbar(
                 (int)layer,
-                new[] { "지형 패턴", "수문 패턴", "통합 패턴" });
+                new[] { "Biome", "Climate", "Hydrology", "Terrain", "Temperature", "Moisture" });
             if (selectedLayer != (int)layer)
             {
                 layer = (PatternMapLayer)selectedLayer;
                 RenderEntireMap();
             }
 
+            if (layer == PatternMapLayer.Temperature)
+                EditorGUILayout.LabelField("0: Blue (Cold)   0.5: Green   1: Red (Hot)");
+            if (layer == PatternMapLayer.Moisture)
+                EditorGUILayout.LabelField("0: White (Dry)   1: Blue (Wet)");
             EditorGUILayout.LabelField(
                 $"Terrain {terrainTileCount:N0} · Hydrology "
                 + $"{hydrologyTileCount:N0} · Combined "
@@ -209,6 +306,8 @@ namespace MiniCivilization.World.Editor
 
         private void RefreshPatternMap()
         {
+            if (debugger == null) return;
+            EnsurePreview();
             if (pixelsByTile == null)
             {
                 return;
@@ -249,6 +348,10 @@ namespace MiniCivilization.World.Editor
 
             DestroyMapTexture();
             terrainSamples = new TerrainPatternCell[MapResolution * MapResolution];
+            climateSamples = new ClimatePatternCell[terrainSamples.Length];
+            temperatureSamples = new float[terrainSamples.Length];
+            moistureSamples = new float[terrainSamples.Length];
+            climateAvailable = new bool[terrainSamples.Length];
             hydrologySamples = new HydrologyPatternCell[MapResolution * MapResolution];
             terrainAvailable = new bool[MapResolution * MapResolution];
             hydrologyAvailable = new bool[MapResolution * MapResolution];
@@ -326,6 +429,8 @@ namespace MiniCivilization.World.Editor
                 var hasHydrology = debugger.TryGetHydrologyPatternTile(
                     pair.Key,
                     out var hydrology);
+                ClimatePatternTile climate = null;
+                var hasClimate = debugger.WorldManager.CurrentWorldRuntime?.PatternMaps.TryGetClimate(pair.Key, out climate) == true;
                 if (hasTerrain)
                 {
                     terrainTileCount++;
@@ -352,6 +457,14 @@ namespace MiniCivilization.World.Editor
                 {
                     var pixel = pixels[index];
                     var mapIndex = pixel.X + MapResolution * pixel.Z;
+                    if (hasClimate && !climateAvailable[mapIndex])
+                    {
+                        climateSamples[mapIndex] = climate.GetCell(pixel.WorldX, pixel.WorldZ);
+                        temperatureSamples[mapIndex] = climate.GetTemperature(pixel.WorldX, pixel.WorldZ);
+                        moistureSamples[mapIndex] = climate.GetMoisture(pixel.WorldX, pixel.WorldZ);
+                        climateAvailable[mapIndex] = true;
+                        changed = true;
+                    }
                     if (hasTerrain && !terrainAvailable[mapIndex])
                     {
                         terrainSamples[mapIndex] = terrain.GetCell(
@@ -406,7 +519,7 @@ namespace MiniCivilization.World.Editor
                         terrainSamples[mapIndex],
                         terrainAvailable[mapIndex],
                         hydrologySamples[mapIndex],
-                        hydrologyAvailable[mapIndex]);
+                        hydrologyAvailable[mapIndex], mapIndex);
                     minimumX = Math.Min(minimumX, pixel.X);
                     minimumZ = Math.Min(minimumZ, pixel.Z);
                     maximumX = Math.Max(maximumX, pixel.X);
@@ -445,7 +558,7 @@ namespace MiniCivilization.World.Editor
                     terrainSamples[index],
                     terrainAvailable[index],
                     hydrologySamples[index],
-                    hydrologyAvailable[index]);
+                    hydrologyAvailable[index], index);
             }
 
             mapTexture.SetPixels(mapColors);
@@ -456,8 +569,14 @@ namespace MiniCivilization.World.Editor
             in TerrainPatternCell terrain,
             bool hasTerrain,
             in HydrologyPatternCell hydrology,
-            bool hasHydrology)
+            bool hasHydrology, int index)
         {
+            if (layer == PatternMapLayer.Temperature)
+                return climateAvailable[index] ? ClimateMapColors.Temperature(temperatureSamples[index]) : Color.black;
+            if (layer == PatternMapLayer.Moisture)
+                return climateAvailable[index] ? ClimateMapColors.Moisture(moistureSamples[index]) : Color.black;
+            if (layer == PatternMapLayer.Climate)
+                return climateAvailable[index] ? BiomeColor(climateSamples[index].Biome) : Color.black;
             if (layer == PatternMapLayer.Terrain)
             {
                 return hasTerrain
@@ -478,13 +597,12 @@ namespace MiniCivilization.World.Editor
                 return hydrologyColor;
             }
 
-            if (!hasTerrain || !hasHydrology)
+            if (!climateAvailable[index] || !hasHydrology)
             {
                 return Color.black;
             }
 
-            var terrainColor = debugger.PatternMapPalette.ResolveTerrain(
-                terrain.Type);
+            var terrainColor = BiomeColor(climateSamples[index].Biome);
             if (!hydrology.HasWater)
             {
                 return terrainColor;
@@ -496,6 +614,16 @@ namespace MiniCivilization.World.Editor
             combined.a = 1f;
             return combined;
         }
+
+        private static Color BiomeColor(TerrainBiome biome) => biome switch
+        {
+            TerrainBiome.Desert => new Color(0.85f, 0.7f, 0.35f),
+            TerrainBiome.Snow => Color.white,
+            TerrainBiome.Forest => new Color(0.1f, 0.4f, 0.15f),
+            TerrainBiome.Wetland => new Color(0.3f, 0.4f, 0.3f),
+            TerrainBiome.Mountain => Color.gray,
+            _ => new Color(0.4f, 0.7f, 0.25f)
+        };
 
         private void DrawChunkGrid(Rect rect)
         {
@@ -969,6 +1097,10 @@ namespace MiniCivilization.World.Editor
             debugger?.WorldManager?.ClearDebuggerPatternMapDemand();
             pixelsByTile = null;
             terrainSamples = null;
+            climateSamples = null;
+            temperatureSamples = null;
+            moistureSamples = null;
+            climateAvailable = null;
             hydrologySamples = null;
             terrainAvailable = null;
             hydrologyAvailable = null;
