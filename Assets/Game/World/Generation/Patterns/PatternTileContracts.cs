@@ -318,6 +318,24 @@ namespace MiniCivilization.World.Generation.Patterns
             0f,
             0f);
 
+        // Strict output path for integer-height producers. Existing float producers
+        // remain explicit until their topology/height rules are replaced.
+        public static HydrologyPatternCell CreateResolved(
+            PatternColumnHeights heights, WaterType waterType, int featureIndex,
+            float interiorInfluence, float boundaryInfluence)
+        {
+            // Current map storage is float; reject integers that cannot survive it exactly.
+            if ((double)(float)heights.Ground != heights.Ground
+                || (double)(float)heights.WaterSurface != heights.WaterSurface)
+                throw new ArgumentOutOfRangeException(nameof(heights));
+            if (heights.HasWater)
+                return CreateWater(waterType, featureIndex, heights.Ground,
+                    heights.WaterSurface, interiorInfluence, boundaryInfluence);
+            if (waterType != WaterType.None)
+                throw new ArgumentException("A dry column cannot carry a water type.", nameof(waterType));
+            return CreateGroundOverride(featureIndex, heights.Ground, boundaryInfluence);
+        }
+
         public static HydrologyPatternCell CreateWater(
             WaterType waterType,
             int featureIndex,

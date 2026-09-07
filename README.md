@@ -75,6 +75,8 @@ Assets/Game/World
 
 ### 월드 흐름
 
+월드 생성의 현재 구조와 규칙은 [월드 생성 기준](Docs/WorldGeneration/README.md)을 따릅니다.
+
 ```text
 WorldGenerationSettings
 → Pattern Tile streaming

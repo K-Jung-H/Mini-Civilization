@@ -74,6 +74,19 @@ namespace MiniCivilization.World.Generation.Patterns
     }
 
     [Serializable]
+    public struct RiverDistribution
+    {
+        [SerializeField] private float minimum;
+        [SerializeField] private float average;
+        [SerializeField] private float maximum;
+
+        internal RiverDistributionData CreateData() => new(
+            minimum,
+            average,
+            maximum);
+    }
+
+    [Serializable]
     public struct RiverFeatureSettings
     {
         [SerializeField] private int candidateLatticeSpacingCells;
@@ -84,14 +97,20 @@ namespace MiniCivilization.World.Generation.Patterns
         [SerializeField] private int maximumNodeCount;
         [SerializeField] private PatternRange nodeTurnDegrees;
         [SerializeField] private PatternNoiseField curvatureField;
+        [SerializeField] private float terrainHeightChangeReferenceCells;
+        [SerializeField] private float terrainAvoidanceStrength;
+        [SerializeField] private int maximumDescendantBranchCount;
+        [SerializeField] private float branchOccurrencePerNode;
+        [SerializeField] private RiverDistribution branchNodeCountRatio;
+        [SerializeField] private int minimumBranchNodeCount;
+        [SerializeField] private RiverDistribution branchOpeningAngleDegrees;
+        [SerializeField] private RiverDistribution branchWidthRatio;
+        [SerializeField] private RiverDistribution branchDepthRatio;
         [SerializeField] private PatternNoiseField widthField;
         [SerializeField] private PatternRange widthCells;
         [SerializeField] private PatternCurve crossSection;
         [SerializeField] private PatternRange depthCells;
         [SerializeField] private PatternRange waterInsetCells;
-        [SerializeField] private float bankMarginCells;
-        [SerializeField] private int dropTransitionCells;
-        [SerializeField] private PatternCurve dropTransition;
         [SerializeField] private PatternNoiseField riverbedField;
         [SerializeField] private PatternRange riverbedAmplitudeCells;
 
@@ -104,14 +123,20 @@ namespace MiniCivilization.World.Generation.Patterns
             maximumNodeCount,
             nodeTurnDegrees.CreateData(),
             curvatureField.CreateData(),
+            terrainHeightChangeReferenceCells,
+            terrainAvoidanceStrength,
+            maximumDescendantBranchCount,
+            branchOccurrencePerNode,
+            branchNodeCountRatio.CreateData(),
+            minimumBranchNodeCount,
+            branchOpeningAngleDegrees.CreateData(),
+            branchWidthRatio.CreateData(),
+            branchDepthRatio.CreateData(),
             widthField.CreateData(),
             widthCells.CreateData(),
             crossSection.CreateData(),
             depthCells.CreateData(WorldGrid.HeightStepsPerCell),
             waterInsetCells.CreateData(WorldGrid.HeightStepsPerCell),
-            bankMarginCells,
-            dropTransitionCells,
-            dropTransition.CreateData(),
             riverbedField.CreateData(),
             riverbedAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell));
     }
@@ -162,7 +187,9 @@ namespace MiniCivilization.World.Generation.Patterns
                 || occurrence > 1f
                 || area.Minimum <= 0f
                 || pondMaximumAreaCells <= 0
-                || maximumDepth.Minimum <= 0f
+                || maximumDepth.Minimum - bedAmplitude.Maximum < 1f
+                || !IsUnitTransition(depthByInterior)
+                || !IsUnitTransition(shoreTransition)
                 || shoreTransitionCells <= 0
                 || bedAmplitude.Maximum >= maximumDepth.Minimum
                 || maximumReachCells < 1
@@ -217,6 +244,12 @@ namespace MiniCivilization.World.Generation.Patterns
         public float CutCost { get; }
         public float FillCost { get; }
         public float RimCost { get; }
+
+        internal static bool IsUnitTransition(TerrainCurveData curve) =>
+            curve.AtZero == 0f && curve.AtOne == 1f
+            && curve.AtQuarter >= 0f && curve.AtQuarter <= 1f
+            && curve.AtHalf >= 0f && curve.AtHalf <= 1f
+            && curve.AtThreeQuarters >= 0f && curve.AtThreeQuarters <= 1f;
     }
 
     public readonly struct SeaFeatureSettingsData
@@ -259,6 +292,29 @@ namespace MiniCivilization.World.Generation.Patterns
         public int SurfaceHeight { get; }
     }
 
+    public readonly struct RiverDistributionData
+    {
+        public RiverDistributionData(float minimum, float average, float maximum)
+        {
+            if (!float.IsFinite(minimum)
+                || !float.IsFinite(average)
+                || !float.IsFinite(maximum)
+                || minimum > average
+                || average > maximum)
+            {
+                throw new ArgumentOutOfRangeException(nameof(minimum));
+            }
+
+            Minimum = minimum;
+            Average = average;
+            Maximum = maximum;
+        }
+
+        public float Minimum { get; }
+        public float Average { get; }
+        public float Maximum { get; }
+    }
+
     public readonly struct RiverFeatureSettingsData
     {
         public RiverFeatureSettingsData(
@@ -270,14 +326,20 @@ namespace MiniCivilization.World.Generation.Patterns
             int maximumNodeCount,
             TerrainRangeData nodeTurnDegrees,
             TerrainNoiseFieldData curvatureField,
+            float terrainHeightChangeReferenceCells,
+            float terrainAvoidanceStrength,
+            int maximumDescendantBranchCount,
+            float branchOccurrencePerNode,
+            RiverDistributionData branchNodeCountRatio,
+            int minimumBranchNodeCount,
+            RiverDistributionData branchOpeningAngleDegrees,
+            RiverDistributionData branchWidthRatio,
+            RiverDistributionData branchDepthRatio,
             TerrainNoiseFieldData widthField,
             TerrainRangeData width,
             TerrainCurveData crossSection,
             TerrainRangeData depth,
             TerrainRangeData waterInset,
-            float bankMarginCells,
-            int dropTransitionCells,
-            TerrainCurveData dropTransition,
             TerrainNoiseFieldData riverbedField,
             TerrainRangeData riverbedAmplitude)
         {
@@ -291,11 +353,27 @@ namespace MiniCivilization.World.Generation.Patterns
                 || averageNodeCount > maximumNodeCount
                 || nodeTurnDegrees.Minimum < 0f
                 || nodeTurnDegrees.Maximum >= 90f
+                || !float.IsFinite(terrainHeightChangeReferenceCells)
+                || terrainHeightChangeReferenceCells <= 0f
+                || !float.IsFinite(terrainAvoidanceStrength)
+                || terrainAvoidanceStrength < 0f
+                || maximumDescendantBranchCount < 0
+                || !float.IsFinite(branchOccurrencePerNode)
+                || branchOccurrencePerNode < 0f
+                || branchOccurrencePerNode > 1f
+                || branchNodeCountRatio.Minimum <= 0f
+                || branchNodeCountRatio.Maximum >= 1f
+                || minimumBranchNodeCount < 2
+                || branchOpeningAngleDegrees.Minimum <= 0f
+                || branchOpeningAngleDegrees.Maximum >= 90f
+                || branchWidthRatio.Minimum <= 0f
+                || branchWidthRatio.Maximum > 1f
+                || branchDepthRatio.Minimum <= 0f
+                || branchDepthRatio.Maximum > 1f
                 || width.Minimum <= 0f
+                || !BasinFeatureSettingsData.IsUnitTransition(crossSection)
                 || depth.Minimum <= 0f
                 || waterInset.Minimum < 0f
-                || !float.IsFinite(bankMarginCells) || bankMarginCells < 0f
-                || dropTransitionCells <= 0
                 || riverbedAmplitude.Maximum >= depth.Minimum)
             {
                 throw new ArgumentOutOfRangeException(
@@ -310,14 +388,20 @@ namespace MiniCivilization.World.Generation.Patterns
             MaximumNodeCount = maximumNodeCount;
             NodeTurnDegrees = nodeTurnDegrees;
             CurvatureField = curvatureField;
+            TerrainHeightChangeReferenceCells = terrainHeightChangeReferenceCells;
+            TerrainAvoidanceStrength = terrainAvoidanceStrength;
+            MaximumDescendantBranchCount = maximumDescendantBranchCount;
+            BranchOccurrencePerNode = branchOccurrencePerNode;
+            BranchNodeCountRatio = branchNodeCountRatio;
+            MinimumBranchNodeCount = minimumBranchNodeCount;
+            BranchOpeningAngleDegrees = branchOpeningAngleDegrees;
+            BranchWidthRatio = branchWidthRatio;
+            BranchDepthRatio = branchDepthRatio;
             WidthField = widthField;
             Width = width;
             CrossSection = crossSection;
             Depth = depth;
             WaterInset = waterInset;
-            BankMarginCells = bankMarginCells;
-            DropTransitionCells = dropTransitionCells;
-            DropTransition = dropTransition;
             RiverbedField = riverbedField;
             RiverbedAmplitude = riverbedAmplitude;
         }
@@ -330,14 +414,20 @@ namespace MiniCivilization.World.Generation.Patterns
         public int MaximumNodeCount { get; }
         public TerrainRangeData NodeTurnDegrees { get; }
         public TerrainNoiseFieldData CurvatureField { get; }
+        public float TerrainHeightChangeReferenceCells { get; }
+        public float TerrainAvoidanceStrength { get; }
+        public int MaximumDescendantBranchCount { get; }
+        public float BranchOccurrencePerNode { get; }
+        public RiverDistributionData BranchNodeCountRatio { get; }
+        public int MinimumBranchNodeCount { get; }
+        public RiverDistributionData BranchOpeningAngleDegrees { get; }
+        public RiverDistributionData BranchWidthRatio { get; }
+        public RiverDistributionData BranchDepthRatio { get; }
         public TerrainNoiseFieldData WidthField { get; }
         public TerrainRangeData Width { get; }
         public TerrainCurveData CrossSection { get; }
         public TerrainRangeData Depth { get; }
         public TerrainRangeData WaterInset { get; }
-        public float BankMarginCells { get; }
-        public int DropTransitionCells { get; }
-        public TerrainCurveData DropTransition { get; }
         public TerrainNoiseFieldData RiverbedField { get; }
         public TerrainRangeData RiverbedAmplitude { get; }
     }

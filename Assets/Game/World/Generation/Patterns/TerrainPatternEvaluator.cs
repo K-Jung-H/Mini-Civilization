@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace MiniCivilization.World.Generation.Patterns
@@ -67,8 +68,10 @@ namespace MiniCivilization.World.Generation.Patterns
                 int key,
                 RegionPattern pattern,
                 float influence,
-                float interiorProgress)
+                float interiorProgress,
+                RegionParameters parameters)
             {
+                Parameters = parameters;
                 GridX = gridX;
                 GridZ = gridZ;
                 Key = key;
@@ -77,6 +80,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 InteriorProgress = interiorProgress;
             }
 
+            public RegionParameters Parameters { get; }
             public long GridX { get; }
             public long GridZ { get; }
             public int Key { get; }
@@ -110,28 +114,66 @@ namespace MiniCivilization.World.Generation.Patterns
         }
 
         private readonly TerrainPatternSettingsData settings;
+        private readonly int continentalnessSeed;
+        private readonly int erosionSeed;
+        private readonly int warpXSeed;
+        private readonly int warpZSeed;
+        private readonly int regionSeed;
+        // Evaluator lifetime is one tile build; workers never share mutable caches.
+        private readonly Dictionary<int, RegionParameters> regionParameters = new();
+        private readonly RegionCenter[] regionCenters;
+        private readonly double[] regionDistances;
+        private readonly int regionSearchRadius;
+        private double nearestRegionDistance;
+        private bool hasRegionCenters;
+        private long centerGridX;
+        private long centerGridZ;
 
         public TerrainPatternEvaluator(TerrainPatternSettingsData settings)
         {
             this.settings = settings
                 ?? throw new ArgumentNullException(nameof(settings));
+            continentalnessSeed = DeriveSeed(settings.WorldSeed, "world-router-continentalness");
+            erosionSeed = DeriveSeed(settings.WorldSeed, "world-router-erosion");
+            warpXSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-x");
+            warpZSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-z");
+            regionSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-region");
+            // A center in the sample's own lattice cell is at most sqrt(2)*(0.5+jitter)
+            // cells away. Include every center within that bound + the blend support.
+            // Also cover the second nearest center, used by the existing Sea metadata.
+            var jitter = (double)settings.Region.CenterJitter;
+            var nearestBound = Math.Sqrt(2d) * (0.5d + jitter);
+            var secondBound = Math.Sqrt(
+                (1.5d + jitter) * (1.5d + jitter)
+                + (0.5d + jitter) * (0.5d + jitter));
+            var reach = Math.Max(secondBound, nearestBound
+                + 2d * settings.Region.BoundaryBlendCells / settings.Region.SizeCells);
+            regionSearchRadius = checked((int)Math.Ceiling(reach + jitter + 0.5d));
+            var diameter = checked(regionSearchRadius * 2 + 1);
+            regionCenters = new RegionCenter[checked(diameter * diameter)];
+            regionDistances = new double[regionCenters.Length];
         }
 
-        internal TerrainPatternSample EvaluateSample(int worldX, int worldZ)
+        internal TerrainPatternSample EvaluateSample(double worldX, double worldZ)
         {
             var continentalness = SampleNoise(
                 worldX,
                 worldZ,
                 settings.NoiseRouter.Continentalness,
-                DeriveSeed(settings.WorldSeed, "world-router-continentalness"));
+                continentalnessSeed);
             var erosion = SampleNoise(
                 worldX,
                 worldZ,
                 settings.NoiseRouter.Erosion,
-                DeriveSeed(settings.WorldSeed, "world-router-erosion"));
+                erosionSeed);
             var region = SampleRegion(worldX, worldZ);
             var primary = SampleContribution(region.Primary, worldX, worldZ);
-            var secondary = SampleContribution(region.Secondary, worldX, worldZ);
+            // Keep unweighted nearest-region heights for the existing Sea consumer.
+            // They no longer determine the blended Terrain surface.
+            var secondary = region.Primary.Key == region.Secondary.Key
+                ? primary
+                : SampleContribution(region.Secondary, worldX, worldZ);
+            var blended = SampleBlendedContribution(worldX, worldZ);
             var baseSurface = settings.TerrainBaseHeight
                 + settings.BaseSurface.SurfaceByContinentalness.Evaluate(
                     NormalizeNoise(continentalness,
@@ -142,14 +184,8 @@ namespace MiniCivilization.World.Generation.Patterns
             var terrainType = ResolveTerrainType(region);
             return new TerrainPatternSample(
                 terrainType,
-                baseSurface + Lerp(
-                    secondary.BaseHeight,
-                    primary.BaseHeight,
-                    primaryInfluence),
-                Lerp(
-                    secondary.DetailHeight,
-                    primary.DetailHeight,
-                    primaryInfluence),
+                baseSurface + blended.BaseHeight,
+                blended.DetailHeight,
                 region.Primary.Pattern == RegionPattern.Sea,
                 region.Primary.Key,
                 region.Primary.InteriorProgress,
@@ -189,28 +225,25 @@ namespace MiniCivilization.World.Generation.Patterns
             return MathF.Sqrt(horizontal * horizontal + vertical * vertical);
         }
 
-        private RegionSample SampleRegion(int worldX, int worldZ)
+        private RegionSample SampleRegion(double worldX, double worldZ)
         {
             var regionSettings = settings.Region;
-            var warpX = SampleSignedNoise(
+            var warpX = regionSettings.WarpStrengthCells == 0f ? 0f : SampleSignedNoise(
                     worldX,
                     worldZ,
                     regionSettings.WarpField,
-                    DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-x"))
+                    warpXSeed)
                 * regionSettings.WarpStrengthCells;
-            var warpZ = SampleSignedNoise(
+            var warpZ = regionSettings.WarpStrengthCells == 0f ? 0f : SampleSignedNoise(
                     worldX,
                     worldZ,
                     regionSettings.WarpField,
-                    DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-z"))
+                    warpZSeed)
                 * regionSettings.WarpStrengthCells;
             var sampleX = worldX + warpX;
             var sampleZ = worldZ + warpZ;
             var gridX = (long)Math.Floor(sampleX / regionSettings.SizeCells);
             var gridZ = (long)Math.Floor(sampleZ / regionSettings.SizeCells);
-            var regionSeed = DeriveSeed(
-                settings.WorldSeed,
-                "world-router-pattern-region");
             var nearestDistance = double.PositiveInfinity;
             var secondDistance = double.PositiveInfinity;
             var nearestGridX = 0L;
@@ -218,54 +251,32 @@ namespace MiniCivilization.World.Generation.Patterns
             var secondGridX = 0L;
             var secondGridZ = 0L;
 
-            const int candidateRingCount = 1;
-            for (var offsetZ = -candidateRingCount;
-                 offsetZ <= candidateRingCount;
-                 offsetZ++)
+            PrepareRegionCenters(gridX, gridZ);
+            for (var index = 0; index < regionCenters.Length; index++)
             {
-                for (var offsetX = -candidateRingCount;
-                     offsetX <= candidateRingCount;
-                     offsetX++)
+                var center = regionCenters[index];
+                var deltaX = sampleX - center.X;
+                var deltaZ = sampleZ - center.Z;
+                var distance = Math.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
+                regionDistances[index] = distance;
+                if (distance < nearestDistance)
                 {
-                    var candidateGridX = checked(gridX + offsetX);
-                    var candidateGridZ = checked(gridZ + offsetZ);
-                    var centerX = (candidateGridX + 0.5)
-                        * regionSettings.SizeCells
-                        + SignedValue01(
-                            candidateGridX,
-                            candidateGridZ,
-                            unchecked(regionSeed + 101))
-                            * regionSettings.CenterJitter
-                            * regionSettings.SizeCells;
-                    var centerZ = (candidateGridZ + 0.5)
-                        * regionSettings.SizeCells
-                        + SignedValue01(
-                            candidateGridX,
-                            candidateGridZ,
-                            unchecked(regionSeed + 211))
-                            * regionSettings.CenterJitter
-                            * regionSettings.SizeCells;
-                    var deltaX = sampleX - centerX;
-                    var deltaZ = sampleZ - centerZ;
-                    var distance = Math.Sqrt(deltaX * deltaX + deltaZ * deltaZ);
-                    if (distance < nearestDistance)
-                    {
-                        secondDistance = nearestDistance;
-                        secondGridX = nearestGridX;
-                        secondGridZ = nearestGridZ;
-                        nearestDistance = distance;
-                        nearestGridX = candidateGridX;
-                        nearestGridZ = candidateGridZ;
-                    }
-                    else if (distance < secondDistance)
-                    {
-                        secondDistance = distance;
-                        secondGridX = candidateGridX;
-                        secondGridZ = candidateGridZ;
-                    }
+                    secondDistance = nearestDistance;
+                    secondGridX = nearestGridX;
+                    secondGridZ = nearestGridZ;
+                    nearestDistance = distance;
+                    nearestGridX = center.GridX;
+                    nearestGridZ = center.GridZ;
+                }
+                else if (distance < secondDistance)
+                {
+                    secondDistance = distance;
+                    secondGridX = center.GridX;
+                    secondGridZ = center.GridZ;
                 }
             }
 
+            nearestRegionDistance = nearestDistance;
             var boundaryDistance = Math.Max(
                 0d,
                 (secondDistance - nearestDistance) * 0.5d);
@@ -293,10 +304,81 @@ namespace MiniCivilization.World.Generation.Patterns
                     0f));
         }
 
+        private void PrepareRegionCenters(long gridX, long gridZ)
+        {
+            if (hasRegionCenters && centerGridX == gridX && centerGridZ == gridZ)
+                return;
+            var region = settings.Region;
+            var index = 0;
+            for (var offsetZ = -regionSearchRadius; offsetZ <= regionSearchRadius; offsetZ++)
+            for (var offsetX = -regionSearchRadius; offsetX <= regionSearchRadius; offsetX++)
+            {
+                var x = checked(gridX + offsetX);
+                var z = checked(gridZ + offsetZ);
+                regionCenters[index++] = new RegionCenter(
+                    x, z,
+                    (x + 0.5) * region.SizeCells
+                        + SignedValue01(x, z, unchecked(regionSeed + 101))
+                        * region.CenterJitter * region.SizeCells,
+                    (z + 0.5) * region.SizeCells
+                        + SignedValue01(x, z, unchecked(regionSeed + 211))
+                        * region.CenterJitter * region.SizeCells);
+            }
+            centerGridX = gridX;
+            centerGridZ = gridZ;
+            hasRegionCenters = true;
+        }
+
+        private TerrainContribution SampleBlendedContribution(double worldX, double worldZ)
+        {
+            double totalWeight = 0d, baseHeight = 0d, detailHeight = 0d;
+            // Fixed absolute Z/X order makes sums independent of tile/cache traversal.
+            for (var index = 0; index < regionCenters.Length; index++)
+            {
+                var weight = RegionBlendWeight(
+                    regionDistances[index], nearestRegionDistance,
+                    settings.Region.BoundaryBlendCells);
+                if (weight == 0d) continue;
+                var center = regionCenters[index];
+                var contribution = SampleContribution(
+                    CreateCandidate(center.GridX, center.GridZ, 0f, 0f), worldX, worldZ);
+                totalWeight += weight;
+                baseHeight += contribution.BaseHeight * weight;
+                detailHeight += contribution.DetailHeight * weight;
+            }
+
+            // The nearest center always has weight 1, so the denominator is nonzero.
+            return new TerrainContribution(
+                (float)(baseHeight / totalWeight), (float)(detailHeight / totalWeight));
+        }
+
+        internal static double RegionBlendWeight(
+            double distance, double nearestDistance, double blendWidth)
+        {
+            var t = Math.Clamp(1d - (distance - nearestDistance) / (2d * blendWidth), 0d, 1d);
+            return t * t * t * (t * (t * 6d - 15d) + 10d);
+        }
+
+        private readonly struct RegionCenter
+        {
+            public RegionCenter(long gridX, long gridZ, double x, double z)
+            {
+                GridX = gridX;
+                GridZ = gridZ;
+                X = x;
+                Z = z;
+            }
+
+            public long GridX { get; }
+            public long GridZ { get; }
+            public double X { get; }
+            public double Z { get; }
+        }
+
         private TerrainContribution SampleContribution(
             RegionCandidate candidate,
-            int worldX,
-            int worldZ)
+            double worldX,
+            double worldZ)
         {
             return candidate.Pattern switch
             {
@@ -305,13 +387,13 @@ namespace MiniCivilization.World.Generation.Patterns
                     worldX,
                     worldZ,
                     settings.Smooth,
-                    "smooth"),
+                    1000),
                 RegionPattern.Rugged => SampleSurfaceForm(
                     candidate,
                     worldX,
                     worldZ,
                     settings.Rugged,
-                    "rugged"),
+                    2000),
                 RegionPattern.Mountain => SampleMountain(
                     candidate,
                     worldX,
@@ -327,44 +409,38 @@ namespace MiniCivilization.World.Generation.Patterns
 
         private TerrainContribution SampleSurfaceForm(
             RegionCandidate candidate,
-            int worldX,
-            int worldZ,
+            double worldX,
+            double worldZ,
             TerrainSurfaceFormData form,
-            string patternName)
+            int channelBase)
         {
             Warp(
                 candidate,
                 worldX,
                 worldZ,
                 form.DomainWarp,
-                patternName + "-warp",
+                channelBase,
                 out var sampleX,
                 out var sampleZ);
             var shape = form.ShapeResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
                     form.ShapeField,
-                    DeriveCandidateSeed(candidate, patternName + "-shape")))
-                * ResolveRange(
-                    candidate,
-                    form.ShapeAmplitude,
-                    patternName + "-shape-amplitude");
+                    DeriveCandidateSeed(candidate, channelBase + 10)))
+                * ResolveRange(candidate, channelBase + 20);
             var detail = SampleSignedNoise(
                     sampleX,
                     sampleZ,
                     form.DetailField,
-                    DeriveCandidateSeed(candidate, patternName + "-detail"))
-                * ResolveRange(
-                    candidate,
-                    form.DetailAmplitude,
-                    patternName + "-detail-amplitude");
+                    DeriveCandidateSeed(candidate, channelBase + 30))
+                * ResolveRange(candidate, channelBase + 40);
             return new TerrainContribution(shape, detail);
         }
 
         private TerrainContribution SampleMountain(
             RegionCandidate candidate,
-            int worldX,
-            int worldZ)
+            double worldX,
+            double worldZ)
         {
             var form = settings.Mountain;
             Warp(
@@ -372,40 +448,34 @@ namespace MiniCivilization.World.Generation.Patterns
                 worldX,
                 worldZ,
                 form.DomainWarp,
-                "mountain-warp",
+                3000,
                 out var sampleX,
                 out var sampleZ);
             var mass = form.MassResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
                     form.MassField,
-                    DeriveCandidateSeed(candidate, "mountain-mass")))
-                * ResolveRange(candidate, form.Height, "mountain-height");
+                    DeriveCandidateSeed(candidate, 3010)))
+                * ResolveRange(candidate, 3020);
             var ridge = form.RidgeResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
                     form.RidgeField,
-                    DeriveCandidateSeed(candidate, "mountain-ridge")))
-                * ResolveRange(
-                    candidate,
-                    form.RidgeStrength,
-                    "mountain-ridge-strength");
+                    DeriveCandidateSeed(candidate, 3030)))
+                * ResolveRange(candidate, 3040);
             var detail = SampleSignedNoise(
                     sampleX,
                     sampleZ,
                     form.DetailField,
-                    DeriveCandidateSeed(candidate, "mountain-detail"))
-                * ResolveRange(
-                    candidate,
-                    form.DetailAmplitude,
-                    "mountain-detail-amplitude");
+                    DeriveCandidateSeed(candidate, 3050))
+                * ResolveRange(candidate, 3060);
             return new TerrainContribution(mass + ridge, detail);
         }
 
         private TerrainContribution SampleCanyon(
             RegionCandidate candidate,
-            int worldX,
-            int worldZ)
+            double worldX,
+            double worldZ)
         {
             var form = settings.Canyon;
             Warp(
@@ -413,67 +483,61 @@ namespace MiniCivilization.World.Generation.Patterns
                 worldX,
                 worldZ,
                 form.DomainWarp,
-                "canyon-warp",
+                4000,
                 out var sampleX,
                 out var sampleZ);
             var basin = form.BasinResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
                     form.BasinField,
-                    DeriveCandidateSeed(candidate, "canyon-basin")))
-                * ResolveRange(
-                    candidate,
-                    form.BasinDepthRatio,
-                    "canyon-basin-ratio");
+                    DeriveCandidateSeed(candidate, 4010)))
+                * ResolveRange(candidate, 4020);
             var valley = form.ValleyResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
                     form.ValleyField,
-                    DeriveCandidateSeed(candidate, "canyon-valley")))
-                * ResolveRange(
-                    candidate,
-                    form.ValleyDepthRatio,
-                    "canyon-valley-ratio");
+                    DeriveCandidateSeed(candidate, 4030)))
+                * ResolveRange(candidate, 4040);
             var depthProgress = Math.Clamp(
                 1f - (1f - basin) * (1f - valley),
                 0f,
                 1f);
-            var depth = depthProgress * ResolveRange(
-                candidate,
-                form.Depth,
-                "canyon-depth");
+            var depth = depthProgress * ResolveRange(candidate, 4050);
             var detail = SampleSignedNoise(
                     sampleX,
                     sampleZ,
                     form.DetailField,
-                    DeriveCandidateSeed(candidate, "canyon-detail"))
-                * ResolveRange(
-                    candidate,
-                    form.DetailAmplitude,
-                    "canyon-detail-amplitude");
+                    DeriveCandidateSeed(candidate, 4060))
+                * ResolveRange(candidate, 4070);
             return new TerrainContribution(-depth, detail);
         }
 
         private void Warp(
             RegionCandidate candidate,
-            int worldX,
-            int worldZ,
+            double worldX,
+            double worldZ,
             TerrainDomainWarpData warp,
-            string path,
+            int channelBase,
             out double sampleX,
             out double sampleZ)
         {
+            if (warp.StrengthCells == 0f)
+            {
+                sampleX = worldX;
+                sampleZ = worldZ;
+                return;
+            }
             sampleX = worldX + SampleSignedNoise(
                 worldX,
                 worldZ,
                 warp.Field,
-                DeriveCandidateSeed(candidate, path + "-x"))
+                DeriveCandidateSeed(candidate, channelBase))
                 * warp.StrengthCells;
             sampleZ = worldZ + SampleSignedNoise(
                 worldX,
                 worldZ,
                 warp.Field,
-                DeriveCandidateSeed(candidate, path + "-z"))
+                DeriveCandidateSeed(candidate, channelBase + 1))
                 * warp.StrengthCells;
         }
 
@@ -483,20 +547,24 @@ namespace MiniCivilization.World.Generation.Patterns
             float influence,
             float interiorProgress)
         {
-            var regionSeed = DeriveSeed(
-                settings.WorldSeed,
-                "world-router-pattern-region");
             var hash = Hash(gridX, gridZ, regionSeed);
             var selector = (hash & 0x00FFFFFFu) / 16777215f
                 * settings.Region.TotalShare;
             var pattern = SelectRegionPattern(selector);
+            var key = unchecked((int)hash);
+            if (!regionParameters.TryGetValue(key, out var parameters))
+            {
+                parameters = new RegionParameters(key, pattern, settings);
+                regionParameters.Add(key, parameters);
+            }
             return new RegionCandidate(
                 gridX,
                 gridZ,
                 unchecked((int)hash),
                 pattern,
                 influence,
-                interiorProgress);
+                interiorProgress,
+                parameters);
         }
 
         private RegionPattern SelectRegionPattern(float selector)
@@ -546,58 +614,64 @@ namespace MiniCivilization.World.Generation.Patterns
                 _ => throw new ArgumentOutOfRangeException(nameof(pattern))
             };
 
-        private int DeriveCandidateSeed(RegionCandidate candidate, string path) =>
-            unchecked((int)PatternNoise.Hash(
-                candidate.Key,
-                ResolveLegacyChannel(path),
-                settings.WorldSeed));
+        private static int DeriveCandidateSeed(RegionCandidate candidate, int channel) =>
+            candidate.Parameters.Seeds[RegionParameters.Index(channel)];
 
-        private float ResolveRange(
-            RegionCandidate candidate,
-            TerrainRangeData range,
-            string path)
+        private static float ResolveRange(
+            RegionCandidate candidate, int channel) =>
+            candidate.Parameters.Ranges[RegionParameters.Index(channel)];
+
+        private sealed class RegionParameters
         {
-            var selector = (PatternNoise.Hash(
-                    candidate.Key,
-                    ResolveLegacyChannel(path),
-                    settings.WorldSeed) & 0x00FFFFFFu)
-                / 16777215f;
-            return range.Minimum + (range.Maximum - range.Minimum) * selector;
+            public readonly int[] Seeds = new int[9];
+            public readonly float[] Ranges = new float[9];
+
+            public RegionParameters(int key, RegionPattern pattern, TerrainPatternSettingsData settings)
+            {
+                if (pattern == RegionPattern.Sea) return;
+                var channelBase = ((int)pattern + 1) * 1000;
+                for (var index = 0; index < Seeds.Length; index++)
+                {
+                    var channel = channelBase + (index < 2 ? index : (index - 1) * 10);
+                    Seeds[index] = unchecked((int)PatternNoise.Hash(key, channel, settings.WorldSeed));
+                }
+                switch (pattern)
+                {
+                    case RegionPattern.Smooth:
+                        SetRange(1020, settings.Smooth.ShapeAmplitude);
+                        SetRange(1040, settings.Smooth.DetailAmplitude);
+                        break;
+                    case RegionPattern.Rugged:
+                        SetRange(2020, settings.Rugged.ShapeAmplitude);
+                        SetRange(2040, settings.Rugged.DetailAmplitude);
+                        break;
+                    case RegionPattern.Mountain:
+                        SetRange(3020, settings.Mountain.Height);
+                        SetRange(3040, settings.Mountain.RidgeStrength);
+                        SetRange(3060, settings.Mountain.DetailAmplitude);
+                        break;
+                    case RegionPattern.Canyon:
+                        SetRange(4020, settings.Canyon.BasinDepthRatio);
+                        SetRange(4040, settings.Canyon.ValleyDepthRatio);
+                        SetRange(4050, settings.Canyon.Depth);
+                        SetRange(4070, settings.Canyon.DetailAmplitude);
+                        break;
+                }
+            }
+
+            public static int Index(int channel)
+            {
+                var offset = channel % 1000;
+                return offset < 2 ? offset : offset / 10 + 1;
+            }
+
+            private void SetRange(int channel, TerrainRangeData range)
+            {
+                var index = Index(channel);
+                var selector = ((uint)Seeds[index] & 0x00FFFFFFu) / 16777215f;
+                Ranges[index] = range.Minimum + (range.Maximum - range.Minimum) * selector;
+            }
         }
-
-        private static int ResolveLegacyChannel(string path) => path switch
-        {
-            "smooth-warp-x" => 1000,
-            "smooth-warp-z" => 1001,
-            "smooth-shape" => 1010,
-            "smooth-shape-amplitude" => 1020,
-            "smooth-detail" => 1030,
-            "smooth-detail-amplitude" => 1040,
-            "rugged-warp-x" => 2000,
-            "rugged-warp-z" => 2001,
-            "rugged-shape" => 2010,
-            "rugged-shape-amplitude" => 2020,
-            "rugged-detail" => 2030,
-            "rugged-detail-amplitude" => 2040,
-            "mountain-warp-x" => 3000,
-            "mountain-warp-z" => 3001,
-            "mountain-mass" => 3010,
-            "mountain-height" => 3020,
-            "mountain-ridge" => 3030,
-            "mountain-ridge-strength" => 3040,
-            "mountain-detail" => 3050,
-            "mountain-detail-amplitude" => 3060,
-            "canyon-warp-x" => 4000,
-            "canyon-warp-z" => 4001,
-            "canyon-basin" => 4010,
-            "canyon-basin-ratio" => 4020,
-            "canyon-valley" => 4030,
-            "canyon-valley-ratio" => 4040,
-            "canyon-depth" => 4050,
-            "canyon-detail" => 4060,
-            "canyon-detail-amplitude" => 4070,
-            _ => throw new ArgumentOutOfRangeException(nameof(path))
-        };
 
         private static float NormalizeNoise(float value, PatternNoiseMode mode) =>
             PatternNoise.Normalize(value, mode);
@@ -667,7 +741,7 @@ namespace MiniCivilization.World.Generation.Patterns
     public sealed class TerrainPatternTileBuilder
     {
         private readonly PatternTileGridSettingsData grid;
-        private readonly TerrainPatternEvaluator evaluator;
+        private readonly TerrainPatternSettingsData settings;
 
         public TerrainPatternTileBuilder(
             PatternTileGridSettingsData grid,
@@ -686,13 +760,14 @@ namespace MiniCivilization.World.Generation.Patterns
                     nameof(settings));
             }
 
-            evaluator = new TerrainPatternEvaluator(settings);
+            this.settings = settings;
         }
 
         public TerrainPatternTile Build(
             PatternTileKey key,
             CancellationToken cancellationToken = default)
         {
+            var evaluator = new TerrainPatternEvaluator(settings);
             var bounds = grid.GetCoreBounds(key);
             var sampleWidth = checked(bounds.Width + 2);
             var samples = new TerrainPatternSample[checked(

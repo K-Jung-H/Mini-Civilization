@@ -110,7 +110,7 @@ namespace MiniCivilization.World.Runtime
                 configuration.PatternTiles,
                 runtime.PatternMaps,
                 terrainBuilder);
-            var hydrologyBuilder = new HydrologyPatternTileBuilder(
+            var hydrologyDrawer = new HydrologyPatternDrawer(
                 configuration.PatternTiles,
                 configuration.Hydrology,
                 terrainMap,
@@ -118,7 +118,7 @@ namespace MiniCivilization.World.Runtime
             mapScheduler = new PatternMapPreparationScheduler(
                 runtime.PatternMaps,
                 terrainBuilder,
-                hydrologyBuilder,
+                hydrologyDrawer,
                 configuration.MaximumConcurrentTileBuilds);
             materializer = new PatternChunkMaterializer(
                 configuration.PatternTiles);

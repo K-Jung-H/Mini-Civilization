@@ -5,19 +5,12 @@ using System.Threading.Tasks;
 
 namespace MiniCivilization.World.Generation.Patterns
 {
-    public interface ITerrainPatternMapReader
-    {
-        TerrainPatternCell GetCell(int absoluteX, int absoluteZ);
-    }
-
     public sealed class PatternMapStore
     {
         private sealed class TerrainBuild
         {
             public readonly TaskCompletionSource<TerrainPatternTile> Completion =
                 new(TaskCreationOptions.RunContinuationsAsynchronously);
-            public TerrainPatternTile Tile;
-            public Exception Failure;
         }
 
         private readonly object gate = new();
@@ -136,7 +129,6 @@ namespace MiniCivilization.World.Generation.Patterns
                     {
                         terrainTiles.Add(key, tile);
                         terrainBuilds.Remove(key);
-                        build.Tile = tile;
                         revision++;
                     }
 
@@ -147,26 +139,25 @@ namespace MiniCivilization.World.Generation.Patterns
                     lock (gate)
                     {
                         terrainBuilds.Remove(key);
-                        build.Failure = exception;
                     }
 
-                    build.Completion.TrySetException(exception);
+                    build.Completion.TrySetException(new InvalidOperationException(
+                        $"Terrain Pattern Tile {key} could not be sealed.", exception));
                 }
             }
             else
             {
-                build.Completion.Task.Wait(cancellationToken);
+                try
+                {
+                    build.Completion.Task.Wait(cancellationToken);
+                }
+                catch (AggregateException)
+                {
+                    // Read the original failure through the common result path below.
+                }
             }
 
-            if (build.Failure != null)
-            {
-                throw new InvalidOperationException(
-                    $"Terrain Pattern Tile {key} could not be sealed.",
-                    build.Failure);
-            }
-
-            return build.Tile ?? throw new InvalidOperationException(
-                $"Terrain Pattern Tile {key} did not produce a result.");
+            return build.Completion.Task.GetAwaiter().GetResult();
         }
 
         public void SealHydrology(HydrologyPatternTile tile)

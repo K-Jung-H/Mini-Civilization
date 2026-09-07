@@ -68,7 +68,6 @@ namespace MiniCivilization.World.Persistence
 
     internal static class WorldSaveCodec
     {
-        private const uint SaveDataMagic = 0x57534433;
         private const uint ChunkMagic = 0x57434438;
         private const int MaximumCollectionCount = 16_777_216;
         private const int MaximumEntityProgressPayloadLength = 65_536;
@@ -200,7 +199,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
-            writer.Write(SaveDataMagic);
+            WorldGenerationSaveHeader.Write(writer);
             writer.Write(saveData.WorldId.ToByteArray());
             WriteString(writer, saveData.SaveName);
             WriteGenerationConfiguration(
@@ -217,7 +216,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
-            VerifyHeader(reader, SaveDataMagic);
+            WorldGenerationSaveHeader.Read(reader);
             var worldId = new Guid(ReadExactBytes(reader, 16));
             var saveName = ReadString(reader);
             var generationConfiguration = ReadGenerationConfiguration(reader);
@@ -240,7 +239,7 @@ namespace MiniCivilization.World.Persistence
             }
 
             using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
-            VerifyHeader(reader, SaveDataMagic);
+            WorldGenerationSaveHeader.Read(reader);
             worldId = new Guid(ReadExactBytes(reader, 16));
             saveName = ReadString(reader);
             if (worldId == Guid.Empty || string.IsNullOrWhiteSpace(saveName))
@@ -552,6 +551,21 @@ namespace MiniCivilization.World.Persistence
             ReadFiniteSingle(reader),
             ReadFiniteSingle(reader));
 
+        private static void WriteRiverDistribution(
+            BinaryWriter writer,
+            RiverDistributionData value)
+        {
+            writer.Write(value.Minimum);
+            writer.Write(value.Average);
+            writer.Write(value.Maximum);
+        }
+
+        private static RiverDistributionData ReadRiverDistribution(
+            BinaryReader reader) => new(
+            ReadFiniteSingle(reader),
+            ReadFiniteSingle(reader),
+            ReadFiniteSingle(reader));
+
         private static void WriteDomainWarp(
             BinaryWriter writer,
             TerrainDomainWarpData value)
@@ -775,14 +789,20 @@ namespace MiniCivilization.World.Persistence
             writer.Write(value.MaximumNodeCount);
             WriteRange(writer, value.NodeTurnDegrees);
             WriteNoise(writer, value.CurvatureField);
+            writer.Write(value.TerrainHeightChangeReferenceCells);
+            writer.Write(value.TerrainAvoidanceStrength);
+            writer.Write(value.MaximumDescendantBranchCount);
+            writer.Write(value.BranchOccurrencePerNode);
+            WriteRiverDistribution(writer, value.BranchNodeCountRatio);
+            writer.Write(value.MinimumBranchNodeCount);
+            WriteRiverDistribution(writer, value.BranchOpeningAngleDegrees);
+            WriteRiverDistribution(writer, value.BranchWidthRatio);
+            WriteRiverDistribution(writer, value.BranchDepthRatio);
             WriteNoise(writer, value.WidthField);
             WriteRange(writer, value.Width);
             WriteCurve(writer, value.CrossSection);
             WriteRange(writer, value.Depth);
             WriteRange(writer, value.WaterInset);
-            writer.Write(value.BankMarginCells);
-            writer.Write(value.DropTransitionCells);
-            WriteCurve(writer, value.DropTransition);
             WriteNoise(writer, value.RiverbedField);
             WriteRange(writer, value.RiverbedAmplitude);
         }
@@ -797,14 +817,20 @@ namespace MiniCivilization.World.Persistence
                 reader.ReadInt32(),
                 ReadRange(reader),
                 ReadNoise(reader),
+                ReadFiniteSingle(reader),
+                ReadFiniteSingle(reader),
+                reader.ReadInt32(),
+                ReadFiniteSingle(reader),
+                ReadRiverDistribution(reader),
+                reader.ReadInt32(),
+                ReadRiverDistribution(reader),
+                ReadRiverDistribution(reader),
+                ReadRiverDistribution(reader),
                 ReadNoise(reader),
                 ReadRange(reader),
                 ReadCurve(reader),
                 ReadRange(reader),
                 ReadRange(reader),
-                ReadFiniteSingle(reader),
-                reader.ReadInt32(),
-                ReadCurve(reader),
                 ReadNoise(reader),
                 ReadRange(reader));
 

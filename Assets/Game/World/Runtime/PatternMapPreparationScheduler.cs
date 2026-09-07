@@ -10,7 +10,7 @@ namespace MiniCivilization.World.Runtime
     {
         private readonly PatternMapStore store;
         private readonly TerrainPatternTileBuilder terrainBuilder;
-        private readonly HydrologyPatternTileBuilder hydrologyBuilder;
+        private readonly HydrologyPatternDrawer hydrologyDrawer;
         private readonly int maximumConcurrentBuilds;
         private readonly CancellationTokenSource cancellation = new();
         private readonly Dictionary<PatternTileKey, Task<TerrainPatternTile>>
@@ -24,14 +24,14 @@ namespace MiniCivilization.World.Runtime
         public PatternMapPreparationScheduler(
             PatternMapStore store,
             TerrainPatternTileBuilder terrainBuilder,
-            HydrologyPatternTileBuilder hydrologyBuilder,
+            HydrologyPatternDrawer hydrologyDrawer,
             int maximumConcurrentBuilds)
         {
             this.store = store ?? throw new ArgumentNullException(nameof(store));
             this.terrainBuilder = terrainBuilder
                 ?? throw new ArgumentNullException(nameof(terrainBuilder));
-            this.hydrologyBuilder = hydrologyBuilder
-                ?? throw new ArgumentNullException(nameof(hydrologyBuilder));
+            this.hydrologyDrawer = hydrologyDrawer
+                ?? throw new ArgumentNullException(nameof(hydrologyDrawer));
             if (maximumConcurrentBuilds <= 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -175,7 +175,7 @@ namespace MiniCivilization.World.Runtime
 
             var token = cancellation.Token;
             hydrologyBuilds.Add(key, Task.Run(
-                () => hydrologyBuilder.Build(key, token),
+                () => hydrologyDrawer.Draw(key, token),
                 token));
         }
 

@@ -53,7 +53,7 @@ MonoBehaviour:
     surfaceStep: 0
   basins:
     candidateLatticeSpacingCells: 24
-    occurrence: 0.5908
+    occurrence: 0.12
     areaCells:
       minimum: 8
       maximum: 420
@@ -107,10 +107,10 @@ MonoBehaviour:
   river:
     candidateLatticeSpacingCells: 128
     anchorJitterCells: 32
-    occurrence: 0.45
-    minimumNodeCount: 28
-    averageNodeCount: 70
-    maximumNodeCount: 112
+    occurrence: 1
+    minimumNodeCount: 160
+    averageNodeCount: 200
+    maximumNodeCount: 240
     nodeTurnDegrees:
       minimum: 3
       maximum: 18
@@ -121,6 +121,27 @@ MonoBehaviour:
       frequencySpacing: 2
       persistence: 0.45
       octaveSeedStride: 1013
+    terrainHeightChangeReferenceCells: 2
+    terrainAvoidanceStrength: 0.15
+    maximumDescendantBranchCount: 4
+    branchOccurrencePerNode: 0.025
+    branchNodeCountRatio:
+      minimum: 0.3
+      average: 0.45
+      maximum: 0.6
+    minimumBranchNodeCount: 8
+    branchOpeningAngleDegrees:
+      minimum: 25
+      average: 45
+      maximum: 70
+    branchWidthRatio:
+      minimum: 0.45
+      average: 0.65
+      maximum: 0.8
+    branchDepthRatio:
+      minimum: 0.5
+      average: 0.7
+      maximum: 0.85
     widthField:
       mode: 0
       scale: 0.025
@@ -129,8 +150,8 @@ MonoBehaviour:
       persistence: 0.45
       octaveSeedStride: 1013
     widthCells:
-      minimum: 1
-      maximum: 7
+      minimum: 5
+      maximum: 9
     crossSection:
       atZero: 0
       atQuarter: 0.05
@@ -143,14 +164,6 @@ MonoBehaviour:
     waterInsetCells:
       minimum: 0.15
       maximum: 0.65
-    bankMarginCells: 1
-    dropTransitionCells: 12
-    dropTransition:
-      atZero: 0
-      atQuarter: 0.05
-      atHalf: 0.5
-      atThreeQuarters: 0.95
-      atOne: 1
     riverbedField:
       mode: 1
       scale: 0.08

@@ -113,45 +113,17 @@ namespace MiniCivilization.World.Generation.Patterns
                 tile.Hydrology,
                 x,
                 z);
-            var groundHeight = ToGroundHeightUnits(pattern.GroundHeight);
-            var waterSurfaceHeight = pattern.Hydrology.HasWater
-                ? ToWaterSurfaceHeightUnits(
-                    pattern.Hydrology.WaterSurfaceHeight)
-                : 0;
-            var maximumHeight = checked(
-                world.Height * WorldGrid.HeightStepsPerCell);
-            if (groundHeight < 0 || groundHeight > maximumHeight
-                || waterSurfaceHeight < 0
-                || waterSurfaceHeight > maximumHeight)
-            {
-                throw new InvalidOperationException(
-                    "Pattern Tile height is outside the configured world height.");
-            }
-
-            if (pattern.Hydrology.HasWater
-                && waterSurfaceHeight < groundHeight)
-            {
-                throw new InvalidOperationException(
-                    "Hydrology water surface is below its final ground height.");
-            }
-
-            var hasWater = pattern.Hydrology.HasWater
-                && waterSurfaceHeight > groundHeight;
+            var heights = PatternHeightQuantization.FromCurrentPattern(pattern);
+            heights.ValidateWorldHeight(world.Height);
+            var groundHeight = heights.Ground;
+            var hasWater = heights.HasWater;
             var topSurface = hasWater
                 ? ToBedSurface(pattern.Hydrology.WaterType)
                 : SurfaceType.Ground;
-            var usedHeight = Math.Max(groundHeight, waterSurfaceHeight);
-            var usedCellCount = Math.Min(
-                world.Height,
-                (usedHeight + WorldGrid.HeightStepsPerCell - 1)
-                / WorldGrid.HeightStepsPerCell);
-            for (var y = 0; y < usedCellCount; y++)
+            for (var y = 0; y < heights.UsedCellCount; y++)
             {
                 var baseHeight = y * WorldGrid.HeightStepsPerCell;
-                var solidHeight = (byte)Math.Clamp(
-                    groundHeight - baseHeight,
-                    0,
-                    WorldGrid.HeightStepsPerCell);
+                var solidHeight = heights.SolidAt(y);
                 var cell = new CellData
                 {
                     Terrain = new TerrainData
@@ -172,10 +144,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 if (hasWater)
                 {
                     var available = WorldGrid.HeightStepsPerCell - solidHeight;
-                    var waterHeight = (byte)Math.Clamp(
-                        waterSurfaceHeight - baseHeight - solidHeight,
-                        0,
-                        available);
+                    var waterHeight = heights.WaterAt(y);
                     if (waterHeight > 0)
                     {
                         cell.Water = new WaterData
@@ -196,32 +165,6 @@ namespace MiniCivilization.World.Generation.Patterns
                     world.SetCellBulk(x, y, z, cell);
                 }
             }
-        }
-
-        private static int ToGroundHeightUnits(float value)
-        {
-            if (!float.IsFinite(value))
-            {
-                throw new InvalidOperationException(
-                    "Pattern Tile height is not finite.");
-            }
-
-            return checked((int)MathF.Round(
-                value,
-                MidpointRounding.AwayFromZero));
-        }
-
-        private static int ToWaterSurfaceHeightUnits(float value)
-        {
-            if (!float.IsFinite(value))
-            {
-                throw new InvalidOperationException(
-                    "Pattern Tile height is not finite.");
-            }
-
-            return checked((int)MathF.Round(
-                value,
-                MidpointRounding.AwayFromZero));
         }
 
         private static SurfaceType ToBedSurface(WaterType waterType) =>

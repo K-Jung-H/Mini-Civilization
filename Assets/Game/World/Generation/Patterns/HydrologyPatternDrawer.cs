@@ -12,6 +12,7 @@ namespace MiniCivilization.World.Generation.Patterns
         private readonly WaterBrushCatalog brushes;
         private readonly WaterBrushFactory brushFactory;
         private readonly WaterMapPainter painter;
+        private readonly HydrologyContributionCollector collector;
 
         public HydrologyPatternDrawer(
             PatternTileGridSettingsData grid,
@@ -35,7 +36,8 @@ namespace MiniCivilization.World.Generation.Patterns
             }
 
             brushFactory = new WaterBrushFactory(settings);
-            painter = new WaterMapPainter(settings, terrain);
+            collector = new HydrologyContributionCollector(settings, terrain);
+            painter = new WaterMapPainter();
         }
 
         public HydrologyPatternTile Draw(
@@ -48,9 +50,11 @@ namespace MiniCivilization.World.Generation.Patterns
             }
 
             var bounds = grid.GetCoreBounds(key);
-            var basins = CollectBasins(bounds, cancellationToken);
-            var rivers = CollectRivers(bounds, cancellationToken);
-            return painter.Paint(key, bounds, basins, rivers, cancellationToken);
+            var readBounds = HydrologyHeightSolver.ReadBounds(bounds);
+            var basins = CollectBasins(readBounds, cancellationToken);
+            var rivers = CollectRivers(readBounds, cancellationToken);
+            var resolved = collector.Resolve(bounds, basins, rivers, cancellationToken);
+            return painter.Paint(key, bounds, resolved, cancellationToken);
         }
 
         private List<BasinWaterBrush> CollectBasins(
@@ -77,7 +81,8 @@ namespace MiniCivilization.World.Generation.Patterns
                 cancellationToken.ThrowIfCancellationRequested();
                 for (var gridX = minimumGridX; gridX <= maximumGridX; gridX++)
                 {
-                    if (!brushFactory.IsBasinCandidate(gridX, gridZ))
+                    if (!brushFactory.IsBasinCandidate(gridX, gridZ)
+                        || !brushFactory.CanBasinAffect(gridX, gridZ, bounds))
                     {
                         continue;
                     }
@@ -92,13 +97,17 @@ namespace MiniCivilization.World.Generation.Patterns
                     }
 
                     var featureKey = brushFactory.GetBasinKey(gridX, gridZ);
-                    result.Add(brushes.GetOrCreateBasin(
+                    var brush = brushes.GetOrCreateBasin(
                         featureKey,
                         () => brushFactory.CreateBasin(
                             gridX,
                             gridZ,
                             terrain),
-                        cancellationToken));
+                        cancellationToken);
+                    if (brush.Bounds is PatternTileBounds brushBounds && brushBounds.Intersects(bounds))
+                    {
+                        result.Add(brush);
+                    }
                 }
             }
 
@@ -130,16 +139,21 @@ namespace MiniCivilization.World.Generation.Patterns
                 cancellationToken.ThrowIfCancellationRequested();
                 for (var gridX = minimumGridX; gridX <= maximumGridX; gridX++)
                 {
-                    if (!brushFactory.IsRiverCandidate(gridX, gridZ))
+                    if (!brushFactory.IsRiverCandidate(gridX, gridZ)
+                        || !brushFactory.CanRiverAffect(gridX, gridZ, bounds))
                     {
                         continue;
                     }
 
                     var featureKey = brushFactory.GetRiverKey(gridX, gridZ);
-                    result.Add(brushes.GetOrCreateRiver(
+                    var brush = brushes.GetOrCreateRiver(
                         featureKey,
                         () => brushFactory.CreateRiver(gridX, gridZ, terrain),
-                        cancellationToken));
+                        cancellationToken);
+                    if (brush.Bounds is PatternTileBounds brushBounds && brushBounds.Intersects(bounds))
+                    {
+                        result.Add(brush);
+                    }
                 }
             }
 
