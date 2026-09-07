@@ -9,6 +9,8 @@ internal static class WaterSimulationChecks
 {
     public static void Run()
     {
+        Check(StreamingBatch(false).SequenceEqual(StreamingBatch(true)), "batched frontier final water equivalence");
+        Console.WriteLine("PASS real water streaming batch: active wave detach/restore, frontier and final water equivalence");
         foreach (var surface in new[] { 13, 15, 16, 24 })
         foreach (var budget in new[] { 1, 4096 })
         {
@@ -50,6 +52,40 @@ internal static class WaterSimulationChecks
         Check(escaped, "negative control must detect actual exterior supply");
         Console.WriteLine("PASS real Materializer/WaterFlowResolver: partial Filled pools, Source preservation, contained falls, wave budgets and chunk order");
         Console.WriteLine("PASS negative controls: open bank spreads; same-Y Source step produces no Dynamic waterfall");
+    }
+
+    private static WaterData[] StreamingBatch(bool batch)
+    {
+        var world = Build((x,z) => z == 0 && x >= -2 && x <= 2
+            ? PatternColumnHeights.Wet(x < 0 ? 21 : 7, x < 0 ? 24 : 10)
+            : PatternColumnHeights.Dry(25));
+        var state = new WaterFlowState(world, Array.Empty<WaterBody>());
+        var enabled = true;
+        var resolver = new WaterFlowResolver(world.ChunkSizeX, c => enabled);
+        var cells = Coordinates(world).ToArray();
+        resolver.RestoreFrontier(world, state, cells);
+        var parameters = new WaterFlowParameters(world.WaterFlowRules);
+        resolver.Step(world, state, parameters, 1, out _);
+        Check(resolver.IsWaveInProgress, "streaming fixture has active wave");
+        if (batch) resolver.BeginStreamingChanges();
+        var detached = new List<CellCoordinate>();
+        resolver.DetachChunkFrontier(world, state, new ChunkCoordinate(0,0), detached);
+        Check(detached.Count > 0, "streaming fixture detaches real frontier");
+        resolver.RestoreChunkFrontier(world, state, detached);
+        enabled = false;
+        resolver.OnSimulationSetChanged(world, state);
+        enabled = true;
+        resolver.OnSimulationSetChanged(world, state);
+        if (batch) resolver.EndStreamingChanges(world, state);
+        Check(world.WaterFlowSchedule.FrontierCells.SequenceEqual(cells.OrderBy(c => c)),
+            "cancelled wave and detached frontier preserved exactly");
+        var count = 0;
+        while (resolver.HasWork)
+        {
+            Check(++count < 10000 && resolver.HasRunnableWork, "streaming batch settles");
+            resolver.Step(world, state, parameters, 4096, out _);
+        }
+        return cells.Select(c => world.GetCell(c.X,c.Y,c.Z).Water).ToArray();
     }
 
     private static WaterData[] Fall(int high, int budget, bool reverse, bool pauseRight = false)

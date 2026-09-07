@@ -39,7 +39,42 @@ namespace MiniCivilization.World.Runtime
         public event Action SimulationStateChanged;
         public event Action<ChunkRuntime> TerrainRenderStateChanged;
         public event Action<ChunkRuntime> EntityRenderStateChanged;
-        public event Action<ChunkCoordinate> ChunkDataUnloaded;
+        public event Action ChunksDataUnloaded;
+        private bool streamingChanges;
+        private bool simulationChangedDuringStreaming;
+        private bool dataUnloadedDuringStreaming;
+
+        internal void BeginStreamingChanges()
+        {
+            if (streamingChanges) throw new InvalidOperationException("Streaming changes already open.");
+            streamingChanges = true;
+            WaterFlowResolver.BeginStreamingChanges();
+        }
+
+        internal void EndStreamingChanges()
+        {
+            streamingChanges = false;
+            try
+            {
+                if (simulationChangedDuringStreaming) SimulationStateChanged?.Invoke();
+            }
+            finally
+            {
+                simulationChangedDuringStreaming = false;
+                WaterFlowResolver.EndStreamingChanges(Data, WaterFlowState);
+            }
+            if (dataUnloadedDuringStreaming)
+            {
+                dataUnloadedDuringStreaming = false;
+                ChunksDataUnloaded?.Invoke();
+            }
+        }
+
+        private void NotifySimulationChanged()
+        {
+            if (streamingChanges) simulationChangedDuringStreaming = true;
+            else SimulationStateChanged?.Invoke();
+        }
 
         public static WorldRuntime Create(WorldData data)
         {
@@ -158,7 +193,7 @@ namespace MiniCivilization.World.Runtime
                 EntityRenderStateChanged?.Invoke(chunkRuntime);
             }
 
-            SimulationStateChanged?.Invoke();
+            NotifySimulationChanged();
         }
 
         internal void SetChunkSimulationEnabled(
@@ -179,7 +214,7 @@ namespace MiniCivilization.World.Runtime
 
             if (chunkRuntime.SetSimulationEnabled(enabled))
             {
-                SimulationStateChanged?.Invoke();
+                NotifySimulationChanged();
             }
         }
 
@@ -240,14 +275,15 @@ namespace MiniCivilization.World.Runtime
 
             if (simulationChanged)
             {
-                SimulationStateChanged?.Invoke();
+                NotifySimulationChanged();
             }
 
             if (unloadWorldData)
             {
                 Data.UnloadChunk(coordinate);
                 chunkRuntimes.Remove(coordinate);
-                ChunkDataUnloaded?.Invoke(coordinate);
+                if (streamingChanges) dataUnloadedDuringStreaming = true;
+                else ChunksDataUnloaded?.Invoke();
             }
         }
 

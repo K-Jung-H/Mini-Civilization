@@ -371,8 +371,9 @@ namespace MiniCivilization.World.Persistence
             writer.Write(configuration.UpdateRangeChunks);
             writer.Write(configuration.RenderRangeChunks);
             writer.Write(configuration.PrepareRangeChunks);
-            writer.Write(configuration.ChunkMaterializationsPerFrame);
-            writer.Write(configuration.MaximumConcurrentTileBuilds);
+            // Preserve the existing save layout; current authoring settings override streaming limits on load.
+            writer.Write(configuration.ChunkPreparePerFrame);
+            writer.Write(configuration.MapBuildConcurrency);
         }
 
         private static WorldGenerationConfiguration ReadGenerationConfiguration(

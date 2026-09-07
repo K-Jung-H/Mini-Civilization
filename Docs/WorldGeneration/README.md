@@ -1,6 +1,6 @@
 # 월드 생성 구조
 
-현재 River 형태와 교차부 Ground는 사용자 실행 검증에서 해결 확인을 받았다. 생성 버전은 9다.
+현재 River 형태와 교차부 Ground는 사용자 실행 검증에서 해결 확인을 받았다. 생성 버전은 10이다. 높이 출력 통합과 캐시 수명 변경도 사용자 실행 검증을 통과했다.
 
 ## 데이터 흐름
 
@@ -26,6 +26,10 @@
 - OverlapResolver는 겹침을 해석하고 HeightSolver는 최종 정수 높이를 계산한다.
 - Painter는 Feature 인덱스와 Pixel을 기록한다. Materializer는 확정된 높이를 실제 Cell로 변환한다.
 
+Hydrology 출력은 Sea·마른 전이를 포함해 정수 Filled로 확정한다. Painter는 미확정 float 출력을 받지 않는다. 저장 Pixel 필드 자체는 기존 float 형식을 유지하므로 형식 변경은 아니다. 얕은 Sea 물은 출력 단계에서 마른 Pixel로 바뀔 수 있다(이전에는 최종 Cell 변환에서 사라짐). Materializer의 공통 반올림은 Terrain 원본을 위해 유지한다.
+
+Scheduler의 준비 작업이 모두 끝난 시점에 현재 스트리밍/디버거 요구 밖 Tile을 제거한다. 남은 Tile의 경계 halo에 영향을 주는 Brush는 유지한다. 진행 중 작업은 제거하지 않는다. 수요/저장 revision이 같으면 재정리를 생략한다. 실제 Cell과 저장은 삭제하지 않으며 제거된 Map은 재방문 시 재생성한다. 연속 작업 중에는 정리가 지연되므로 엄격한 메모리 상한은 아니다. 재방문 비용과 디버거의 과거 Map 표시 범위는 이전과 달라질 수 있다.
+
 도형 코드는 `WaterBrushCatalog`(캐시), `WaterBrushFactory`(도형 생성), `BasinWaterBrush`/`RiverWaterBrush`(샘플링), `WaterMapGeometry`(공통 좌표·Profile·공간 인덱스·수학) 파일로 나눈다. 파일 분리는 새 런타임 계층을 추가하지 않는다.
 
 ## 수역 규칙
@@ -50,6 +54,16 @@
 Sea, Basin 물 내부, River 물 내부, 마른 지형 순으로 우선한다. River 수면의 대표 선택은 FeatureKey 기준이다. 마른 기여는 높은 지면을 유지한다. 외부 마른 Cell은 인접 Lake/Pond/River 수면보다 한 Filled 이상 높게 결정한다. 후보 조회는 도형 영향 범위와 외부 경계 halo를 포함한다.
 
 Sea 수면 규칙은 기존 동작을 유지한다. 의도적 River–Sea/Basin 연결은 별도 기능이다.
+
+## 청크 스트리밍
+
+StreamingCoordinator는 준비·활성화·완전 언로드 대기 목록을 관리한다. 준비·활성화는 가까운 청크, 언로드는 표시 범위 밖 먼 청크부터 처리한다. 타깃 변경 시 대기를 다시 계산하고, 범위 밖 시뮬레이션은 언로드 대기 중에도 중지한다.
+
+WorldGenerationSettings의 Streaming Processing에서 `mapBuildConcurrency`(맵 동시 작업), `chunkPreparePerFrame`(신규 생성/로드·캐시 준비), `chunkActivatePerFrame`(활성화), `chunkUnloadPerFrame`(저장·완전 해제), `meshPatchPerFrame`(신규/갱신 합산 패치)을 관리한다. 기본값은 각각 2/1/1/1/2다. 메시 큐 사이에서도 가까운 패치를 먼저 처리한다. 시간 예산은 사용하지 않는다.
+
+한 번의 스트리밍 Update에서 물 상태 알림·물 대기 목록 확정·언로드 후 수역 재계산·전체 저장 상태 기록은 각각 필요한 경우 한 번 처리한다. 청크 데이터 저장은 개별적으로 유지한다. 파일 I/O와 단일 메시 작업은 여전히 동기 작업이다.
+
+저장 파일의 기존 스트리밍 필드 배치는 호환성을 위해 유지한다. 실행 한도와 범위는 저장값 대신 현재 설정 에셋을 적용하며 추가 실행 한도를 저장 형식에 넣지 않는다. 생성 버전은 변경하지 않는다.
 
 ## 현재 설정과 검증
 

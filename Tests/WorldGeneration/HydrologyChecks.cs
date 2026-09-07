@@ -177,7 +177,7 @@ internal static class HydrologyChecks
             for (var z = -2; z <= 2; z++)
                 if (brush.TrySample(0, z, terrain.GetCell(0, z), out var sample))
                 {
-                    var resolved = HydrologyHeightSolver.ResolveRiver(sample);
+                    var resolved = HydrologyHeightSolver.ResolveHeights(sample);
                     var heights = Heights(resolved, 0);
                     Check(resolved.HasWater == heights.HasWater, "integer river mask");
                 }
@@ -212,6 +212,21 @@ internal static class HydrologyChecks
             new PatternTileKey(-16, -16), new PatternTileKey(16, 16), new PatternTileKey(16, -16), new PatternTileKey(-16, 16) };
         var terrainSettings = terrainAsset.CreateData(0);
         var grid = new PatternTileGridSettingsData(world, 1);
+        var cache = new PatternMapStore();
+        var terrainBuilder = new TerrainPatternTileBuilder(grid,terrainSettings);
+        var cacheReader = new TerrainPatternMapReader(grid,cache,terrainBuilder);
+        var cachedDrawer = new HydrologyPatternDrawer(grid,settings,cacheReader,cache.WaterBrushes);
+        var cacheKey = keys[0];
+        cache.GetOrBuildTerrain(cacheKey,terrainBuilder);
+        var beforeEviction = cachedDrawer.Draw(cacheKey);
+        cache.SealHydrology(beforeEviction);
+        cache.Retain(new HashSet<PatternTileKey> { cacheKey });
+        Check(cache.TryGetPair(cacheKey,out _),"demanded pair retained");
+        cache.Retain(new HashSet<PatternTileKey>());
+        Check(cache.TerrainTileCount == 0 && cache.HydrologyTileCount == 0,"idle cache release");
+        cache.GetOrBuildTerrain(cacheKey,terrainBuilder);
+        EqualTile(beforeEviction,cachedDrawer.Draw(cacheKey));
+        Console.WriteLine("PASS cache demand retention, release and real map regeneration equality");
         HydrologyPatternDrawer Drawer() => new(grid, settings, new EvaluatorReader(terrainSettings), new WaterBrushCatalog());
         var sequential = Drawer();
         var reference = keys.Select(k => sequential.Draw(k)).ToArray();

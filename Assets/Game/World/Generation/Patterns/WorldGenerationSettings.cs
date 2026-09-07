@@ -14,8 +14,11 @@ namespace MiniCivilization.World.Generation.Patterns
             int updateRangeChunks,
             int renderRangeChunks,
             int prepareRangeChunks,
-            int chunkMaterializationsPerFrame,
-            int maximumConcurrentTileBuilds)
+            int chunkPreparePerFrame,
+            int mapBuildConcurrency,
+            int chunkActivatePerFrame = 1,
+            int chunkUnloadPerFrame = 1,
+            int meshPatchPerFrame = 2)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
             Terrain = terrain ?? throw new ArgumentNullException(nameof(terrain));
@@ -28,23 +31,32 @@ namespace MiniCivilization.World.Generation.Patterns
                 throw new ArgumentOutOfRangeException(nameof(prepareRangeChunks));
             }
 
-            if (chunkMaterializationsPerFrame <= 0)
+            if (chunkPreparePerFrame <= 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(chunkMaterializationsPerFrame));
+                    nameof(chunkPreparePerFrame));
             }
 
-            if (maximumConcurrentTileBuilds <= 0)
+            if (mapBuildConcurrency <= 0)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(maximumConcurrentTileBuilds));
+                    nameof(mapBuildConcurrency));
             }
 
+            if (chunkActivatePerFrame <= 0)
+                throw new ArgumentOutOfRangeException(nameof(chunkActivatePerFrame));
+            if (chunkUnloadPerFrame <= 0)
+                throw new ArgumentOutOfRangeException(nameof(chunkUnloadPerFrame));
+            if (meshPatchPerFrame <= 0)
+                throw new ArgumentOutOfRangeException(nameof(meshPatchPerFrame));
+            ChunkActivatePerFrame = chunkActivatePerFrame;
+            ChunkUnloadPerFrame = chunkUnloadPerFrame;
+            MeshPatchPerFrame = meshPatchPerFrame;
             UpdateRangeChunks = updateRangeChunks;
             RenderRangeChunks = renderRangeChunks;
             PrepareRangeChunks = prepareRangeChunks;
-            ChunkMaterializationsPerFrame = chunkMaterializationsPerFrame;
-            MaximumConcurrentTileBuilds = maximumConcurrentTileBuilds;
+            ChunkPreparePerFrame = chunkPreparePerFrame;
+            MapBuildConcurrency = mapBuildConcurrency;
         }
 
         public WorldSettingsData World { get; }
@@ -54,8 +66,11 @@ namespace MiniCivilization.World.Generation.Patterns
         public int UpdateRangeChunks { get; }
         public int RenderRangeChunks { get; }
         public int PrepareRangeChunks { get; }
-        public int ChunkMaterializationsPerFrame { get; }
-        public int MaximumConcurrentTileBuilds { get; }
+        public int ChunkPreparePerFrame { get; }
+        public int MapBuildConcurrency { get; }
+        public int ChunkActivatePerFrame { get; }
+        public int ChunkUnloadPerFrame { get; }
+        public int MeshPatchPerFrame { get; }
     }
 
     [CreateAssetMenu(
@@ -88,12 +103,25 @@ namespace MiniCivilization.World.Generation.Patterns
         [SerializeField, Min(0)] private int updateRangeChunks = 5;
         [SerializeField, Min(0)] private int renderRangeChunks = 7;
         [SerializeField, Min(0)] private int prepareRangeChunks = 10;
-        [SerializeField, Min(1)] private int chunkMaterializationsPerFrame = 1;
-        [SerializeField, Min(1)] private int maximumConcurrentTileBuilds = 2;
+        [Header("Streaming Processing")]
+        [UnityEngine.Serialization.FormerlySerializedAs("chunkMaterializationsPerFrame")]
+        [SerializeField, Min(1)] private int chunkPreparePerFrame = 1;
+        [SerializeField, Min(1)] private int chunkActivatePerFrame = 1;
+        [SerializeField, Min(1)] private int chunkUnloadPerFrame = 1;
+        [SerializeField, Min(1)] private int meshPatchPerFrame = 2;
+        [UnityEngine.Serialization.FormerlySerializedAs("maximumConcurrentTileBuilds")]
+        [SerializeField, Min(1)] private int mapBuildConcurrency = 2;
 
         [Header("Pattern Sources")]
         [SerializeField] private TerrainPatternSettings terrain;
         [SerializeField] private HydrologyFeatureSettings hydrology;
+
+        // Streaming limits belong to the current machine, not the saved terrain definition.
+        public WorldGenerationConfiguration ApplyStreamingSettings(WorldGenerationConfiguration saved) => new(
+            saved.World, saved.Terrain, saved.Hydrology, saved.PatternTiles,
+            updateRangeChunks, renderRangeChunks, prepareRangeChunks,
+            chunkPreparePerFrame, mapBuildConcurrency,
+            chunkActivatePerFrame, chunkUnloadPerFrame, meshPatchPerFrame);
 
         public WorldGenerationConfiguration CreateConfiguration()
         {
@@ -138,8 +166,11 @@ namespace MiniCivilization.World.Generation.Patterns
                 updateRangeChunks,
                 renderRangeChunks,
                 prepareRangeChunks,
-                chunkMaterializationsPerFrame,
-                maximumConcurrentTileBuilds);
+                chunkPreparePerFrame,
+                mapBuildConcurrency,
+                chunkActivatePerFrame,
+                chunkUnloadPerFrame,
+                meshPatchPerFrame);
         }
     }
 }

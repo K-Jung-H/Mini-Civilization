@@ -24,8 +24,7 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Material waterMaterial;
         [SerializeField] private Transform renderRoot;
 
-        [Header("Mesh")]
-        [SerializeField, Min(1)] private int maxPatchRebuildsPerFrame = 2;
+        private int meshPatchPerFrame = 2;
 
         private readonly RenderPatchPriorityQueue pendingFullPatches = new();
         private readonly RenderPatchPriorityQueue pendingTerrainPatches = new();
@@ -56,17 +55,46 @@ namespace MiniCivilization.World.Presentation
 
         private void LateUpdate()
         {
-            BuildPendingStreamPatches();
-            RebuildPendingPatches();
+            for (var index = 0; index < meshPatchPerFrame; index++)
+            {
+                var selected = SelectNextMeshQueue();
+                if (selected == null) break;
+                var remaining = 1;
+                if (selected == pendingCreatePatches)
+                    BuildPendingStreamPatches(ref remaining);
+                else
+                    RebuildPendingPatches(ref remaining, selected);
+            }
         }
 
-        private void OnValidate()
+        private RenderPatchPriorityQueue SelectNextMeshQueue()
         {
-            maxPatchRebuildsPerFrame = Math.Max(
-                1,
-                maxPatchRebuildsPerFrame);
+            if (boundWorld == null) return null;
+            RenderPatchPriorityQueue selected = null;
+            RenderPatchQueueEntry nearest = default;
+            Consider(pendingCreatePatches);
+            Consider(pendingFullPatches);
+            Consider(pendingTerrainPatches);
+            Consider(pendingWaterPatches);
+            Consider(pendingRoadPatches);
+            return selected;
+
+            void Consider(RenderPatchPriorityQueue queue)
+            {
+                if (queue.TryPeek(out var entry)
+                    && (selected == null || entry.CompareTo(nearest) < 0))
+                {
+                    nearest = entry;
+                    selected = queue;
+                }
+            }
         }
 
+        internal void SetMeshPatchPerFrame(int value)
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
+            meshPatchPerFrame = value;
+        }
         public void Bind(WorldRuntime runtime)
         {
             var world = runtime?.Data;
@@ -194,7 +222,7 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private void BuildPendingStreamPatches()
+        private void BuildPendingStreamPatches(ref int remaining)
         {
             if (boundWorld == null
                 || boundRuntime == null
@@ -203,9 +231,7 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            for (var buildIndex = 0;
-                 buildIndex < maxPatchRebuildsPerFrame;
-                 buildIndex++)
+            while (remaining > 0)
             {
                 if (!pendingCreatePatches.TryTake(out var patch))
                 {
@@ -225,6 +251,7 @@ namespace MiniCivilization.World.Presentation
                 {
                     view = AcquirePatchView();
                     renderedPatchViews.Add(patch, view);
+                    remaining--;
                     BuildPatch(view, patch.x, patch.y);
                     pendingFullPatches.Remove(patch);
                     pendingTerrainPatches.Remove(patch);
@@ -345,7 +372,7 @@ namespace MiniCivilization.World.Presentation
             LastAppliedChangeId = changeSet.ChangeId;
         }
 
-        public void RebuildPendingPatches()
+        private void RebuildPendingPatches(ref int remaining, RenderPatchPriorityQueue selected)
         {
             if (boundWorld == null
                 || (pendingFullPatches.Count == 0
@@ -356,11 +383,9 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            for (var rebuildIndex = 0;
-                 rebuildIndex < maxPatchRebuildsPerFrame;
-                 rebuildIndex++)
+            while (remaining-- > 0)
             {
-                if (pendingFullPatches.TryTake(out var patch))
+                if (selected == pendingFullPatches && pendingFullPatches.TryTake(out var patch))
                 {
                     pendingTerrainPatches.Remove(patch);
                     pendingWaterPatches.Remove(patch);
@@ -377,7 +402,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (pendingTerrainPatches.TryTake(out patch))
+                if (selected == pendingTerrainPatches && pendingTerrainPatches.TryTake(out patch))
                 {
                     var rebuildWaterWithTerrain =
                         pendingWaterPatches.Remove(patch);
@@ -403,7 +428,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (pendingWaterPatches.TryTake(out patch))
+                if (selected == pendingWaterPatches && pendingWaterPatches.TryTake(out patch))
                 {
                     if (!ContainsPatch(patch))
                     {
@@ -416,7 +441,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (pendingRoadPatches.TryTake(out patch)
+                if (selected == pendingRoadPatches && pendingRoadPatches.TryTake(out patch)
                     && ContainsPatch(patch))
                 {
                     RebuildRoadPatch(renderedPatchViews[patch]);
@@ -805,6 +830,12 @@ namespace MiniCivilization.World.Presentation
                 pending.Remove(entry.Patch);
                 patch = entry.Patch;
                 return true;
+            }
+
+            public bool TryPeek(out RenderPatchQueueEntry entry)
+            {
+                entry = ordered.Count == 0 ? default : ordered.Min;
+                return ordered.Count != 0;
             }
 
             private RenderPatchQueueEntry CreateEntry(Vector2Int patch) => new(

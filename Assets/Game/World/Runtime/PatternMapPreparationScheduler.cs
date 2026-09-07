@@ -19,7 +19,12 @@ namespace MiniCivilization.World.Runtime
             hydrologyBuilds = new();
         private readonly PatternMapDemand streamingDemand = new();
         private readonly PatternMapDemand debuggerDemand = new();
+        private List<PatternTileKey> orderedDemand = new();
+        private bool demandChanged;
         private bool disposed;
+        private long retainedRevision = -1;
+        private readonly HashSet<PatternTileKey> retainedDemand = new();
+        private readonly HashSet<PatternTileKey> currentDemand = new();
 
         public PatternMapPreparationScheduler(
             PatternMapStore store,
@@ -65,6 +70,17 @@ namespace MiniCivilization.World.Runtime
             CollectTerrainBuilds();
             CollectHydrologyBuilds();
             StartBuilds();
+            if (ActiveBuildCount == 0)
+            {
+                var required = currentDemand;
+                if (retainedRevision != store.Revision || !retainedDemand.SetEquals(required))
+                {
+                    store.Retain(required);
+                    retainedDemand.Clear();
+                    retainedDemand.UnionWith(required);
+                    retainedRevision = store.Revision;
+                }
+            }
         }
 
         public void Dispose()
@@ -134,7 +150,15 @@ namespace MiniCivilization.World.Runtime
 
         private void StartBuilds()
         {
-            var ordered = BuildOrderedDemand();
+            if (demandChanged)
+            {
+                orderedDemand = BuildOrderedDemand();
+                currentDemand.Clear();
+                currentDemand.UnionWith(orderedDemand);
+                demandChanged = false;
+            }
+
+            var ordered = orderedDemand;
             for (var index = 0;
                  index < ordered.Count && ActiveBuildCount < maximumConcurrentBuilds;
                  index++)
@@ -210,7 +234,7 @@ namespace MiniCivilization.World.Runtime
             }
         }
 
-        private static void ReplaceDemand(
+        private void ReplaceDemand(
             PatternMapDemand target,
             IReadOnlyList<PatternTileKey> source,
             PatternTileKey anchor,
@@ -221,16 +245,21 @@ namespace MiniCivilization.World.Runtime
                 throw new ArgumentNullException(parameterName);
             }
 
-            target.Keys.Clear();
-            target.Anchor = anchor;
             var seen = new HashSet<PatternTileKey>();
             for (var index = 0; index < source.Count; index++)
             {
-                if (seen.Add(source[index]))
-                {
-                    target.Keys.Add(source[index]);
-                }
+                seen.Add(source[index]);
             }
+
+            if (target.Anchor.Equals(anchor) && seen.SetEquals(target.Keys))
+            {
+                return;
+            }
+
+            target.Keys.Clear();
+            target.Keys.AddRange(seen);
+            target.Anchor = anchor;
+            demandChanged = true;
         }
 
         private static ulong CalculateDistanceSquared(

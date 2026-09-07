@@ -40,7 +40,7 @@ namespace MiniCivilization.World.Generation.Patterns
                 foreach (var contribution in contributions)
                     if (contribution.Kind == HydrologyContributionKind.River && contribution.Sample.HasWater)
                         ground = Math.Min(ground, contribution.Sample.GroundHeight);
-                return HydrologyHeightSolver.ResolveRiver(new HydrologyDrawingSample(sample.Key,
+                return HydrologyHeightSolver.ResolveHeights(new HydrologyDrawingSample(sample.Key,
                     sample.WaterType, ground, sample.WaterSurfaceHeight, sample.InteriorInfluence,
                     sample.BoundaryInfluence, true));
             }

@@ -186,6 +186,15 @@ namespace MiniCivilization.World.Persistence
             }
         }
 
+        private bool detachedChunksPendingSave;
+
+        internal void FlushDetachedChunks()
+        {
+            if (!detachedChunksPendingSave) return;
+            WriteSaveData();
+            detachedChunksPendingSave = false;
+        }
+
         public void SaveAndDetachChunk(ChunkCoordinate coordinate)
         {
             EnsureAttached();
@@ -221,7 +230,7 @@ namespace MiniCivilization.World.Persistence
                 frontierBuffer);
             ReplaceDeferredWaterFrontier(coordinate, frontierBuffer);
 
-            WriteSaveData();
+            detachedChunksPendingSave = true;
             dirtyChunks.Remove(coordinate);
         }
 

@@ -1041,8 +1041,26 @@ namespace MiniCivilization.World.WaterFlow
             state.Frontier.Add(cell);
         }
 
+        private bool streamingChanges;
+        private bool frontierChangedDuringStreaming;
+
+        internal void BeginStreamingChanges()
+        {
+            if (streamingChanges) throw new InvalidOperationException("Streaming changes already open.");
+            streamingChanges = true;
+        }
+
+        internal void EndStreamingChanges(WorldData world, WaterFlowState state)
+        {
+            streamingChanges = false;
+            if (!frontierChangedDuringStreaming) return;
+            frontierChangedDuringStreaming = false;
+            RefreshRunnableFrontier();
+            PersistFrontier(world, state);
+        }
         private void RefreshRunnableFrontier()
         {
+            if (streamingChanges) return;
             hasRunnableFrontier = false;
             foreach (var state in chunkStates.Values)
             {
@@ -1063,6 +1081,11 @@ namespace MiniCivilization.World.WaterFlow
             WorldData world,
             WaterFlowState state)
         {
+            if (streamingChanges)
+            {
+                frontierChangedDuringStreaming = true;
+                return;
+            }
             restartWave.Clear();
             for (var index = 0; index < activeWave.Count; index++)
             {

@@ -63,7 +63,7 @@ namespace MiniCivilization.World.Generation.Patterns
             return surface - (1f + (Math.Max(1f, depthBelowWater) - 1f) * cross);
         }
 
-        public static HydrologyDrawingSample ResolveRiver(HydrologyDrawingSample target)
+        public static HydrologyDrawingSample ResolveHeights(HydrologyDrawingSample target)
         {
             var ground = PatternHeightQuantization.Round(target.GroundHeight);
             var water = PatternHeightQuantization.Round(target.WaterSurfaceHeight);

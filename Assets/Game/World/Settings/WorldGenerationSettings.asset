@@ -28,7 +28,10 @@ MonoBehaviour:
   updateRangeChunks: 5
   renderRangeChunks: 7
   prepareRangeChunks: 10
-  chunkMaterializationsPerFrame: 1
-  maximumConcurrentTileBuilds: 2
+  chunkPreparePerFrame: 1
+  mapBuildConcurrency: 2
+  chunkActivatePerFrame: 1
+  chunkUnloadPerFrame: 1
+  meshPatchPerFrame: 2
   terrain: {fileID: 11400000, guid: 02c64171b2294cf4951c0624d7948638, type: 2}
   hydrology: {fileID: 11400000, guid: 6fc8ee87425c4800b4e1d76ffeba57c1, type: 2}

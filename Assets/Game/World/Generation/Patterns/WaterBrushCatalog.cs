@@ -25,6 +25,22 @@ namespace MiniCivilization.World.Generation.Patterns
         private readonly Dictionary<HydrologyFeatureKey, IWaterMapBrush> brushes = new();
         private readonly Dictionary<HydrologyFeatureKey, PendingBrush> pending = new();
 
+        internal void Retain(IReadOnlyList<PatternTileBounds> required)
+        {
+            lock (gate)
+            {
+                if (pending.Count != 0) return;
+                foreach (var key in new List<HydrologyFeatureKey>(brushes.Keys))
+                {
+                    var keep = false;
+                    if (brushes[key].Bounds is PatternTileBounds bounds)
+                        foreach (var area in required)
+                            if (bounds.Intersects(area)) { keep = true; break; }
+                    if (!keep) brushes.Remove(key);
+                }
+            }
+        }
+
         public BasinWaterBrush GetOrCreateBasin(
             HydrologyFeatureKey key,
             Func<BasinWaterBrush> create,

@@ -210,6 +210,7 @@ namespace MiniCivilization.World.Runtime
 
             generationConfiguration = saveLoadManager.OpenOrCreateWorldSession(
                 worldGenerationSettings);
+            generationConfiguration = worldGenerationSettings.ApplyStreamingSettings(generationConfiguration);
             var data = new WorldData(generationConfiguration.World);
             var runtime = WorldRuntime.Create(data);
             try
@@ -299,6 +300,7 @@ namespace MiniCivilization.World.Runtime
             {
                 editController.Bind(runtime);
                 waterFlowController.Bind(runtime);
+                worldRenderer.SetMeshPatchPerFrame(generationConfiguration.MeshPatchPerFrame);
                 worldRenderer.Bind(runtime);
                 entityManager.Bind(runtime);
 

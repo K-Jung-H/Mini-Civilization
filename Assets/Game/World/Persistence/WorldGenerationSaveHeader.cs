@@ -7,7 +7,7 @@ namespace MiniCivilization.World.Persistence
     {
         private const uint Magic = 0x57534434;
         private const uint LegacyMagic = 0x57534433;
-        internal const int CurrentGenerationVersion = 9;
+        internal const int CurrentGenerationVersion = 10;
 
         public static void Write(BinaryWriter writer)
         {

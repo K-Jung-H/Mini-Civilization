@@ -66,8 +66,10 @@ namespace MiniCivilization.World.Generation.Patterns
                         if (neighbours.Count > 0)
                             center = HydrologyHeightSolver.ResolveExterior(center, terrainCells[index].SurfaceHeight, neighbours);
                     }
-                    if (center.HasValue && center.Value.ResolvedHeights)
+                    if (center.HasValue)
                     {
+                        if (!center.Value.ResolvedHeights)
+                            center = HydrologyHeightSolver.ResolveHeights(center.Value);
                         center.Value.GetResolvedHeights().ValidateWorldHeight(worldHeight);
                     }
                     output[x - core.MinimumX + core.Width * (z - core.MinimumZ)] = center;

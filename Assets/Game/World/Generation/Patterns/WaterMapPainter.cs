@@ -31,15 +31,8 @@ namespace MiniCivilization.World.Generation.Patterns
                     featureIndices.Add(sample.Key, featureIndex);
                     features.Add(sample.Key);
                 }
-                cells[index] = sample.ResolvedHeights
-                    ? HydrologyPatternCell.CreateResolved(sample.GetResolvedHeights(),
-                        sample.WaterType, featureIndex, sample.InteriorInfluence, sample.BoundaryInfluence)
-                    : sample.HasWater
-                    ? HydrologyPatternCell.CreateWater(
-                        sample.WaterType, featureIndex, sample.GroundHeight,
-                        sample.WaterSurfaceHeight, sample.InteriorInfluence, sample.BoundaryInfluence)
-                    : HydrologyPatternCell.CreateGroundOverride(
-                        featureIndex, sample.GroundHeight, sample.BoundaryInfluence);
+                cells[index] = HydrologyPatternCell.CreateResolved(sample.GetResolvedHeights(),
+                    sample.WaterType, featureIndex, sample.InteriorInfluence, sample.BoundaryInfluence);
             }
             return new HydrologyPatternTile(key, bounds, features.ToArray(), cells);
         }

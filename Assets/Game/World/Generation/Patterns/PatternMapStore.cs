@@ -183,6 +183,25 @@ namespace MiniCivilization.World.Generation.Patterns
                 }
             }
         }
+
+        // Called by the scheduler only after all preparation jobs have completed.
+        internal void Retain(ISet<PatternTileKey> required)
+        {
+            var bounds = new List<PatternTileBounds>();
+            lock (gate)
+            {
+                if (terrainBuilds.Count != 0) return;
+                var removed = false;
+                foreach (var key in new List<PatternTileKey>(hydrologyTiles.Keys))
+                    if (!required.Contains(key)) removed |= hydrologyTiles.Remove(key);
+                foreach (var key in new List<PatternTileKey>(terrainTiles.Keys))
+                    if (!required.Contains(key)) removed |= terrainTiles.Remove(key);
+                foreach (var tile in terrainTiles.Values)
+                    bounds.Add(HydrologyHeightSolver.ReadBounds(tile.Bounds));
+                if (removed) revision++;
+            }
+            WaterBrushes.Retain(bounds);
+        }
     }
 
     public sealed class TerrainPatternMapReader : ITerrainPatternMapReader

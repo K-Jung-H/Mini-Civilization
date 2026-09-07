@@ -34,7 +34,7 @@ for (var iteration = 0; iteration < 500; iteration++)
 }
 var painter = new WaterMapPainter();
 var output = painter.Paint(new PatternTileKey(0, 0), new PatternTileBounds(0, 0, 2, 1),
-    new HydrologyDrawingSample?[] { null, overlapCases.First(c => c.Sample.HasWater).Sample }, default);
+    new HydrologyDrawingSample?[] { null, HydrologyHeightSolver.ResolveHeights(overlapCases.First(c => c.Sample.HasWater).Sample) }, default);
 Require(!output.GetCell(0, 0).HasGroundOverride && output.GetCell(1, 0).HasWater, "record resolved samples");
 Console.WriteLine("PASS 500 overlap subsets: reverse/parallel, resolved recording");
 for (var ground = 0; ground <= 30; ground++)
@@ -85,6 +85,7 @@ Require(PatternHeightQuantization.Round(1.5f) == 2 && PatternHeightQuantization.
 Console.WriteLine("PASS integer column contract, map roundtrip, capacity/volume, Amount, invalid and shallow heights");
 var asset = LoadSettings<TerrainPatternSettings>(Path.Combine(root, "Assets/Game/World/Settings/TerrainPatternSettings.asset"));
 HydrologyChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
+StreamingChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 foreach (var seed in new[] { 0, 1, -1 })
 {
     var settings = asset.CreateData(seed);
