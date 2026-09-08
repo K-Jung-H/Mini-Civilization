@@ -19,7 +19,15 @@ namespace MiniCivilization.World.Generation.Patterns
         [Range(0, 1)] public float WetlandThreshold = 0.75f;
         public float WetlandMaximumHeight = 22f;
         [Min(0)] public float MountainMinimumHeight = 55f;
-        [Min(0)] public float MountainMinimumSlope = 0.75f;
+        [Min(1)] public int VariantRegionScaleCells = 256;
+        [Range(0, 1)] public float MesaOccurrence = 0.25f;
+        public BiomeTerrainRule[] TerrainRules =
+        {
+            new() { Biome = TerrainBiome.Desert, Smooth = 6, Rugged = 2, Mountain = 1, Canyon = 1 },
+            new() { Biome = TerrainBiome.Desert, Variant = ClimateRegionVariant.Mesa, Smooth = 1, Rugged = 2, Mountain = 1, Canyon = 6 },
+            new() { Biome = TerrainBiome.Field, Smooth = 6, Rugged = 2, Mountain = 1, Canyon = 1 },
+            new() { Biome = TerrainBiome.Forest, Smooth = 3, Rugged = 4, Mountain = 2, Canyon = 1 }
+        };
         public BiomeHydrologyRule[] HydrologyRules =
         {
             new() { Biome = TerrainBiome.Desert, BasinOccurrence = 0.2f,
@@ -31,6 +39,8 @@ namespace MiniCivilization.World.Generation.Patterns
             var copy = (ClimateSettings)MemberwiseClone();
             copy.HydrologyRules = (BiomeHydrologyRule[])(HydrologyRules
                 ?? throw new ArgumentException("Climate hydrology rules are required.")).Clone();
+            copy.TerrainRules = (BiomeTerrainRule[])(TerrainRules
+                ?? throw new ArgumentException("Climate terrain rules are required.")).Clone();
             copy.Validate();
             return copy;
         }
@@ -40,15 +50,23 @@ namespace MiniCivilization.World.Generation.Patterns
             var values = new[] { TemperatureRegionScaleCells, MoistureRegionScaleCells,
                 AltitudeCoolingPerCell, AltitudeReferenceHeight, ColdThreshold, HotThreshold,
                 DryThreshold, ForestThreshold, WetlandThreshold, WetlandMaximumHeight,
-                MountainMinimumHeight, MountainMinimumSlope };
+                MountainMinimumHeight, MesaOccurrence };
             foreach (var value in values)
                 if (!float.IsFinite(value)) throw new ArgumentException("Climate settings must be finite.");
             if (TemperatureRegionScaleCells < 1 || MoistureRegionScaleCells < 1
                 || AltitudeCoolingPerCell < 0 || ColdThreshold < 0 || HotThreshold > 1
                 || ColdThreshold >= HotThreshold || DryThreshold < 0
                 || DryThreshold >= ForestThreshold || ForestThreshold > WetlandThreshold
-                || WetlandThreshold > 1 || MountainMinimumSlope < 0)
+                || WetlandThreshold > 1 || MountainMinimumHeight < 0
+                || VariantRegionScaleCells < 1 || MesaOccurrence < 0 || MesaOccurrence > 1)
                 throw new ArgumentException("Climate thresholds or scales are invalid.");
+            var terrainSeen = new System.Collections.Generic.HashSet<(TerrainBiome, ClimateRegionVariant)>();
+            foreach (var rule in TerrainRules)
+            {
+                rule.Validate();
+                if (!terrainSeen.Add((rule.Biome, rule.Variant)))
+                    throw new ArgumentException("Duplicate climate terrain rule.");
+            }
             var seen = new System.Collections.Generic.HashSet<TerrainBiome>();
             foreach (var rule in HydrologyRules)
                 if (!Enum.IsDefined(typeof(TerrainBiome), rule.Biome) || !seen.Add(rule.Biome)
@@ -64,6 +82,28 @@ namespace MiniCivilization.World.Generation.Patterns
             foreach (var rule in HydrologyRules) if (rule.Biome == biome) return rule;
             return new BiomeHydrologyRule { Biome = biome, BasinOccurrence = 1, BasinArea = 1, RiverOccurrence = 1 };
         }
+    }
+
+    public enum ClimateRegionVariant : byte { Standard, Mesa }
+
+    [Serializable]
+    public struct BiomeTerrainRule
+    {
+        public TerrainBiome Biome;
+        public ClimateRegionVariant Variant;
+        [Min(0)] public float Smooth;
+        [Min(0)] public float Rugged;
+        [Min(0)] public float Mountain;
+        [Min(0)] public float Canyon;
+        public static BiomeTerrainRule Default => new() { Smooth = 1, Rugged = 1, Mountain = 1, Canyon = 1 };
+        internal void Validate()
+        {
+            if (!Enum.IsDefined(typeof(TerrainBiome), Biome) || !Enum.IsDefined(typeof(ClimateRegionVariant), Variant)
+                || !Valid(Smooth) || !Valid(Rugged) || !Valid(Mountain) || !Valid(Canyon)
+                || (double)Smooth + Rugged + Mountain + Canyon <= 0)
+                throw new ArgumentException("Terrain multipliers must be finite, nonnegative and not all zero.");
+        }
+        private static bool Valid(float value) => float.IsFinite(value) && value >= 0;
     }
 
     [Serializable]
@@ -115,9 +155,10 @@ namespace MiniCivilization.World.Generation.Patterns
 
     public readonly struct ClimatePatternCell
     {
-        public ClimatePatternCell(TerrainPatternCell terrain, float temperature, float moisture, ClimateBiome climate, TerrainBiome biome)
-        { Terrain = terrain; Temperature = temperature; Moisture = moisture; Climate = climate; Biome = biome; }
-        public TerrainPatternCell Terrain { get; }
+        public ClimatePatternCell(ElevationPatternCell elevation, float temperature, float moisture, ClimateBiome climate, TerrainBiome biome, ClimateRegionVariant variant = ClimateRegionVariant.Standard)
+        { Elevation = elevation; Temperature = temperature; Moisture = moisture; Climate = climate; Biome = biome; Variant = variant; }
+        public ElevationPatternCell Elevation { get; }
+        public ClimateRegionVariant Variant { get; }
         public float Temperature { get; }
         public float Moisture { get; }
         public ClimateBiome Climate { get; }
@@ -129,16 +170,19 @@ namespace MiniCivilization.World.Generation.Patterns
         private readonly float[] temperatures, moistures, correctedTemperatures;
         private readonly TerrainBiome[] biomes;
         private readonly ClimateBiome[] climates;
-        public TerrainPatternTile Terrain { get; }
-        public PatternTileKey Key => Terrain.Key;
-        public PatternTileBounds Bounds => Terrain.Bounds;
-        internal ClimatePatternTile(TerrainPatternTile terrain, ClimateNoiseMap temperature,
-            ClimateNoiseMap moisture, ClimateSettings settings, CancellationToken token = default)
+        private readonly ClimateRegionVariant[] variants;
+        public ElevationPatternTile Elevation { get; }
+        public PatternTileKey Key => Elevation.Key;
+        public PatternTileBounds Bounds => Elevation.Bounds;
+        internal ClimatePatternTile(ElevationPatternTile elevation, ClimateNoiseMap temperature,
+            ClimateNoiseMap moisture, ClimateSettings settings, CancellationToken token = default, int worldSeed = 0)
         {
-            Terrain = terrain;
-            temperatures = new float[terrain.CellCount]; moistures = new float[terrain.CellCount];
-            correctedTemperatures = new float[terrain.CellCount];
-            biomes = new TerrainBiome[terrain.CellCount]; climates = new ClimateBiome[terrain.CellCount];
+            Elevation = elevation ?? throw new ArgumentNullException(nameof(elevation));
+            variants = new ClimateRegionVariant[elevation.CellCount];
+            int variantSeed = PatternNoise.DeriveSeed(worldSeed, "climate-region-variant");
+            temperatures = new float[elevation.CellCount]; moistures = new float[elevation.CellCount];
+            correctedTemperatures = new float[elevation.CellCount];
+            biomes = new TerrainBiome[elevation.CellCount]; climates = new ClimateBiome[elevation.CellCount];
             for (int z = Bounds.MinimumZ; z < Bounds.MaximumZExclusive; z++)
             {
                 token.ThrowIfCancellationRequested();
@@ -147,19 +191,22 @@ namespace MiniCivilization.World.Generation.Patterns
                     int i = Index(x, z);
                     temperatures[i] = temperature.GetCell(x, z);
                     moistures[i] = moisture.GetCell(x, z);
-                    var t = terrain.GetCell(x, z);
-                    float heightCells = t.SurfaceHeight / WorldGrid.HeightStepsPerCell;
-                    float slopeCells = t.Slope / WorldGrid.HeightStepsPerCell;
+                    var t = elevation.GetCell(x, z);
+                    float heightCells = t.Height / WorldGrid.HeightStepsPerCell;
                     float heat = Math.Clamp(temperatures[i] - Math.Max(0, heightCells - settings.AltitudeReferenceHeight)
                         * settings.AltitudeCoolingPerCell, 0, 1);
                     correctedTemperatures[i] = heat;
                     climates[i] = heat <= settings.ColdThreshold ? ClimateBiome.Cold
                         : heat >= settings.HotThreshold ? ClimateBiome.Warm : ClimateBiome.Temperate;
                     biomes[i] = heat <= settings.ColdThreshold ? TerrainBiome.Snow
-                        : heightCells >= settings.MountainMinimumHeight && slopeCells >= settings.MountainMinimumSlope ? TerrainBiome.Mountain
+                        : heightCells >= settings.MountainMinimumHeight ? TerrainBiome.Mountain
                         : heat >= settings.HotThreshold && moistures[i] <= settings.DryThreshold ? TerrainBiome.Desert
                         : moistures[i] >= settings.WetlandThreshold && heightCells <= settings.WetlandMaximumHeight ? TerrainBiome.Wetland
                         : moistures[i] >= settings.ForestThreshold ? TerrainBiome.Forest : TerrainBiome.Field;
+                    if (biomes[i] == TerrainBiome.Desert && PatternNoise.Value01(
+                        WorldCoordinateUtility.FloorDivide(x, settings.VariantRegionScaleCells),
+                        WorldCoordinateUtility.FloorDivide(z, settings.VariantRegionScaleCells), variantSeed) < settings.MesaOccurrence)
+                        variants[i] = ClimateRegionVariant.Mesa;
                 }
             }
         }
@@ -173,36 +220,68 @@ namespace MiniCivilization.World.Generation.Patterns
         public ClimatePatternCell GetCell(int x, int z)
         {
             int i = Index(x, z);
-            return new ClimatePatternCell(Terrain.GetCell(x, z), correctedTemperatures[i], moistures[i], climates[i], biomes[i]);
+            return new ClimatePatternCell(Elevation.GetCell(x, z), correctedTemperatures[i], moistures[i], climates[i], biomes[i], variants[i]);
         }
     }
 
-    public interface IClimatePatternMapReader : ITerrainPatternMapReader
+    public interface IClimatePatternMapReader
     {
         ClimatePatternCell GetClimateCell(int x, int z);
         BiomeHydrologyRule GetHydrologyRule(int x, int z);
+        BiomeTerrainRule GetTerrainRule(int x, int z);
     }
 
     public sealed class ClimatePatternMapReader : IClimatePatternMapReader
     {
         private readonly PatternTileGridSettingsData grid;
         private readonly PatternMapStore store;
-        private readonly TerrainPatternTileBuilder builder;
+        private readonly ElevationPatternMapReader elevation;
         private readonly ClimateSettings settings;
         private readonly ClimateNoiseMap temperature, moisture;
+        private readonly object ruleGate = new();
+        private readonly System.Collections.Generic.Dictionary<(int X,int Z), BiomeTerrainRule> terrainRules = new();
+        private readonly System.Collections.Generic.Queue<(int X,int Z)> ruleOrder = new();
+        private const int MaximumCachedRules = 512;
         public ClimatePatternMapReader(PatternTileGridSettingsData grid, PatternMapStore store,
-            TerrainPatternTileBuilder builder, ClimateSettings settings)
+            ElevationPatternMapReader elevation, ClimateSettings settings)
         {
-            this.grid = grid; this.store = store; this.builder = builder; this.settings = settings.Snapshot();
+            this.grid = grid ?? throw new ArgumentNullException(nameof(grid));
+            this.store = store ?? throw new ArgumentNullException(nameof(store));
+            this.elevation = elevation ?? throw new ArgumentNullException(nameof(elevation));
+            this.settings = (settings ?? throw new ArgumentNullException(nameof(settings))).Snapshot();
             temperature = new ClimateNoiseMap(grid.World.Seed, "temperature", settings.TemperatureRegionScaleCells);
             moisture = new ClimateNoiseMap(grid.World.Seed, "moisture", settings.MoistureRegionScaleCells);
         }
-        public ClimatePatternTile Build(PatternTileKey key, CancellationToken token = default) =>
+        public ClimatePatternTile Build(PatternTileKey key, CancellationToken token = default)
+        {
+            if (store.TryGetClimate(key, out var cached)) return cached;
+            return BuildMissing(key, token);
+        }
+        private ClimatePatternTile BuildMissing(PatternTileKey key, CancellationToken token) =>
             store.GetOrBuildClimate(key, () => new ClimatePatternTile(
-                store.GetOrBuildTerrain(key, builder, token), temperature, moisture, settings, token));
+                elevation.Build(key, token), temperature, moisture, settings, token, grid.World.Seed));
         public ClimatePatternCell GetClimateCell(int x, int z) => Build(grid.GetKeyForCell(x, z)).GetCell(x, z);
-        public TerrainPatternCell GetCell(int x, int z) => GetClimateCell(x, z).Terrain;
         public BiomeHydrologyRule GetHydrologyRule(int x, int z) => settings.Rule(GetClimateCell(x, z).Biome);
+        public BiomeTerrainRule GetTerrainRule(int x, int z)
+        {
+            lock (ruleGate)
+            {
+                if (terrainRules.TryGetValue((x,z),out var rule)) return rule;
+                rule = ResolveTerrainRule(x,z);
+                if (terrainRules.Count >= MaximumCachedRules) terrainRules.Remove(ruleOrder.Dequeue());
+                terrainRules.Add((x,z),rule); ruleOrder.Enqueue((x,z));
+                return rule;
+            }
+        }
+        private BiomeTerrainRule ResolveTerrainRule(int x, int z)
+        {
+            var cell = GetClimateCell(x, z);
+            foreach (var rule in settings.TerrainRules)
+                if (rule.Biome == cell.Biome && rule.Variant == cell.Variant) return rule;
+            foreach (var rule in settings.TerrainRules)
+                if (rule.Biome == cell.Biome && rule.Variant == ClimateRegionVariant.Standard) return rule;
+            return BiomeTerrainRule.Default;
+        }
     }
 
 }

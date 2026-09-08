@@ -12,7 +12,6 @@ namespace MiniCivilization.World.Runtime
         private readonly TerrainPatternTileBuilder terrainBuilder;
         private readonly HydrologyPatternDrawer hydrologyDrawer;
         private readonly int maximumConcurrentBuilds;
-        private readonly ClimatePatternMapReader climate;
         private readonly CancellationTokenSource cancellation = new();
         private readonly Dictionary<PatternTileKey, Task<TerrainPatternTile>>
             terrainBuilds = new();
@@ -26,14 +25,15 @@ namespace MiniCivilization.World.Runtime
         private long retainedRevision = -1;
         private readonly HashSet<PatternTileKey> retainedDemand = new();
         private readonly HashSet<PatternTileKey> currentDemand = new();
+        private readonly List<PatternTileKey> completedTerrain = new();
+        private readonly List<PatternTileKey> completedHydrology = new();
 
         public PatternMapPreparationScheduler(
             PatternMapStore store,
             TerrainPatternTileBuilder terrainBuilder,
             HydrologyPatternDrawer hydrologyDrawer,
-            int maximumConcurrentBuilds, ClimatePatternMapReader climate)
+            int maximumConcurrentBuilds)
         {
-            this.climate = climate ?? throw new ArgumentNullException(nameof(climate));
             this.store = store ?? throw new ArgumentNullException(nameof(store));
             this.terrainBuilder = terrainBuilder
                 ?? throw new ArgumentNullException(nameof(terrainBuilder));
@@ -103,7 +103,8 @@ namespace MiniCivilization.World.Runtime
 
         private void CollectTerrainBuilds()
         {
-            var completed = new List<PatternTileKey>();
+            var completed = completedTerrain;
+            completed.Clear();
             foreach (var pair in terrainBuilds)
             {
                 if (pair.Value.IsCompleted)
@@ -127,7 +128,8 @@ namespace MiniCivilization.World.Runtime
 
         private void CollectHydrologyBuilds()
         {
-            var completed = new List<PatternTileKey>();
+            var completed = completedHydrology;
+            completed.Clear();
             foreach (var pair in hydrologyBuilds)
             {
                 if (pair.Value.IsCompleted)
@@ -201,7 +203,7 @@ namespace MiniCivilization.World.Runtime
 
             var token = cancellation.Token;
             hydrologyBuilds.Add(key, Task.Run(
-                () => { climate.Build(key, token); return hydrologyDrawer.Draw(key, token); },
+                () => hydrologyDrawer.Draw(key, token),
                 token));
         }
 

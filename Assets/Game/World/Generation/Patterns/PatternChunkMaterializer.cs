@@ -8,16 +8,20 @@ namespace MiniCivilization.World.Generation.Patterns
     {
         public PatternTilePair(
             ClimatePatternTile climate,
+            TerrainPatternTile terrain,
             HydrologyPatternTile hydrology)
         {
             if (climate == null) throw new ArgumentNullException(nameof(climate));
-            PatternTileComposition.ValidatePair(climate.Terrain, hydrology);
+            PatternTileComposition.ValidatePair(terrain, hydrology);
+            if (!climate.Key.Equals(terrain.Key) || !climate.Bounds.Equals(terrain.Bounds))
+                throw new ArgumentException("Climate and Terrain must share a tile core.");
+            Terrain = terrain;
             Climate = climate;
             Hydrology = hydrology;
         }
 
         public ClimatePatternTile Climate { get; }
-        public TerrainPatternTile Terrain => Climate.Terrain;
+        public TerrainPatternTile Terrain { get; }
         public HydrologyPatternTile Hydrology { get; }
     }
 
@@ -123,14 +127,15 @@ namespace MiniCivilization.World.Generation.Patterns
             var topSurface = hasWater
                 ? ToBedSurface(pattern.Hydrology.WaterType)
                 : SurfaceType.Ground;
+            var biome = new CellBiome(climate.Climate, climate.Biome,
+                hasWater ? (WaterBiome)pattern.Hydrology.WaterType : WaterBiome.None);
             for (var y = 0; y < heights.UsedCellCount; y++)
             {
                 var baseHeight = y * WorldGrid.HeightStepsPerCell;
                 var solidHeight = heights.SolidAt(y);
                 var cell = new CellData
                 {
-                    Biome = new CellBiome(climate.Climate, climate.Biome,
-                        hasWater ? (WaterBiome)pattern.Hydrology.WaterType : WaterBiome.None),
+                    Biome = biome,
                     Terrain = new TerrainData
                     {
                         Material = solidHeight > 0

@@ -21,3 +21,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tests/WorldGeneration/RunChe
 현재 설정 에셋을 읽는다. Source/허용 Dynamic 영역을 벗어나는 물은 완료 wave마다 검사한다. 처리되지 않은 frontier나 제한 횟수 초과를 안정화 성공으로 취급하지 않는다. 처리 재활성화 검사는 실제 청크 언로드/저장 복원과 구분한다.
 
 Unity 메시, 전용 성능 계측, 실제 저장/청크 재로드 통합은 이 검사에 포함되지 않는다. 유한 표본 통과를 모든 Seed의 보장으로 확대하지 않는다. 현재 생성 구조는 [기준 문서](../../Docs/WorldGeneration/README.md)를 따른다.
+
+`RunStreamingRuntimeChecks.ps1`는 생성된 World.csproj의 실제 런타임 소스와 Unity 관리형 라이브러리를 사용한다. 네이티브 Profiler 호출만 제외하고 물 영역 증분 갱신/전체 탐색 동등성, Cell 검증 할당, Terrain 메시 계산, 캐시 무효화와 경계 의존성을 검사한다. GPU 업로드·GameObject 수명·디스크 저장은 실행하지 않는다. 출력된 시간은 .NET 비교 시험이며 Unity 프레임 시간으로 해석하지 않는다.

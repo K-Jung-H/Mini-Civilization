@@ -17,6 +17,14 @@ namespace MiniCivilization.World.Presentation
 
     public sealed class WorldRenderer : MonoBehaviour
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Render.MeshQueue");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage1 = new("World.Render.VisibilityChange");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage2 = new("World.Render.FullPatch");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage3 = new("World.Render.RemovePatch");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage4 = new("World.Render.Reprioritize");
+#endif
+
         [Header("Rendering")]
         [SerializeField] private WorldSurfaceCatalog surfaceCatalog;
         [SerializeField] private RoadVisualCatalog roadVisualCatalog;
@@ -25,6 +33,24 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Transform renderRoot;
 
         private int meshPatchPerFrame = 2;
+        private bool preferCreate = true;
+        private readonly Dictionary<Vector2Int, BoundaryRefresh> boundaryRefreshes = new();
+        private readonly List<Vector2Int> readyBoundaryRefreshes = new();
+        private readonly struct BoundaryRefresh
+        {
+            public BoundaryRefresh(int first, int last) { First = first; Last = last; }
+            public int First { get; }
+            public int Last { get; }
+        }
+        public int PendingCreateCount => pendingCreatePatches.Count;
+        public int PendingBoundaryCount => boundaryRefreshes.Count;
+        public int PendingRebuildCount => pendingFullPatches.Count + pendingTerrainPatches.Count
+            + pendingWaterPatches.Count + pendingRoadPatches.Count;
+        public long CoalescedBoundaryRequests { get; private set; }
+        public int CreatedPatchesLastFrame { get; private set; }
+        public int RebuiltPatchesLastFrame { get; private set; }
+        public double MeshWorkMillisecondsLastFrame { get; private set; }
+
 
         private readonly RenderPatchPriorityQueue pendingFullPatches = new();
         private readonly RenderPatchPriorityQueue pendingTerrainPatches = new();
@@ -55,16 +81,53 @@ namespace MiniCivilization.World.Presentation
 
         private void LateUpdate()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
+            CreatedPatchesLastFrame = 0;
+            RebuiltPatchesLastFrame = 0;
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            FlushBoundaryRefreshes();
             for (var index = 0; index < meshPatchPerFrame; index++)
             {
                 var selected = SelectNextMeshQueue();
                 if (selected == null) break;
                 var remaining = 1;
                 if (selected == pendingCreatePatches)
+                {
                     BuildPendingStreamPatches(ref remaining);
+                    preferCreate = false;
+                }
                 else
+                {
                     RebuildPendingPatches(ref remaining, selected);
+                    preferCreate = true;
+                }
             }
+            MeshWorkMillisecondsLastFrame = (System.Diagnostics.Stopwatch.GetTimestamp() - started)
+                * 1000d / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        private void FlushBoundaryRefreshes()
+        {
+            readyBoundaryRefreshes.Clear();
+            foreach (var entry in boundaryRefreshes)
+                if (Time.frameCount - entry.Value.Last >= 2 || Time.frameCount - entry.Value.First >= 8)
+                    readyBoundaryRefreshes.Add(entry.Key);
+            foreach (var patch in readyBoundaryRefreshes)
+            {
+                boundaryRefreshes.Remove(patch);
+                if (renderedPatchViews.ContainsKey(patch)) QueueFullPatch(patch);
+            }
+        }
+
+        private void QueueFullPatch(Vector2Int patch)
+        {
+            boundaryRefreshes.Remove(patch);
+            pendingFullPatches.Add(patch);
+            pendingTerrainPatches.Remove(patch);
+            pendingWaterPatches.Remove(patch);
+            pendingRoadPatches.Remove(patch);
         }
 
         private RenderPatchPriorityQueue SelectNextMeshQueue()
@@ -72,11 +135,12 @@ namespace MiniCivilization.World.Presentation
             if (boundWorld == null) return null;
             RenderPatchPriorityQueue selected = null;
             RenderPatchQueueEntry nearest = default;
-            Consider(pendingCreatePatches);
             Consider(pendingFullPatches);
             Consider(pendingTerrainPatches);
             Consider(pendingWaterPatches);
             Consider(pendingRoadPatches);
+            if (pendingCreatePatches.Count > 0 && (preferCreate || selected == null))
+                return pendingCreatePatches;
             return selected;
 
             void Consider(RenderPatchPriorityQueue queue)
@@ -120,6 +184,7 @@ namespace MiniCivilization.World.Presentation
             BindingMode = WorldRenderBindingMode.RuntimeGenerated;
             LastAppliedChangeId = runtime.CurrentChangeId;
             runtime.TerrainRenderStateChanged += OnTerrainRenderStateChanged;
+            runtime.StreamingDataChanged += OnStreamingDataChanged;
             foreach (var pair in runtime.ChunkRuntimes)
             {
                 if (pair.Value.TerrainRenderingEnabled)
@@ -150,6 +215,9 @@ namespace MiniCivilization.World.Presentation
         private void OnTerrainRenderStateChanged(
             ChunkRuntime chunkRuntime)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage1.Auto();
+#endif
             if (boundRuntime == null
                 || chunkRuntime == null
                 || activeChunksPerPatch <= 0)
@@ -161,10 +229,7 @@ namespace MiniCivilization.World.Presentation
             if (!chunkRuntime.TerrainRenderingEnabled)
             {
                 exposureCache?.ReleaseChunk(chunkRuntime.Coordinate);
-                surfaceQuery?.InvalidateChunk(
-                    chunkRuntime.Coordinate,
-                    boundWorld.ChunkSizeX);
-                QueueBoundaryPatchRebuilds(chunkRuntime.Coordinate);
+                if (renderedPatchViews.ContainsKey(patch)) QueueFullPatch(patch);
                 if (!boundRuntime.HasTerrainRenderingInPatch(
                         patch.x,
                         patch.y,
@@ -177,18 +242,25 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            exposureCache?.PrepareChunk(chunkRuntime.Coordinate);
-            surfaceQuery?.InvalidateChunk(
-                chunkRuntime.Coordinate,
-                boundWorld.ChunkSizeX);
-            QueueBoundaryPatchRebuilds(chunkRuntime.Coordinate);
+            exposureCache?.PrepareChunk(chunkRuntime.Coordinate, refreshNeighbors: false);
 
             if (renderedPatchViews.ContainsKey(patch))
             {
+                QueueFullPatch(patch);
                 return;
             }
 
             pendingCreatePatches.Add(patch);
+        }
+
+        private void OnStreamingDataChanged(IReadOnlyCollection<ChunkCoordinate> chunks)
+        {
+            foreach (var chunk in chunks)
+            {
+                exposureCache.RebuildPreparedNeighborBoundaries(chunk);
+                surfaceQuery.InvalidateChunk(chunk, boundWorld.ChunkSizeX);
+                QueueBoundaryPatchRebuilds(chunk);
+            }
         }
 
         private void QueueBoundaryPatchRebuilds(
@@ -210,15 +282,24 @@ namespace MiniCivilization.World.Presentation
 
                 var patch = ToPatchCoordinate(
                     new ChunkCoordinate(x, z));
-                if (!renderedPatchViews.ContainsKey(patch))
+                if (!renderedPatchViews.TryGetValue(patch, out var view)
+                    || !view.HasStreamingDependencyChanged(boundWorld, coordinate))
                 {
                     continue;
                 }
 
-                pendingFullPatches.Add(patch);
-                pendingTerrainPatches.Remove(patch);
-                pendingWaterPatches.Remove(patch);
-                pendingRoadPatches.Remove(patch);
+                if (patch == ToPatchCoordinate(coordinate))
+                {
+                    // Content inside a shared patch must appear/disappear without a debounce.
+                    QueueFullPatch(patch);
+                    continue;
+                }
+                if (boundaryRefreshes.TryGetValue(patch, out var refresh))
+                {
+                    boundaryRefreshes[patch] = new BoundaryRefresh(refresh.First, Time.frameCount);
+                    CoalescedBoundaryRequests++;
+                }
+                else boundaryRefreshes.Add(patch, new BoundaryRefresh(Time.frameCount, Time.frameCount));
             }
         }
 
@@ -253,6 +334,7 @@ namespace MiniCivilization.World.Presentation
                     renderedPatchViews.Add(patch, view);
                     remaining--;
                     BuildPatch(view, patch.x, patch.y);
+                    CreatedPatchesLastFrame++;
                     pendingFullPatches.Remove(patch);
                     pendingTerrainPatches.Remove(patch);
                     pendingWaterPatches.Remove(patch);
@@ -393,6 +475,7 @@ namespace MiniCivilization.World.Presentation
                     if (ContainsPatch(patch))
                     {
                         var view = renderedPatchViews[patch];
+                        RebuiltPatchesLastFrame++;
                         BuildPatch(
                             view,
                             patch.x,
@@ -414,6 +497,7 @@ namespace MiniCivilization.World.Presentation
                     }
 
                     var terrainView = renderedPatchViews[patch];
+                    RebuiltPatchesLastFrame++;
                     RebuildTerrainPatch(terrainView);
                     if (rebuildWaterWithTerrain)
                     {
@@ -436,6 +520,7 @@ namespace MiniCivilization.World.Presentation
                     }
 
                     var view = renderedPatchViews[patch];
+                    RebuiltPatchesLastFrame++;
                     RebuildWaterPatch(view);
 
                     continue;
@@ -444,6 +529,7 @@ namespace MiniCivilization.World.Presentation
                 if (selected == pendingRoadPatches && pendingRoadPatches.TryTake(out patch)
                     && ContainsPatch(patch))
                 {
+                    RebuiltPatchesLastFrame++;
                     RebuildRoadPatch(renderedPatchViews[patch]);
                 }
             }
@@ -583,6 +669,7 @@ namespace MiniCivilization.World.Presentation
             if (boundRuntime != null)
             {
                 boundRuntime.TerrainRenderStateChanged -= OnTerrainRenderStateChanged;
+                boundRuntime.StreamingDataChanged -= OnStreamingDataChanged;
             }
 
             boundWorld = null;
@@ -601,6 +688,10 @@ namespace MiniCivilization.World.Presentation
             pendingWaterPatches.Clear();
             pendingRoadPatches.Clear();
             pendingCreatePatches.Clear();
+            boundaryRefreshes.Clear();
+            readyBoundaryRefreshes.Clear();
+            preferCreate = true;
+            CoalescedBoundaryRequests = 0;
             if (clearViews)
             {
                 ClearViews();
@@ -634,6 +725,10 @@ namespace MiniCivilization.World.Presentation
             int patchX,
             int patchZ)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage2.Auto();
+#endif
+            boundaryRefreshes.Remove(new Vector2Int(patchX, patchZ));
             view.Build(
                 boundWorld,
                 patchX,
@@ -695,6 +790,10 @@ namespace MiniCivilization.World.Presentation
 
         private void ReturnPatchToPool(Vector2Int patch)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage3.Auto();
+#endif
+            boundaryRefreshes.Remove(patch);
             if (!renderedPatchViews.Remove(patch, out var view)
                 || view == null)
             {
@@ -705,6 +804,7 @@ namespace MiniCivilization.World.Presentation
             pendingTerrainPatches.Remove(patch);
             pendingWaterPatches.Remove(patch);
             pendingRoadPatches.Remove(patch);
+            view.ClearStreamingDependencies();
             view.gameObject.SetActive(false);
             patchViewPool.Push(view);
         }
@@ -740,6 +840,9 @@ namespace MiniCivilization.World.Presentation
 
         private void UpdatePatchPriorities()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage4.Auto();
+#endif
             pendingFullPatches.SetPriorityTarget(
                 priorityTarget,
                 activeChunksPerPatch,

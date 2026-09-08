@@ -20,7 +20,7 @@ $sources = @(
     'Domain/WorldData.cs', 'Domain/WorldEntities.cs', 'Domain/WaterState.cs',
     'WaterFlow/WaterFlowState.cs', 'WaterFlow/WaterBody.cs', 'WaterFlow/WaterFlowSimulation.cs',
     'Generation/Patterns/PatternChunkMaterializer.cs',
-    'Generation/Patterns/PatternMapStore.cs', 'Generation/Patterns/ClimatePatternMap.cs',
+    'Generation/Patterns/PatternMapStore.cs', 'Generation/Patterns/ClimatePatternMap.cs', 'Generation/Patterns/ElevationPatternMap.cs',
     'Generation/Patterns/TerrainPatternSettings.cs', 'Generation/Patterns/TerrainPatternEvaluator.cs',
     'Generation/Patterns/PatternNoise.cs', 'Generation/Patterns/PatternTileContracts.cs',
     'Generation/Patterns/PatternTileSettingsData.cs', 'Persistence/WorldGenerationSaveHeader.cs',
@@ -36,6 +36,8 @@ $compileArgs += @($sources | ForEach-Object { Join-Path $projectRoot "Assets/Gam
 $compileArgs += @((Join-Path $PSScriptRoot 'Program.cs'), (Join-Path $PSScriptRoot 'UnityAuthoringStubs.cs'))
 $compileArgs += (Join-Path $PSScriptRoot 'HydrologyChecks.cs')
 $compileArgs += (Join-Path $PSScriptRoot 'ClimateChecks.cs')
+$compileArgs += (Join-Path $PSScriptRoot 'ElevationChecks.cs')
+$compileArgs += (Join-Path $PSScriptRoot 'GenerationPerformanceChecks.cs')
 $compileArgs += (Join-Path $PSScriptRoot 'WaterSimulationChecks.cs')
 $compileArgs += (Join-Path $PSScriptRoot 'RiverPathChecks.cs')
 $compileArgs += (Join-Path $PSScriptRoot 'StreamingChecks.cs')

@@ -19,6 +19,7 @@ namespace MiniCivilization.World.Editor
             Climate,
             Hydrology,
             Terrain,
+            Elevation,
             Temperature,
             Moisture
         }
@@ -59,6 +60,8 @@ namespace MiniCivilization.World.Editor
             public WorldRuntime Runtime;
             public Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile;
             public TerrainPatternCell[] terrainSamples;
+            public float[] elevationSamples;
+            public bool[] elevationAvailable;
             public ClimatePatternCell[] climateSamples;
             public float[] temperatureSamples;
             public float[] moistureSamples;
@@ -84,6 +87,8 @@ namespace MiniCivilization.World.Editor
         private PreviewState preview;
         private Dictionary<PatternTileKey, List<PatternMapPixel>> pixelsByTile { get => preview.pixelsByTile; set => preview.pixelsByTile = value; }
         private TerrainPatternCell[] terrainSamples { get => preview.terrainSamples; set => preview.terrainSamples = value; }
+        private float[] elevationSamples { get => preview.elevationSamples; set => preview.elevationSamples = value; }
+        private bool[] elevationAvailable { get => preview.elevationAvailable; set => preview.elevationAvailable = value; }
         private ClimatePatternCell[] climateSamples { get => preview.climateSamples; set => preview.climateSamples = value; }
         private float[] temperatureSamples { get => preview.temperatureSamples; set => preview.temperatureSamples = value; }
         private float[] moistureSamples { get => preview.moistureSamples; set => preview.moistureSamples = value; }
@@ -264,9 +269,10 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            var selectedLayer = GUILayout.Toolbar(
+            var selectedLayer = EditorGUILayout.Popup(
+                "Type",
                 (int)layer,
-                new[] { "Biome", "Climate", "Hydrology", "Terrain", "Temperature", "Moisture" });
+                new[] { "Biome", "Climate", "Hydrology", "Terrain", "Elevation", "Temperature", "Moisture" });
             if (selectedLayer != (int)layer)
             {
                 layer = (PatternMapLayer)selectedLayer;
@@ -348,6 +354,8 @@ namespace MiniCivilization.World.Editor
 
             DestroyMapTexture();
             terrainSamples = new TerrainPatternCell[MapResolution * MapResolution];
+            elevationSamples = new float[terrainSamples.Length];
+            elevationAvailable = new bool[terrainSamples.Length];
             climateSamples = new ClimatePatternCell[terrainSamples.Length];
             temperatureSamples = new float[terrainSamples.Length];
             moistureSamples = new float[terrainSamples.Length];
@@ -429,6 +437,8 @@ namespace MiniCivilization.World.Editor
                 var hasHydrology = debugger.TryGetHydrologyPatternTile(
                     pair.Key,
                     out var hydrology);
+                ElevationPatternTile elevation = null;
+                var hasElevation = debugger.WorldManager.CurrentWorldRuntime?.PatternMaps.TryGetElevation(pair.Key, out elevation) == true;
                 ClimatePatternTile climate = null;
                 var hasClimate = debugger.WorldManager.CurrentWorldRuntime?.PatternMaps.TryGetClimate(pair.Key, out climate) == true;
                 if (hasTerrain)
@@ -446,7 +456,7 @@ namespace MiniCivilization.World.Editor
                     combinedTileCount++;
                 }
 
-                if (!hasTerrain && !hasHydrology)
+                if (!hasTerrain && !hasHydrology && !hasClimate && !hasElevation)
                 {
                     continue;
                 }
@@ -457,6 +467,12 @@ namespace MiniCivilization.World.Editor
                 {
                     var pixel = pixels[index];
                     var mapIndex = pixel.X + MapResolution * pixel.Z;
+                    if (hasElevation && !elevationAvailable[mapIndex])
+                    {
+                        elevationSamples[mapIndex] = elevation.GetNormalized(pixel.WorldX, pixel.WorldZ);
+                        elevationAvailable[mapIndex] = true;
+                        changed = true;
+                    }
                     if (hasClimate && !climateAvailable[mapIndex])
                     {
                         climateSamples[mapIndex] = climate.GetCell(pixel.WorldX, pixel.WorldZ);
@@ -571,6 +587,10 @@ namespace MiniCivilization.World.Editor
             in HydrologyPatternCell hydrology,
             bool hasHydrology, int index)
         {
+            if (layer == PatternMapLayer.Elevation)
+                return elevationAvailable[index] ? (elevationSamples[index] < 0
+                    ? Color.Lerp(new Color(0.45f, 0.8f, 1f), new Color(0.02f, 0.05f, 0.3f), -elevationSamples[index])
+                    : Color.Lerp(new Color(0.65f, 0.9f, 0.35f), Color.red, elevationSamples[index])) : Color.black;
             if (layer == PatternMapLayer.Temperature)
                 return climateAvailable[index] ? ClimateMapColors.Temperature(temperatureSamples[index]) : Color.black;
             if (layer == PatternMapLayer.Moisture)
@@ -597,7 +617,7 @@ namespace MiniCivilization.World.Editor
                 return hydrologyColor;
             }
 
-            if (!climateAvailable[index] || !hasHydrology)
+            if (!climateAvailable[index] || !hasTerrain || !hasHydrology)
             {
                 return Color.black;
             }
@@ -1097,6 +1117,8 @@ namespace MiniCivilization.World.Editor
             debugger?.WorldManager?.ClearDebuggerPatternMapDemand();
             pixelsByTile = null;
             terrainSamples = null;
+            elevationSamples = null;
+            elevationAvailable = null;
             climateSamples = null;
             temperatureSamples = null;
             moistureSamples = null;

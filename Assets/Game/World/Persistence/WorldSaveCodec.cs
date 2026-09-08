@@ -412,7 +412,15 @@ namespace MiniCivilization.World.Persistence
             writer.Write(value.WetlandThreshold);
             writer.Write(value.WetlandMaximumHeight);
             writer.Write(value.MountainMinimumHeight);
-            writer.Write(value.MountainMinimumSlope);
+            writer.Write(value.VariantRegionScaleCells);
+            writer.Write(value.MesaOccurrence);
+            writer.Write(value.TerrainRules.Length);
+            foreach (var rule in value.TerrainRules)
+            {
+                writer.Write((byte)rule.Biome); writer.Write((byte)rule.Variant);
+                writer.Write(rule.Smooth); writer.Write(rule.Rugged);
+                writer.Write(rule.Mountain); writer.Write(rule.Canyon);
+            }
             writer.Write(value.HydrologyRules.Length);
             foreach (var rule in value.HydrologyRules)
             {
@@ -434,8 +442,16 @@ namespace MiniCivilization.World.Persistence
                 WetlandThreshold = reader.ReadSingle(),
                 WetlandMaximumHeight = reader.ReadSingle(),
                 MountainMinimumHeight = reader.ReadSingle(),
-                MountainMinimumSlope = reader.ReadSingle(),
+                VariantRegionScaleCells = reader.ReadInt32(),
+                MesaOccurrence = reader.ReadSingle(),
             };
+            int terrainCount = reader.ReadInt32();
+            if (terrainCount < 0 || terrainCount > 256) throw new InvalidDataException("Invalid terrain rule count.");
+            value.TerrainRules = new BiomeTerrainRule[terrainCount];
+            for (int i = 0; i < terrainCount; i++) value.TerrainRules[i] = new BiomeTerrainRule {
+                Biome = (TerrainBiome)reader.ReadByte(), Variant = (ClimateRegionVariant)reader.ReadByte(),
+                Smooth = reader.ReadSingle(), Rugged = reader.ReadSingle(),
+                Mountain = reader.ReadSingle(), Canyon = reader.ReadSingle() };
             int count = reader.ReadInt32();
             if (count < 0 || count > 256) throw new InvalidDataException("Invalid climate rule count.");
             value.HydrologyRules = new BiomeHydrologyRule[count];

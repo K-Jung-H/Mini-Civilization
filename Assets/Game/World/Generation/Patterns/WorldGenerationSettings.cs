@@ -23,6 +23,15 @@ namespace MiniCivilization.World.Generation.Patterns
             climateSettings = (climate ?? new ClimateSettings()).Snapshot();
             World = world ?? throw new ArgumentNullException(nameof(world));
             Terrain = terrain ?? throw new ArgumentNullException(nameof(terrain));
+            Elevation = new ElevationPatternSettingsData(terrain, hydrology.Sea.SurfaceHeight,
+                world.WorldHeight * WorldGrid.HeightStepsPerCell - 1 - hydrology.Sea.SurfaceHeight,
+                hydrology.Sea.SurfaceHeight);
+                foreach (var rule in climateSettings.TerrainRules)
+                    if ((double)terrain.Region.SmoothShare * rule.Smooth
+                        + (double)terrain.Region.RuggedShare * rule.Rugged
+                        + (double)terrain.Region.MountainShare * rule.Mountain
+                        + (double)terrain.Region.CanyonShare * rule.Canyon <= 0)
+                        throw new ArgumentException("Climate and Terrain weights leave no land pattern available.", nameof(climate));
             Hydrology = hydrology ?? throw new ArgumentNullException(nameof(hydrology));
             PatternTiles = patternTiles ?? throw new ArgumentNullException(nameof(patternTiles));
             if (updateRangeChunks < 0
@@ -64,6 +73,7 @@ namespace MiniCivilization.World.Generation.Patterns
         public ClimateSettings Climate => climateSettings.Snapshot();
         public WorldSettingsData World { get; }
         public TerrainPatternSettingsData Terrain { get; }
+        public ElevationPatternSettingsData Elevation { get; }
         public HydrologyFeatureSettingsData Hydrology { get; }
         public PatternTileGridSettingsData PatternTiles { get; }
         public int UpdateRangeChunks { get; }

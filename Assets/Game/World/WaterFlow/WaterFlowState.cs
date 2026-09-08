@@ -12,6 +12,67 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Dictionary<int, WaterBody> waterBodiesById = new();
         private readonly Dictionary<CellCoordinate, WaterData> stagedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
+        private int nextBodyId = 1;
+
+        internal int GetIndexedWaterBodyId(int x, int z) =>
+            waterBodyIdsByColumn.TryGetValue(new CellColumnCoordinate(x, z), out var id) ? id : 0;
+
+        internal int AllocateWaterBodyId() => nextBodyId++;
+
+        internal void MergeWaterBodies(HashSet<int> connected, WaterBody addition)
+        {
+            var target = addition;
+            foreach (var id in connected)
+                if (waterBodiesById.TryGetValue(id, out var body) && body.Cells.Count > target.Cells.Count)
+                    target = body;
+            var updated = new List<WaterBody>(waterBodies.Count + 1);
+            foreach (var body in waterBodies)
+            {
+                if (!connected.Contains(body.Id)) { updated.Add(body); continue; }
+                if (body == target) continue;
+                Append(body);
+                waterBodiesById.Remove(body.Id);
+            }
+            if (target != addition) Append(addition);
+            else
+                foreach (var cell in addition.Cells)
+                    waterBodyIdsByColumn[new CellColumnCoordinate(cell.X, cell.Z)] = target.Id;
+            updated.Add(target);
+            waterBodiesById[target.Id] = target;
+            waterBodies = updated;
+
+            void Append(WaterBody source)
+            {
+                foreach (var cell in source.Cells)
+                {
+                    target.Add(cell);
+                    waterBodyIdsByColumn[new CellColumnCoordinate(cell.X, cell.Z)] = target.Id;
+                }
+                target.VolumeUnits += source.VolumeUnits;
+                target.SurfaceCellCount += source.SurfaceCellCount;
+                target.TouchesWorldEdge |= source.TouchesWorldEdge;
+            }
+        }
+
+        internal void ReplaceAffectedWaterBodies(HashSet<int> removed, IReadOnlyList<WaterBody> added)
+        {
+            var updated = new List<WaterBody>(waterBodies.Count + added.Count);
+            foreach (var body in waterBodies)
+            {
+                if (!removed.Contains(body.Id)) { updated.Add(body); continue; }
+                waterBodiesById.Remove(body.Id);
+                foreach (var cell in body.Cells)
+                    waterBodyIdsByColumn.Remove(new CellColumnCoordinate(cell.X, cell.Z));
+            }
+            foreach (var body in added)
+            {
+                updated.Add(body);
+                waterBodiesById.Add(body.Id, body);
+                foreach (var cell in body.Cells)
+                    waterBodyIdsByColumn[new CellColumnCoordinate(cell.X, cell.Z)] = body.Id;
+            }
+            waterBodies = updated;
+        }
 
         public IReadOnlyList<WaterBody> WaterBodies => waterBodies;
         public bool IsRecalculating { get; internal set; }
@@ -97,11 +158,13 @@ namespace MiniCivilization.World.WaterFlow
             waterBodies = bodies ?? Array.Empty<WaterBody>();
             waterBodyIdsByColumn.Clear();
             waterBodiesById.Clear();
+            nextBodyId = 1;
             for (var bodyIndex = 0;
                  bodyIndex < waterBodies.Count;
                  bodyIndex++)
             {
                 var body = waterBodies[bodyIndex];
+                nextBodyId = Math.Max(nextBodyId, body.Id + 1);
                 waterBodiesById[body.Id] = body;
                 for (var cellIndex = 0;
                      cellIndex < body.Cells.Count;

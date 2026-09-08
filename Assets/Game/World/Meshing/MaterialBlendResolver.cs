@@ -3,6 +3,56 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.Meshing
 {
+    // Owned by mesh scratch, reset per cell; never retains world data across builds.
+    internal sealed class TerrainCellMaterials
+    {
+        private readonly SurfaceAppearance[] values = new SurfaceAppearance[32];
+        private uint resolved;
+        private WorldData world;
+        private WorldSurfaceCatalog catalog;
+        private int x, y, z;
+
+        internal void BeginCell(WorldData world, WorldSurfaceCatalog catalog, int x, int y, int z)
+        {
+            this.world = world;
+            this.catalog = catalog;
+            this.x = x; this.y = y; this.z = z;
+            resolved = 0;
+        }
+
+        internal SurfaceAppearance Resolve(float localX, float localZ, SurfaceType? surface)
+        {
+            var ix = Index(localX);
+            var iz = Index(localZ);
+            if (ix < 0 || iz < 0 || (surface.HasValue && surface != SurfaceType.Cliff))
+                return MaterialBlendResolver.ResolveTerrainCell(world, catalog, x, y, z, localX, localZ, surface);
+            var index = ix + iz * 4 + (surface.HasValue ? 16 : 0);
+            var bit = 1u << index;
+            if ((resolved & bit) == 0)
+            {
+                values[index] = MaterialBlendResolver.ResolveTerrainCell(world, catalog, x, y, z, localX, localZ, surface);
+                resolved |= bit;
+            }
+            return values[index];
+        }
+
+        internal bool HasUniformTop()
+        {
+            var current = world.GetCell(x, y, z);
+            var surface = current.Terrain.Surface;
+            for (var dz = -1; dz <= 1; dz++)
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                if (!world.TryGetCell(x + dx, y, z + dz, out var other) || !other.HasTerrain) continue;
+                if (other.Biome.Terrain != current.Biome.Terrain || other.Terrain.Surface != surface) return false;
+            }
+            return true;
+        }
+
+        private static int Index(float value) => value == 0f ? 0 : value == 0.2f ? 1
+            : value == 0.8f ? 2 : value == 1f ? 3 : -1;
+    }
+
     public static class MaterialBlendResolver
     {
         private const float BlendBand = 0.2f;
@@ -42,7 +92,8 @@ namespace MiniCivilization.World.Meshing
                 surfaceOverride,
                 default,
                 false);
-            var xAppearance = ResolveTerrainCellAppearance(
+            if (offsetX == 0 && offsetZ == 0) return current;
+            var xAppearance = offsetX == 0 ? current : ResolveTerrainCellAppearance(
                 world,
                 catalog,
                 x + offsetX,
@@ -51,6 +102,7 @@ namespace MiniCivilization.World.Meshing
                 surfaceOverride,
                 current,
                 true);
+            if (offsetZ == 0) return SurfaceAppearance.Lerp(current, xAppearance, blendX);
             var zAppearance = ResolveTerrainCellAppearance(
                 world,
                 catalog,
@@ -60,6 +112,7 @@ namespace MiniCivilization.World.Meshing
                 surfaceOverride,
                 current,
                 true);
+            if (offsetX == 0) return SurfaceAppearance.Lerp(current, zAppearance, blendZ);
             var diagonalAppearance = ResolveTerrainCellAppearance(
                 world,
                 catalog,

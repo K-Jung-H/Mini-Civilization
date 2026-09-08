@@ -8,6 +8,7 @@ namespace MiniCivilization.World.Generation.Patterns
     internal sealed class HydrologyPatternDrawer
     {
         private readonly PatternTileGridSettingsData grid;
+        private readonly ElevationPatternMapReader elevation;
         private readonly ITerrainPatternMapReader terrain;
         private readonly WaterBrushCatalog brushes;
         private readonly WaterBrushFactory brushFactory;
@@ -18,8 +19,9 @@ namespace MiniCivilization.World.Generation.Patterns
             PatternTileGridSettingsData grid,
             HydrologyFeatureSettingsData settings,
             ITerrainPatternMapReader terrain,
-            WaterBrushCatalog brushes)
+            WaterBrushCatalog brushes, IClimatePatternMapReader climate = null, ElevationPatternMapReader elevation = null)
         {
+            this.elevation = elevation;
             this.grid = grid ?? throw new ArgumentNullException(nameof(grid));
             if (settings == null)
             {
@@ -35,7 +37,7 @@ namespace MiniCivilization.World.Generation.Patterns
                     nameof(settings));
             }
 
-            brushFactory = new WaterBrushFactory(settings, terrain as IClimatePatternMapReader);
+            brushFactory = new WaterBrushFactory(settings, climate);
             collector = new HydrologyContributionCollector(settings, terrain);
             painter = new WaterMapPainter();
         }
@@ -56,6 +58,9 @@ namespace MiniCivilization.World.Generation.Patterns
             var resolved = collector.Resolve(bounds, basins, rivers, cancellationToken);
             return painter.Paint(key, bounds, resolved, cancellationToken);
         }
+
+        private bool KnownOcean(int x, int z, int radius) => elevation != null && elevation.IsKnownOcean(
+            new PatternTileBounds(checked(x - radius), checked(z - radius), checked(x + radius + 1), checked(z + radius + 1)));
 
         private List<BasinWaterBrush> CollectBasins(
             PatternTileBounds bounds,
@@ -96,6 +101,7 @@ namespace MiniCivilization.World.Generation.Patterns
                         continue;
                     }
 
+                    if (KnownOcean(ownerX, ownerZ, brushFactory.BasinPaddingCells)) continue;
                     var featureKey = brushFactory.GetBasinKey(gridX, gridZ);
                     var brush = brushes.GetOrCreateBasin(
                         featureKey,
@@ -145,6 +151,7 @@ namespace MiniCivilization.World.Generation.Patterns
                         continue;
                     }
 
+                    if (KnownOcean(checked(gridX * riverSpacing), checked(gridZ * riverSpacing), brushFactory.RiverPaddingCells)) continue;
                     var featureKey = brushFactory.GetRiverKey(gridX, gridZ);
                     var brush = brushes.GetOrCreateRiver(
                         featureKey,

@@ -8,6 +8,10 @@ namespace MiniCivilization.World.Meshing
 {
     internal static class TerrainChunkMeshBuilder
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Terrain");
+#endif
+
         private const float Shoulder = 0.2f;
         private const float CoreMin = Shoulder;
         private const float CoreMax = 1f - Shoulder;
@@ -23,6 +27,9 @@ namespace MiniCivilization.World.Meshing
             MeshBuffers buffers,
             List<ExposedCell> cells)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
             buffers.Clear();
             var startX = patchX * patchSize;
             var startZ = patchZ * patchSize;
@@ -44,13 +51,15 @@ namespace MiniCivilization.World.Meshing
                 var z = coordinate.Z;
                 var cell = world.GetCell(x, y, z);
                 var exposure = cells[index].Exposure;
+                var materials = buffers.TerrainMaterials;
+                materials.BeginCell(world, catalog, x, y, z);
                 SolidSurfaceProfile profile = default;
                 if ((exposure & CellExposureFlags.SolidTop) != 0)
                 {
                     profile = topology.ResolveSolid(x, y, z);
                     AddVolumeTop(
                         world,
-                        catalog,
+                        materials,
                         buffers,
                         x,
                         y,
@@ -62,7 +71,7 @@ namespace MiniCivilization.World.Meshing
 
                 AddVolumeSides(
                     world,
-                    catalog,
+                    materials,
                     buffers,
                     x,
                     y,
@@ -78,7 +87,7 @@ namespace MiniCivilization.World.Meshing
                 {
                     AddVolumeBottom(
                         world,
-                        catalog,
+                        materials,
                         buffers,
                         x,
                         y,
@@ -93,7 +102,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeTop(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -103,6 +112,19 @@ namespace MiniCivilization.World.Meshing
             in SolidSurfaceProfile profile)
         {
             var height = profile.CenterHeightUnits;
+            if (Flat(profile.GetBoundary(-1, 0), height)
+                && Flat(profile.GetBoundary(1, 0), height)
+                && Flat(profile.GetBoundary(0, -1), height)
+                && Flat(profile.GetBoundary(0, 1), height)
+                && catalog.HasUniformTop())
+            {
+                AddSurfaceQuad(buffers,
+                    CreateCellVertex(world, catalog, x, y, z, startX, startZ, 0f, 0f, height),
+                    CreateCellVertex(world, catalog, x, y, z, startX, startZ, 0f, 1f, height),
+                    CreateCellVertex(world, catalog, x, y, z, startX, startZ, 1f, 1f, height),
+                    CreateCellVertex(world, catalog, x, y, z, startX, startZ, 1f, 0f, height));
+                return;
+            }
             AddSurfaceQuad(
                 buffers,
                 CreateCellVertex(world, catalog, x, y, z, startX, startZ, CoreMin, CoreMin, height),
@@ -121,9 +143,13 @@ namespace MiniCivilization.World.Meshing
             AddVolumeCorner(world, catalog, buffers, x, y, z, startX, startZ, 1f, 1f, profile);
         }
 
+        private static bool Flat(in SurfaceBoundaryProfile edge, int height) =>
+            edge.StartHeightUnits == height && edge.ShoulderStartHeightUnits == height
+            && edge.ShoulderEndHeightUnits == height && edge.EndHeightUnits == height;
+
         private static void AddVolumeShoulder(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -186,7 +212,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeCorner(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -239,7 +265,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeSides(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -269,7 +295,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeCornerClosure(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -377,7 +403,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeSide(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -453,7 +479,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeSideSegment(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -536,7 +562,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddVolumeBottom(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -555,7 +581,7 @@ namespace MiniCivilization.World.Meshing
 
         private static void AddCellVerticalQuad(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             MeshBuffers buffers,
             int x,
             int y,
@@ -584,7 +610,7 @@ namespace MiniCivilization.World.Meshing
 
         private static SurfaceVertex CreateCellVerticalVertex(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             int x,
             int y,
             int z,
@@ -614,12 +640,7 @@ namespace MiniCivilization.World.Meshing
                     horizontalUv,
                     heightUnits
                     / WorldGrid.HeightStepsPerCell),
-                MaterialBlendResolver.ResolveTerrainCell(
-                    world,
-                    catalog,
-                    x,
-                    y,
-                    z,
+                catalog.Resolve(
                     localX,
                     localZ,
                     SurfaceType.Cliff));
@@ -627,7 +648,7 @@ namespace MiniCivilization.World.Meshing
 
         private static SurfaceVertex CreateCornerClosureVertex(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             int x,
             int y,
             int z,
@@ -652,12 +673,7 @@ namespace MiniCivilization.World.Meshing
                     horizontalUv,
                     heightUnits
                     / WorldGrid.HeightStepsPerCell),
-                MaterialBlendResolver.ResolveTerrainCell(
-                    world,
-                    catalog,
-                    x,
-                    y,
-                    z,
+                catalog.Resolve(
                     localX,
                     localZ,
                     SurfaceType.Cliff));
@@ -665,7 +681,7 @@ namespace MiniCivilization.World.Meshing
 
         private static SurfaceVertex CreateCellVertex(
             WorldData world,
-            WorldSurfaceCatalog catalog,
+            TerrainCellMaterials catalog,
             int x,
             int y,
             int z,
@@ -682,12 +698,7 @@ namespace MiniCivilization.World.Meshing
                     heightUnits * world.HeightStep,
                     (z - startZ + localZ) * world.CellSize),
                 new Vector2(x + localX, z + localZ),
-                MaterialBlendResolver.ResolveTerrainCell(
-                    world,
-                    catalog,
-                    x,
-                    y,
-                    z,
+                catalog.Resolve(
                     localX,
                     localZ,
                     surfaceOverride));

@@ -47,7 +47,33 @@ MonoBehaviour:
     WetlandThreshold: 0.75
     WetlandMaximumHeight: 22
     MountainMinimumHeight: 55
-    MountainMinimumSlope: 0.75
+    VariantRegionScaleCells: 256
+    MesaOccurrence: 0.25
+    TerrainRules:
+    - Biome: 3
+      Variant: 0
+      Smooth: 6
+      Rugged: 2
+      Mountain: 1
+      Canyon: 1
+    - Biome: 3
+      Variant: 1
+      Smooth: 1
+      Rugged: 2
+      Mountain: 1
+      Canyon: 6
+    - Biome: 1
+      Variant: 0
+      Smooth: 6
+      Rugged: 2
+      Mountain: 1
+      Canyon: 1
+    - Biome: 2
+      Variant: 0
+      Smooth: 3
+      Rugged: 4
+      Mountain: 2
+      Canyon: 1
     HydrologyRules:
     - Biome: 3
       BasinOccurrence: 0.2

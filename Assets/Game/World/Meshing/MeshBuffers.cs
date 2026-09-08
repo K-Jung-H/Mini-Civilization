@@ -9,6 +9,7 @@ namespace MiniCivilization.World.Meshing
 {
     internal sealed class WorldMeshBuildScratch
     {
+
         public MeshBuffers Terrain { get; } = new();
         public MeshBuffers Water { get; } = new();
         public List<ExposedCell> SolidCells { get; } = new();
@@ -43,6 +44,11 @@ namespace MiniCivilization.World.Meshing
 
     internal sealed class MeshBuffers
     {
+        internal TerrainCellMaterials TerrainMaterials { get; } = new();
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Upload");
+#endif
+
         private readonly List<Vector3> positions = new();
         private readonly List<Vector3> normals = new();
         private readonly List<Vector4> tangents = new();
@@ -167,6 +173,9 @@ namespace MiniCivilization.World.Meshing
 
         public Mesh CreateMesh(string name, Mesh reusableMesh = null)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
             var mesh = reusableMesh != null ? reusableMesh : new Mesh();
             mesh.Clear();
             mesh.name = name;

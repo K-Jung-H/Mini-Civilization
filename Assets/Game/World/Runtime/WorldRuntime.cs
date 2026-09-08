@@ -9,6 +9,10 @@ namespace MiniCivilization.World.Runtime
 {
     public sealed class WorldRuntime
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker WaterTopologyProfile = new("World.Streaming.WaterTopology");
+        private static readonly Unity.Profiling.ProfilerMarker VisibilityDataProfile = new("World.Streaming.VisibilityData");
+#endif
         private readonly Dictionary<ChunkCoordinate, ChunkRuntime>
             chunkRuntimes = new();
 
@@ -40,9 +44,12 @@ namespace MiniCivilization.World.Runtime
         public event Action<ChunkRuntime> TerrainRenderStateChanged;
         public event Action<ChunkRuntime> EntityRenderStateChanged;
         public event Action ChunksDataUnloaded;
+        internal event Action<IReadOnlyCollection<ChunkCoordinate>> StreamingDataChanged;
         private bool streamingChanges;
         private bool simulationChangedDuringStreaming;
         private bool dataUnloadedDuringStreaming;
+        private readonly HashSet<ChunkCoordinate> waterTopologyChunks = new();
+        private readonly WaterBodyResolver.StreamingScratch waterTopologyScratch = new();
 
         internal void BeginStreamingChanges()
         {
@@ -63,6 +70,7 @@ namespace MiniCivilization.World.Runtime
                 simulationChangedDuringStreaming = false;
                 WaterFlowResolver.EndStreamingChanges(Data, WaterFlowState);
             }
+            FlushStreamingDataChanges();
             if (dataUnloadedDuringStreaming)
             {
                 dataUnloadedDuringStreaming = false;
@@ -167,6 +175,32 @@ namespace MiniCivilization.World.Runtime
                 WaterFlowState,
                 waterFrontier,
                 null);
+            RefreshStreamingWater(coordinate);
+        }
+
+        private void RefreshStreamingWater(ChunkCoordinate coordinate)
+        {
+            waterTopologyChunks.Add(coordinate);
+            if (streamingChanges) return;
+            FlushStreamingDataChanges();
+        }
+
+        private void FlushStreamingDataChanges()
+        {
+            if (waterTopologyChunks.Count == 0) return;
+            {
+#if ENABLE_PROFILER
+                using var profile = WaterTopologyProfile.Auto();
+#endif
+                WaterBodyResolver.RefreshStreaming(this, waterTopologyChunks, waterTopologyScratch);
+            }
+            {
+#if ENABLE_PROFILER
+                using var profile = VisibilityDataProfile.Auto();
+#endif
+                StreamingDataChanged?.Invoke(waterTopologyChunks);
+            }
+            waterTopologyChunks.Clear();
         }
 
         internal void ActivateChunk(ChunkCoordinate coordinate)
@@ -282,6 +316,7 @@ namespace MiniCivilization.World.Runtime
             {
                 Data.UnloadChunk(coordinate);
                 chunkRuntimes.Remove(coordinate);
+                RefreshStreamingWater(coordinate);
                 if (streamingChanges) dataUnloadedDuringStreaming = true;
                 else ChunksDataUnloaded?.Invoke();
             }

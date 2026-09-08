@@ -114,13 +114,13 @@ namespace MiniCivilization.World.Generation.Patterns
         }
 
         private readonly TerrainPatternSettingsData settings;
-        private readonly int continentalnessSeed;
-        private readonly int erosionSeed;
+        private readonly IElevationPatternMapReader elevation;
+        private readonly IClimatePatternMapReader climate;
         private readonly int warpXSeed;
         private readonly int warpZSeed;
         private readonly int regionSeed;
         // Evaluator lifetime is one tile build; workers never share mutable caches.
-        private readonly Dictionary<int, RegionParameters> regionParameters = new();
+        private readonly Dictionary<(long X, long Z), RegionParameters> regionParameters = new();
         private readonly RegionCenter[] regionCenters;
         private readonly double[] regionDistances;
         private readonly int regionSearchRadius;
@@ -129,12 +129,12 @@ namespace MiniCivilization.World.Generation.Patterns
         private long centerGridX;
         private long centerGridZ;
 
-        public TerrainPatternEvaluator(TerrainPatternSettingsData settings)
+        public TerrainPatternEvaluator(TerrainPatternSettingsData settings, IElevationPatternMapReader elevation = null, IClimatePatternMapReader climate = null)
         {
             this.settings = settings
                 ?? throw new ArgumentNullException(nameof(settings));
-            continentalnessSeed = DeriveSeed(settings.WorldSeed, "world-router-continentalness");
-            erosionSeed = DeriveSeed(settings.WorldSeed, "world-router-erosion");
+            this.elevation = elevation ?? new ElevationPatternEvaluator(new ElevationPatternSettingsData(settings));
+            this.climate = climate;
             warpXSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-x");
             warpZSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-warp-z");
             regionSeed = DeriveSeed(settings.WorldSeed, "world-router-pattern-region");
@@ -156,45 +156,17 @@ namespace MiniCivilization.World.Generation.Patterns
 
         internal TerrainPatternSample EvaluateSample(double worldX, double worldZ)
         {
-            var continentalness = SampleNoise(
-                worldX,
-                worldZ,
-                settings.NoiseRouter.Continentalness,
-                continentalnessSeed);
-            var erosion = SampleNoise(
-                worldX,
-                worldZ,
-                settings.NoiseRouter.Erosion,
-                erosionSeed);
+            var baseSurface = elevation.GetHeight(worldX, worldZ);
+            if (baseSurface < elevation.SeaLevel)
+                return new TerrainPatternSample(TerrainPatternType.Smooth, baseSurface, 0, true, 0, 1, false, 0, 0, 1, baseSurface, baseSurface);
             var region = SampleRegion(worldX, worldZ);
-            var primary = SampleContribution(region.Primary, worldX, worldZ);
-            // Keep unweighted nearest-region heights for the existing Sea consumer.
-            // They no longer determine the blended Terrain surface.
-            var secondary = region.Primary.Key == region.Secondary.Key
-                ? primary
-                : SampleContribution(region.Secondary, worldX, worldZ);
             var blended = SampleBlendedContribution(worldX, worldZ);
-            var baseSurface = settings.TerrainBaseHeight
-                + settings.BaseSurface.SurfaceByContinentalness.Evaluate(
-                    NormalizeNoise(continentalness,
-                        settings.NoiseRouter.Continentalness.Mode))
-                + settings.BaseSurface.SurfaceByErosion.Evaluate(
-                    NormalizeNoise(erosion, settings.NoiseRouter.Erosion.Mode));
-            var primaryInfluence = region.Primary.Influence;
-            var terrainType = ResolveTerrainType(region);
-            return new TerrainPatternSample(
-                terrainType,
-                baseSurface + blended.BaseHeight,
-                blended.DetailHeight,
-                region.Primary.Pattern == RegionPattern.Sea,
-                region.Primary.Key,
-                region.Primary.InteriorProgress,
-                region.Secondary.Pattern == RegionPattern.Sea,
-                region.Secondary.Key,
-                region.Secondary.InteriorProgress,
-                primaryInfluence,
-                baseSurface + primary.BaseHeight + primary.DetailHeight,
-                baseSurface + secondary.BaseHeight + secondary.DetailHeight);
+            float distance = baseSurface - elevation.SeaLevel;
+            float fade = Math.Clamp(distance / 25f, 0f, 1f);
+            fade = fade * fade * (3f - 2f * fade);
+            float delta = Math.Max(-distance, (blended.BaseHeight + blended.DetailHeight) * fade);
+            return new TerrainPatternSample(ResolveTerrainType(region), baseSurface + delta, 0,
+                false, region.Primary.Key, region.Primary.InteriorProgress, false, region.Secondary.Key, 0, region.Primary.Influence, baseSurface + delta, baseSurface + delta);
         }
 
         internal TerrainPatternCell ToCell(
@@ -451,12 +423,6 @@ namespace MiniCivilization.World.Generation.Patterns
                 3000,
                 out var sampleX,
                 out var sampleZ);
-            var mass = form.MassResponse.Evaluate(SampleNormalizedNoise(
-                    sampleX,
-                    sampleZ,
-                    form.MassField,
-                    DeriveCandidateSeed(candidate, 3010)))
-                * ResolveRange(candidate, 3020);
             var ridge = form.RidgeResponse.Evaluate(SampleNormalizedNoise(
                     sampleX,
                     sampleZ,
@@ -469,7 +435,7 @@ namespace MiniCivilization.World.Generation.Patterns
                     form.DetailField,
                     DeriveCandidateSeed(candidate, 3050))
                 * ResolveRange(candidate, 3060);
-            return new TerrainContribution(mass + ridge, detail);
+            return new TerrainContribution(ridge, detail);
         }
 
         private TerrainContribution SampleCanyon(
@@ -548,45 +514,45 @@ namespace MiniCivilization.World.Generation.Patterns
             float interiorProgress)
         {
             var hash = Hash(gridX, gridZ, regionSeed);
-            var selector = (hash & 0x00FFFFFFu) / 16777215f
-                * settings.Region.TotalShare;
-            var pattern = SelectRegionPattern(selector);
             var key = unchecked((int)hash);
-            if (!regionParameters.TryGetValue(key, out var parameters))
+            if (!regionParameters.TryGetValue((gridX, gridZ), out var parameters))
             {
+                var pattern = SelectRegionPattern(gridX, gridZ);
                 parameters = new RegionParameters(key, pattern, settings);
-                regionParameters.Add(key, parameters);
+                regionParameters.Add((gridX, gridZ), parameters);
             }
             return new RegionCandidate(
                 gridX,
                 gridZ,
                 unchecked((int)hash),
-                pattern,
+                parameters.Pattern,
                 influence,
                 interiorProgress,
                 parameters);
         }
 
-        private RegionPattern SelectRegionPattern(float selector)
+        private RegionPattern SelectRegionPattern(long gridX, long gridZ)
         {
-            if ((selector -= settings.Region.SmoothShare) <= 0f)
-            {
-                return RegionPattern.Smooth;
-            }
-
-            if ((selector -= settings.Region.RuggedShare) <= 0f)
-            {
-                return RegionPattern.Rugged;
-            }
-
-            if ((selector -= settings.Region.MountainShare) <= 0f)
-            {
-                return RegionPattern.Mountain;
-            }
-
-            return selector - settings.Region.CanyonShare <= 0f
-                ? RegionPattern.Canyon
-                : RegionPattern.Sea;
+            // One immutable climate choice at the region's absolute lattice center.
+            int anchorX = (int)Math.Clamp(Math.Floor((gridX + 0.5) * settings.Region.SizeCells), int.MinValue, int.MaxValue);
+            int anchorZ = (int)Math.Clamp(Math.Floor((gridZ + 0.5) * settings.Region.SizeCells), int.MinValue, int.MaxValue);
+            var rule = climate?.GetTerrainRule(anchorX, anchorZ) ?? BiomeTerrainRule.Default;
+            double smooth = (double)settings.Region.SmoothShare * rule.Smooth;
+            double rugged = (double)settings.Region.RuggedShare * rule.Rugged;
+            double mountain = (double)settings.Region.MountainShare * rule.Mountain;
+            double canyon = (double)settings.Region.CanyonShare * rule.Canyon;
+            double total = smooth + rugged + mountain + canyon;
+            if (total <= 0) throw new InvalidOperationException("Climate and Terrain weights leave no land pattern available.");
+            // A separate channel avoids correlation with Elevation's sea ownership decision.
+            double selector = PatternNoise.Value01(gridX, gridZ, DeriveSeed(settings.WorldSeed, "climate-terrain-choice")) * total;
+            if (selector < smooth) return RegionPattern.Smooth;
+            if ((selector -= smooth) < rugged) return RegionPattern.Rugged;
+            if ((selector -= rugged) < mountain) return RegionPattern.Mountain;
+            // Value01 can equal one: select the last nonzero weight, never a disabled pattern.
+            if (canyon > 0) return RegionPattern.Canyon;
+            if (mountain > 0) return RegionPattern.Mountain;
+            if (rugged > 0) return RegionPattern.Rugged;
+            return RegionPattern.Smooth;
         }
 
         private TerrainPatternType ResolveTerrainType(RegionSample region)
@@ -623,11 +589,13 @@ namespace MiniCivilization.World.Generation.Patterns
 
         private sealed class RegionParameters
         {
+            public readonly RegionPattern Pattern;
             public readonly int[] Seeds = new int[9];
             public readonly float[] Ranges = new float[9];
 
             public RegionParameters(int key, RegionPattern pattern, TerrainPatternSettingsData settings)
             {
+                Pattern = pattern;
                 if (pattern == RegionPattern.Sea) return;
                 var channelBase = ((int)pattern + 1) * 1000;
                 for (var index = 0; index < Seeds.Length; index++)
@@ -646,7 +614,6 @@ namespace MiniCivilization.World.Generation.Patterns
                         SetRange(2040, settings.Rugged.DetailAmplitude);
                         break;
                     case RegionPattern.Mountain:
-                        SetRange(3020, settings.Mountain.Height);
                         SetRange(3040, settings.Mountain.RidgeStrength);
                         SetRange(3060, settings.Mountain.DetailAmplitude);
                         break;
@@ -673,9 +640,6 @@ namespace MiniCivilization.World.Generation.Patterns
             }
         }
 
-        private static float NormalizeNoise(float value, PatternNoiseMode mode) =>
-            PatternNoise.Normalize(value, mode);
-
         private static float SampleNormalizedNoise(
             double x,
             double z,
@@ -691,12 +655,6 @@ namespace MiniCivilization.World.Generation.Patterns
             double z,
             TerrainNoiseFieldData field,
             int seed) => PatternNoise.SampleSigned(x, z, field, seed);
-
-        private static float SampleNoise(
-            double x,
-            double z,
-            TerrainNoiseFieldData field,
-            int seed) => PatternNoise.Sample(x, z, field, seed);
 
         private static bool IsBefore(
             double candidateDistance,
@@ -742,10 +700,12 @@ namespace MiniCivilization.World.Generation.Patterns
     {
         private readonly PatternTileGridSettingsData grid;
         private readonly TerrainPatternSettingsData settings;
+        private readonly IElevationPatternMapReader elevation;
+        private readonly ClimatePatternMapReader climate;
 
         public TerrainPatternTileBuilder(
             PatternTileGridSettingsData grid,
-            TerrainPatternSettingsData settings)
+            TerrainPatternSettingsData settings, IElevationPatternMapReader elevation = null, ClimatePatternMapReader climate = null)
         {
             this.grid = grid ?? throw new ArgumentNullException(nameof(grid));
             if (settings == null)
@@ -761,13 +721,17 @@ namespace MiniCivilization.World.Generation.Patterns
             }
 
             this.settings = settings;
+            this.elevation = elevation;
+            this.climate = climate;
         }
 
         public TerrainPatternTile Build(
             PatternTileKey key,
             CancellationToken cancellationToken = default)
         {
-            var evaluator = new TerrainPatternEvaluator(settings);
+            climate?.Build(key, cancellationToken);
+            var scopedElevation = elevation is ElevationPatternMapReader map ? map.CreateReadScope() : elevation;
+            var evaluator = new TerrainPatternEvaluator(settings, scopedElevation, climate);
             var bounds = grid.GetCoreBounds(key);
             var sampleWidth = checked(bounds.Width + 2);
             var samples = new TerrainPatternSample[checked(

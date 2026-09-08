@@ -7,6 +7,9 @@ namespace MiniCivilization.World.Persistence
 {
     internal sealed class WorldPersistenceService
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker FlushProfile = new("World.Persistence.FlushDetached");
+#endif
         private WorldSaveRepository repository;
         private WorldSaveData saveData;
         private readonly int chunkSizeX;
@@ -190,6 +193,9 @@ namespace MiniCivilization.World.Persistence
 
         internal void FlushDetachedChunks()
         {
+#if ENABLE_PROFILER
+            using var profile = FlushProfile.Auto();
+#endif
             if (!detachedChunksPendingSave) return;
             WriteSaveData();
             detachedChunksPendingSave = false;
@@ -230,7 +236,13 @@ namespace MiniCivilization.World.Persistence
                 frontierBuffer);
             ReplaceDeferredWaterFrontier(coordinate, frontierBuffer);
 
-            detachedChunksPendingSave = true;
+            // Empty terrain chunks do not change the global entity/frontier snapshot.
+            // Preserve the write whenever either the previous or current snapshot may contain state.
+            detachedChunksPendingSave |= entityBuffer.Count > 0 || frontierBuffer.Count > 0
+                || deferredEntitiesByChunk.Count > 0 || deferredWaterFrontierByChunk.Count > 0
+                || saveData.RuntimeState.Entities.Count > 0 || saveData.RuntimeState.WaterFrontier.Count > 0
+                || runtime.Data.WaterFlowSchedule.FrontierCells.Count > 0
+                || runtime.Entities.NextEntityId != saveData.RuntimeState.NextEntityId;
             dirtyChunks.Remove(coordinate);
         }
 

@@ -21,6 +21,41 @@ namespace MiniCivilization.World.Generation.Patterns
         private readonly Dictionary<PatternTileKey, TerrainBuild>
             terrainBuilds = new();
         private long revision;
+        private readonly Dictionary<PatternTileKey, Lazy<ElevationPatternTile>> elevationTiles = new();
+        public ElevationPatternTile GetOrBuildElevation(PatternTileKey key, Func<ElevationPatternTile> build)
+        {
+            Lazy<ElevationPatternTile> entry;
+            lock (gate)
+            {
+                if (!elevationTiles.TryGetValue(key, out entry))
+                {
+                    entry = new Lazy<ElevationPatternTile>(() => {
+                        var tile = build();
+                        lock (gate) revision++;
+                        return tile;
+                    }, LazyThreadSafetyMode.ExecutionAndPublication);
+                    elevationTiles.Add(key, entry);
+                }
+            }
+            try { return entry.Value; }
+            catch
+            {
+                lock (gate)
+                    if (elevationTiles.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
+                        elevationTiles.Remove(key);
+                throw;
+            }
+        }
+        public bool TryGetElevation(PatternTileKey key, out ElevationPatternTile tile)
+        {
+            lock (gate)
+            {
+                if (elevationTiles.TryGetValue(key, out var entry) && entry.IsValueCreated)
+                { tile = entry.Value; return true; }
+            }
+            tile = null; return false;
+        }
+
         private readonly Dictionary<PatternTileKey, Lazy<ClimatePatternTile>> climateTiles = new();
         public ClimatePatternTile GetOrBuildClimate(PatternTileKey key, Func<ClimatePatternTile> build)
         {
@@ -119,7 +154,7 @@ namespace MiniCivilization.World.Generation.Patterns
                     && hydrologyTiles.TryGetValue(key, out var hydrology)
                     && TryGetClimate(key, out var climate))
                 {
-                    pair = new PatternTilePair(climate, hydrology);
+                    pair = new PatternTilePair(climate, terrain, hydrology);
                     return true;
                 }
             }
@@ -219,6 +254,32 @@ namespace MiniCivilization.World.Generation.Patterns
             }
         }
 
+        // Bound auxiliary caches by total Cells rather than tile count (tile spans are configurable).
+        private static bool RetainAuxiliary<T>(Dictionary<PatternTileKey, Lazy<T>> tiles, ISet<PatternTileKey> required)
+        {
+            const int maximumAuxiliaryCells = 16384;
+            int keptCells = 0;
+            bool removed = false;
+            var keys = new List<PatternTileKey>(tiles.Keys);
+            // Always retain explicit demand; the remaining dependency budget is bounded.
+            for (int i=keys.Count-1;i>=0;i--)
+            {
+                var key=keys[i];
+                if (required.Contains(key)) continue;
+                var entry=tiles[key];
+                int cells=0;
+                if (entry.IsValueCreated)
+                {
+                    if (entry.Value is ElevationPatternTile e) cells=e.CellCount;
+                    else if (entry.Value is ClimatePatternTile c) cells=c.Elevation.CellCount;
+                }
+                if (required.Count != 0 && cells > 0 && cells <= maximumAuxiliaryCells-keptCells)
+                { keptCells+=cells; continue; }
+                removed |= tiles.Remove(key);
+            }
+            return removed;
+        }
+
         // Called by the scheduler only after all preparation jobs have completed.
         internal void Retain(ISet<PatternTileKey> required)
         {
@@ -227,8 +288,8 @@ namespace MiniCivilization.World.Generation.Patterns
             {
                 if (terrainBuilds.Count != 0) return;
                 var removed = false;
-                foreach (var key in new List<PatternTileKey>(climateTiles.Keys))
-                    if (!required.Contains(key)) removed |= climateTiles.Remove(key);
+                removed |= RetainAuxiliary(elevationTiles, required);
+                removed |= RetainAuxiliary(climateTiles, required);
                 foreach (var key in new List<PatternTileKey>(hydrologyTiles.Keys))
                     if (!required.Contains(key)) removed |= hydrologyTiles.Remove(key);
                 foreach (var key in new List<PatternTileKey>(terrainTiles.Keys))

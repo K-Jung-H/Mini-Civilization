@@ -33,7 +33,8 @@ internal static class ClimateChecks
         var builder = new TerrainPatternTileBuilder(grid, terrain.CreateData(0));
         var store = new PatternMapStore();
         var settings = new ClimateSettings();
-        var reader = new ClimatePatternMapReader(grid, store, builder, settings);
+        var elevation = new ElevationPatternMapReader(grid, store, new ElevationPatternSettingsData(terrain.CreateData(0)));
+        var reader = new ClimatePatternMapReader(grid, store, elevation, settings);
         var key = new PatternTileKey(-1, 0);
         var results = new ClimatePatternTile[16];
         Parallel.For(0, results.Length, i => results[i] = reader.Build(key));
@@ -53,8 +54,9 @@ internal static class ClimateChecks
         var wideData = new TerrainPatternSettingsData(0, 2, data.TerrainBaseHeight, data.NoiseRouter, data.Region,
             data.BaseSurface, data.Smooth, data.Rugged, data.Mountain, data.Canyon);
         var wideGrid = new PatternTileGridSettingsData(world, 2);
-        var wide = new ClimatePatternMapReader(wideGrid, new PatternMapStore(),
-            new TerrainPatternTileBuilder(wideGrid, wideData), new ClimateSettings());
+        var wideStore = new PatternMapStore();
+        var wide = new ClimatePatternMapReader(wideGrid, wideStore,
+            new ElevationPatternMapReader(wideGrid, wideStore, new ElevationPatternSettingsData(wideData)), new ClimateSettings());
         for (int x = -16; x < 16; x++)
             Check(reader.GetClimateCell(x,0).Equals(wide.GetClimateCell(x,0)), "climate tile span invariance");
         var retry = new PatternMapStore();
@@ -68,18 +70,19 @@ internal static class ClimateChecks
         var bounds = grid.GetCoreBounds(default);
         var dryTerrain = new TerrainPatternTile(default, bounds,
             Enumerable.Repeat(new TerrainPatternCell(TerrainPatternType.Smooth, 20, 0, 0), bounds.Width * bounds.Height).ToArray());
-        var desert = new ClimatePatternTile(dryTerrain, new ClimateNoiseMap(0,"temperature",512),
+        var dryElevation = new ElevationPatternTile(default, bounds, Enumerable.Repeat(20f, bounds.Width * bounds.Height).ToArray());
+        var desert = new ClimatePatternTile(dryElevation, new ClimateNoiseMap(0,"temperature",512),
             new ClimateNoiseMap(0,"moisture",640), desertSettings);
         var dryHydro = new HydrologyPatternTile(default, bounds, Array.Empty<HydrologyFeatureKey>(),
             Enumerable.Repeat(HydrologyPatternCell.None, bounds.Width * bounds.Height).ToArray());
         var cellWorld = new WorldData(world);
-        new PatternChunkMaterializer(grid).Materialize(cellWorld, default, new PatternTilePair(desert, dryHydro));
+        new PatternChunkMaterializer(grid).Materialize(cellWorld, default, new PatternTilePair(desert, dryTerrain, dryHydro));
         var surfaceCell = cellWorld.GetCell(0,3,0);
         Check(surfaceCell.Biome.Terrain == TerrainBiome.Desert && surfaceCell.Biome.Climate == ClimateBiome.Warm
             && surfaceCell.Terrain.Surface == SurfaceType.Ground, "desert surface materialization");
         // Heights are stored in height steps; climate cooling settings are expressed per Cell.
         var coolSettings = new ClimateSettings { AltitudeReferenceHeight = 0, AltitudeCoolingPerCell = .01f };
-        var cooled = new ClimatePatternTile(dryTerrain, new ClimateNoiseMap(0,"temperature",512),
+        var cooled = new ClimatePatternTile(dryElevation, new ClimateNoiseMap(0,"temperature",512),
             new ClimateNoiseMap(0,"moisture",640), coolSettings);
         Check(Math.Abs(cooled.GetTemperature(0,0) - cooled.GetCell(0,0).Temperature - .04f) < .000001f,
             "altitude cooling uses Cell units and preserves raw temperature");
@@ -112,14 +115,15 @@ internal static class ClimateChecks
     }
     private static void Check(bool value, string message)
     { if (!value) throw new InvalidOperationException(message); }
-    private sealed class RuleReader : IClimatePatternMapReader
+    private sealed class RuleReader : IClimatePatternMapReader, ITerrainPatternMapReader
     {
         private readonly BiomeHydrologyRule rule;
         public int RuleReads;
         public RuleReader(float basin, float area, float river)
         { rule = new BiomeHydrologyRule { Biome = TerrainBiome.Desert, BasinOccurrence = basin, BasinArea = area, RiverOccurrence = river }; }
         public TerrainPatternCell GetCell(int x,int z) => new(TerrainPatternType.Smooth, 140,0,0);
-        public ClimatePatternCell GetClimateCell(int x,int z) => new(GetCell(x,z), .9f,.1f,ClimateBiome.Warm,TerrainBiome.Desert);
+        public ClimatePatternCell GetClimateCell(int x,int z) => new(new ElevationPatternCell(140), .9f,.1f,ClimateBiome.Warm,TerrainBiome.Desert);
+        public BiomeTerrainRule GetTerrainRule(int x,int z) => BiomeTerrainRule.Default;
         public BiomeHydrologyRule GetHydrologyRule(int x,int z) { RuleReads++; return rule; }
     }
 }

@@ -280,7 +280,7 @@ namespace MiniCivilization.World.Meshing
 
     internal sealed partial class WorldSurfaceQuery
     {
-        private const int HorizontalDependencyRadius = 1;
+        internal const int HorizontalDependencyRadius = 1;
 
         private readonly struct WaterCornerKey : IEquatable<WaterCornerKey>
         {
@@ -315,6 +315,25 @@ namespace MiniCivilization.World.Meshing
             waterCornerHeights =
             new();
 
+        private readonly Dictionary<ChunkCoordinate, List<CellCoordinate>> profileKeys = new();
+        private readonly Dictionary<ChunkCoordinate, List<WaterCornerKey>> cornerKeys = new();
+
+        private void TrackProfile(CellCoordinate cell)
+        {
+            var chunk = WorldCoordinateUtility.ToChunk(cell.X, cell.Z, world.ChunkSizeX);
+            if (!profileKeys.TryGetValue(chunk, out var keys))
+                profileKeys.Add(chunk, keys = new List<CellCoordinate>());
+            keys.Add(cell);
+        }
+
+        private void TrackCorner(WaterCornerKey cell)
+        {
+            var chunk = WorldCoordinateUtility.ToChunk(cell.X, cell.Z, world.ChunkSizeX);
+            if (!cornerKeys.TryGetValue(chunk, out var keys))
+                cornerKeys.Add(chunk, keys = new List<WaterCornerKey>());
+            keys.Add(cell);
+        }
+
         public WorldSurfaceQuery(
             WorldData world,
             WaterFlowState flowState = null,
@@ -342,6 +361,8 @@ namespace MiniCivilization.World.Meshing
             solidProfiles.Clear();
             waterProfiles.Clear();
             waterCornerHeights.Clear();
+            profileKeys.Clear();
+            cornerKeys.Clear();
         }
 
         public void InvalidateRegion(in CellBounds changedBounds)
@@ -370,20 +391,38 @@ namespace MiniCivilization.World.Meshing
                 return;
             }
 
-            for (var y = 0; y < world.Height; y++)
-            for (var z = minimumZ; z <= maximumZ; z++)
-            for (var x = minimumX; x <= maximumX; x++)
+            // Visit only cached entries in intersecting chunks, including corner dependencies.
+            var first = WorldCoordinateUtility.ToChunk(minimumX, minimumZ, world.ChunkSizeX);
+            var last = WorldCoordinateUtility.ToChunk(maximumX + 1, maximumZ + 1, world.ChunkSizeX);
+            for (var cz = first.Z; cz <= last.Z; cz++)
+            for (var cx = first.X; cx <= last.X; cx++)
             {
-                var cell = new CellCoordinate(x, y, z);
-                solidProfiles.Remove(cell);
-                waterProfiles.Remove(cell);
-            }
-
-            for (var y = 0; y < world.Height; y++)
-            for (var z = minimumZ; z <= maximumZ + 1; z++)
-            for (var x = minimumX; x <= maximumX + 1; x++)
-            {
-                waterCornerHeights.Remove(new WaterCornerKey(x, y, z));
+                var chunk = new ChunkCoordinate(cx, cz);
+                if (profileKeys.TryGetValue(chunk, out var profiles))
+                {
+                    for (var i = profiles.Count - 1; i >= 0; i--)
+                    {
+                        var cell = profiles[i];
+                        if (cell.X < minimumX || cell.X > maximumX || cell.Z < minimumZ || cell.Z > maximumZ) continue;
+                        solidProfiles.Remove(cell);
+                        waterProfiles.Remove(cell);
+                        profiles[i] = profiles[profiles.Count - 1];
+                        profiles.RemoveAt(profiles.Count - 1);
+                    }
+                    if (profiles.Count == 0) profileKeys.Remove(chunk);
+                }
+                if (cornerKeys.TryGetValue(chunk, out var corners))
+                {
+                    for (var i = corners.Count - 1; i >= 0; i--)
+                    {
+                        var cell = corners[i];
+                        if (cell.X < minimumX || cell.X > maximumX + 1 || cell.Z < minimumZ || cell.Z > maximumZ + 1) continue;
+                        waterCornerHeights.Remove(cell);
+                        corners[i] = corners[corners.Count - 1];
+                        corners.RemoveAt(corners.Count - 1);
+                    }
+                    if (corners.Count == 0) cornerKeys.Remove(chunk);
+                }
             }
         }
 
@@ -476,6 +515,7 @@ namespace MiniCivilization.World.Meshing
             if (CanCacheColumn(x, z))
             {
                 solidProfiles[coordinate] = profile;
+                TrackProfile(coordinate);
             }
 
             return profile;
@@ -544,6 +584,7 @@ namespace MiniCivilization.World.Meshing
             if (CanCacheColumn(x, z))
             {
                 waterProfiles[coordinate] = profile;
+                TrackProfile(coordinate);
             }
 
             return true;
@@ -987,6 +1028,7 @@ namespace MiniCivilization.World.Meshing
             if (CanCacheCorner(key))
             {
                 waterCornerHeights[key] = height;
+                TrackCorner(key);
             }
 
             return height;

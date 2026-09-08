@@ -9,6 +9,10 @@ namespace MiniCivilization.World.WaterFlow
     [DisallowMultipleComponent]
     public sealed class WorldWaterFlowController : MonoBehaviour
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Water.Update");
+#endif
+
         [Header("Simulation Budget")]
         [SerializeField, Min(0.01f)]
         private float simulationStepInterval = 0.1f;
@@ -36,6 +40,9 @@ namespace MiniCivilization.World.WaterFlow
 
         private void Update()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
             if (boundWorld == null
                 || State == null
                 || boundRuntime?.WaterFlowResolver == null
@@ -183,8 +190,6 @@ namespace MiniCivilization.World.WaterFlow
                 return;
             }
 
-            State.ReplaceWaterBodies(
-                WaterBodyResolver.ResolvePrepared(boundRuntime));
             StateChanged?.Invoke(State);
         }
 

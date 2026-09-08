@@ -84,6 +84,8 @@ Require(PatternHeightQuantization.Round(1.5f) == 2 && PatternHeightQuantization.
     "rounding compatibility");
 Console.WriteLine("PASS integer column contract, map roundtrip, capacity/volume, Amount, invalid and shallow heights");
 var asset = LoadSettings<TerrainPatternSettings>(Path.Combine(root, "Assets/Game/World/Settings/TerrainPatternSettings.asset"));
+GenerationPerformanceChecks.Run(asset);
+ElevationChecks.Run(asset);
 ClimateChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 HydrologyChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
 StreamingChecks.Run(asset, LoadSettings<HydrologyFeatureSettings>(Path.Combine(root, "Assets/Game/World/Settings/HydrologyFeatureSettings.asset")));
@@ -203,7 +205,7 @@ for (var x = -128; x <= 128; x += 32)
         expectedDetail += (float)c.GetType().GetProperty("DetailHeight")!.GetValue(c)! * w;
         total += w;
     }
-    plain.EvaluateSample(x, z);
+    typeof(TerrainPatternEvaluator).GetMethod("SampleRegion", flags)!.Invoke(plain, new object[] { (double)x, (double)z });
     var blended = typeof(TerrainPatternEvaluator).GetMethod("SampleBlendedContribution", flags)!
         .Invoke(plain, new object[] { (double)x, (double)z })!;
     Require(Math.Abs((float)blended.GetType().GetProperty("BaseHeight")!.GetValue(blended)!
@@ -238,7 +240,7 @@ for (var z = -256; z < 256 && !foundSeam; z += 8)
             double OldBlend(TerrainPatternSample s) => s.SecondaryTerrainSurfaceHeight
                 + (s.PrimaryTerrainSurfaceHeight - s.SecondaryTerrainSurfaceHeight) * s.PrimaryInfluence;
             var oldJump = Math.Abs(OldBlend(a) - OldBlend(b));
-            if (oldJump > .1)
+            if (!a.HasSeaPattern && !b.HasSeaPattern)
             {
                 var newJump = Math.Abs(a.SurfaceHeight - b.SurfaceHeight);
                 Require(newJump < .001, "actual secondary-switch continuity");

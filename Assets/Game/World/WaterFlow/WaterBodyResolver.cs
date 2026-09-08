@@ -7,6 +7,92 @@ namespace MiniCivilization.World.WaterFlow
 {
     internal static class WaterBodyResolver
     {
+        internal sealed class StreamingScratch
+        {
+            internal readonly HashSet<int> Affected = new();
+            internal readonly HashSet<CellColumnCoordinate> Seeds = new();
+            internal readonly HashSet<CellColumnCoordinate> Visited = new();
+            internal readonly Queue<CellColumnCoordinate> Queue = new();
+            internal readonly List<WaterBody> Bodies = new();
+        }
+
+        internal static void RefreshStreaming(WorldRuntime runtime,
+            IReadOnlyCollection<ChunkCoordinate> changed, StreamingScratch scratch)
+        {
+            if (changed.Count == 0) return;
+            var world = runtime.Data;
+            var state = runtime.WaterFlowState;
+            var affected = scratch.Affected;
+            var seeds = scratch.Seeds;
+            var visited = scratch.Visited;
+            var queue = scratch.Queue;
+            var bodies = scratch.Bodies;
+            affected.Clear(); seeds.Clear(); visited.Clear(); queue.Clear(); bodies.Clear();
+
+            foreach (var chunk in changed)
+            {
+                var sx = chunk.X * world.ChunkSizeX;
+                var sz = chunk.Z * world.ChunkSizeZ;
+                for (var z = sz; z < sz + world.ChunkSizeZ; z++)
+                for (var x = sx; x < sx + world.ChunkSizeX; x++)
+                {
+                    IncludeOldBody(x, z);
+                    if (runtime.IsChunkPrepared(chunk)
+                        && runtime.SurfaceCache.GetSurfaceHeight(x, z).HasWater)
+                        seeds.Add(new CellColumnCoordinate(x, z));
+                }
+            }
+            var additionsOnly = affected.Count == 0;
+            // Seed all pieces of a touched component, including pieces disconnected by removal.
+            foreach (var id in affected)
+                if (state.TryGetWaterBody(id, out var old))
+                    foreach (var cell in old.Cells) seeds.Add(new CellColumnCoordinate(cell.X, cell.Z));
+
+            foreach (var seed in seeds)
+            {
+                if (additionsOnly) affected.Clear();
+                if (!TryVisit(seed)) continue;
+                var body = new WaterBody(state.AllocateWaterBodyId());
+                while (queue.Count > 0)
+                {
+                    var column = queue.Dequeue();
+                    IncludeOldBody(column.X, column.Z);
+                    var height = runtime.SurfaceCache.GetSurfaceHeight(column.X, column.Z);
+                    AddExposedColumn(world, height, column.X, column.Z, body);
+                    body.SurfaceCellCount++;
+                    body.TouchesWorldEdge |= !world.IsInfinite &&
+                        (column.X == world.MinimumCellX || column.Z == world.MinimumCellZ ||
+                         column.X == world.MaximumCellXExclusive - 1 || column.Z == world.MaximumCellZExclusive - 1);
+                    foreach (var d in Directions)
+                        TryVisit(new CellColumnCoordinate(column.X + d.x, column.Z + d.z));
+                }
+                if (additionsOnly) state.MergeWaterBodies(affected, body);
+                else bodies.Add(body);
+            }
+            if (!additionsOnly && (affected.Count > 0 || bodies.Count > 0)) state.ReplaceAffectedWaterBodies(affected, bodies);
+            bodies.Clear();
+
+            void IncludeOldBody(int x, int z)
+            {
+                var id = state.GetIndexedWaterBodyId(x, z);
+                if (id != 0) affected.Add(id);
+            }
+            bool TryVisit(CellColumnCoordinate column)
+            {
+                if (additionsOnly)
+                {
+                    var id = state.GetIndexedWaterBodyId(column.X, column.Z);
+                    if (id != 0) { affected.Add(id); return false; }
+                }
+                if (!visited.Add(column)) return false;
+                var chunk = WorldCoordinateUtility.ToChunk(column.X, column.Z, world.ChunkSizeX);
+                if (!runtime.IsChunkPrepared(chunk)
+                    || !runtime.SurfaceCache.GetSurfaceHeight(column.X, column.Z).HasWater) return false;
+                queue.Enqueue(column);
+                return true;
+            }
+        }
+
         private static readonly (int x, int z)[] Directions =
         {
             (1, 0), (-1, 0), (0, 1), (0, -1)

@@ -71,26 +71,26 @@ namespace MiniCivilization.World.Domain
             (WaterBiome)((value >> WaterShift) & WaterMask);
         public bool IsValid =>
             (value & ~UsedMask) == 0
-            && Enum.IsDefined(typeof(ClimateBiome), Climate)
-            && Enum.IsDefined(typeof(TerrainBiome), Terrain)
-            && Enum.IsDefined(typeof(WaterBiome), Water);
+            && (byte)Climate <= (byte)ClimateBiome.Cold
+            && (byte)Terrain <= (byte)TerrainBiome.Cave
+            && (byte)Water <= (byte)WaterBiome.River;
 
         public CellBiome(
             ClimateBiome climate,
             TerrainBiome terrain,
             WaterBiome water)
         {
-            if (!Enum.IsDefined(typeof(ClimateBiome), climate))
+            if ((byte)climate > (byte)ClimateBiome.Cold)
             {
                 throw new ArgumentOutOfRangeException(nameof(climate));
             }
 
-            if (!Enum.IsDefined(typeof(TerrainBiome), terrain))
+            if ((byte)terrain > (byte)TerrainBiome.Cave)
             {
                 throw new ArgumentOutOfRangeException(nameof(terrain));
             }
 
-            if (!Enum.IsDefined(typeof(WaterBiome), water))
+            if ((byte)water > (byte)WaterBiome.River)
             {
                 throw new ArgumentOutOfRangeException(nameof(water));
             }
@@ -389,8 +389,7 @@ namespace MiniCivilization.World.Domain
 
         public void Normalize()
         {
-            if (!Enum.IsDefined(typeof(RoadType), Type)
-                || Type == RoadType.None)
+            if (Type != RoadType.Basic)
             {
                 Type = RoadType.None;
                 CrossesCenter = false;

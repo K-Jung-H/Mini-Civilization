@@ -7,8 +7,49 @@ using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Presentation
 {
+    internal sealed class StreamingPatchDependencies
+    {
+        private readonly System.Collections.Generic.Dictionary<ChunkCoordinate, Chunk> streamingDependencies = new();
+
+        internal bool HasStreamingDependencyChanged(WorldData world, ChunkCoordinate coordinate)
+        {
+            if (!streamingDependencies.TryGetValue(coordinate, out var previous))
+                return false;
+            world.TryGetChunk(coordinate, out var current);
+            return !ReferenceEquals(previous, current);
+        }
+
+        internal void ClearStreamingDependencies() => streamingDependencies.Clear();
+
+        internal void CaptureStreamingDependencies(WorldData world, int patchX, int patchZ, int patchSize)
+        {
+            streamingDependencies.Clear();
+            var radius = WorldSurfaceQuery.HorizontalDependencyRadius;
+            var first = WorldCoordinateUtility.ToChunk(patchX * patchSize - radius, patchZ * patchSize - radius, world.ChunkSizeX);
+            var last = WorldCoordinateUtility.ToChunk((patchX + 1) * patchSize - 1 + radius, (patchZ + 1) * patchSize - 1 + radius, world.ChunkSizeX);
+            for (var z = first.Z; z <= last.Z; z++)
+            for (var x = first.X; x <= last.X; x++)
+            {
+                var coordinate = new ChunkCoordinate(x, z);
+                world.TryGetChunk(coordinate, out var chunk);
+                streamingDependencies.Add(coordinate, chunk);
+            }
+        }
+    }
+
     public sealed class WorldRenderPatchView : MonoBehaviour
     {
+        private readonly StreamingPatchDependencies streamingDependencies = new();
+
+        internal bool HasStreamingDependencyChanged(WorldData world, ChunkCoordinate coordinate) =>
+            streamingDependencies.HasStreamingDependencyChanged(world, coordinate);
+        internal void ClearStreamingDependencies() => streamingDependencies.ClearStreamingDependencies();
+        private void CaptureStreamingDependencies(WorldData world) =>
+            streamingDependencies.CaptureStreamingDependencies(world, patchX, patchZ, patchSize);
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.RoadTextures");
+#endif
+
         private static readonly int RoadPatchMapProperty = Shader.PropertyToID(
             "_RoadPatchMap");
         private static readonly int RoadPortOffsetMapProperty = Shader.PropertyToID(
@@ -84,6 +125,7 @@ namespace MiniCivilization.World.Presentation
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
             terrainRenderer.enabled = !terrainBuffers.IsEmpty;
+            CaptureStreamingDependencies(world);
             RebuildRoad(world, roadTopology, roadVisualCatalog);
 
             var waterBuffers = WaterChunkMeshBuilder.Build(
@@ -162,6 +204,7 @@ namespace MiniCivilization.World.Presentation
             terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
             terrainRenderer.receiveShadows = true;
             terrainRenderer.enabled = !terrainBuffers.IsEmpty;
+            CaptureStreamingDependencies(world);
         }
 
         internal void RebuildRoad(
@@ -169,6 +212,9 @@ namespace MiniCivilization.World.Presentation
             WorldRoadTopology roadTopology,
             RoadVisualCatalog catalog)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
             EnsureChildren();
             if (world == null
                 || roadTopology == null
@@ -236,6 +282,7 @@ namespace MiniCivilization.World.Presentation
 
         public void ReleaseMeshes()
         {
+            ClearStreamingDependencies();
             ReleaseRoadVisuals();
             var filters = GetComponentsInChildren<MeshFilter>(true);
             for (var index = 0; index < filters.Length; index++)

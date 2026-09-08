@@ -44,7 +44,7 @@ namespace MiniCivilization.World.Meshing
         public int PreparedChunkCount => preparedChunks.Count;
         public int PreparedSectionCount => sections.Count;
 
-        public void PrepareChunk(ChunkCoordinate coordinate)
+        public void PrepareChunk(ChunkCoordinate coordinate, bool refreshNeighbors = true)
         {
             if (!world.IsChunkWithinBounds(coordinate))
             {
@@ -66,7 +66,8 @@ namespace MiniCivilization.World.Meshing
                     coordinate.Z));
             }
 
-            RebuildPreparedNeighborBoundaries(coordinate);
+            if (refreshNeighbors) RebuildPreparedNeighborBoundaries(coordinate);
+
         }
 
         public void ReleaseChunk(ChunkCoordinate coordinate)
@@ -203,7 +204,7 @@ namespace MiniCivilization.World.Meshing
             }
         }
 
-        private void RebuildPreparedNeighborBoundaries(
+        internal void RebuildPreparedNeighborBoundaries(
             ChunkCoordinate coordinate)
         {
             for (var directionIndex = 0;

@@ -8,6 +8,7 @@ namespace MiniCivilization.World.Runtime
 {
     internal static class ChunkDemand
     {
+
         public static List<ChunkCoordinate> Build(
             WorldData world,
             ChunkCoordinate target,
@@ -76,6 +77,13 @@ namespace MiniCivilization.World.Runtime
 
     internal sealed class PatternStreamingCoordinator : IDisposable
     {
+#if ENABLE_PROFILER
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Streaming.Update");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage1 = new("World.Streaming.Unload");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage2 = new("World.Streaming.Cells");
+        private static readonly Unity.Profiling.ProfilerMarker ProfileStage3 = new("World.Streaming.Activate");
+#endif
+
         private readonly WorldRuntime runtime;
         private readonly WorldGenerationConfiguration configuration;
         private readonly PatternMapPreparationScheduler mapScheduler;
@@ -105,23 +113,20 @@ namespace MiniCivilization.World.Runtime
                     nameof(configuration));
             }
 
+            var elevationMap = new ElevationPatternMapReader(
+                configuration.PatternTiles, runtime.PatternMaps, configuration.Elevation);
+            var climateMap = new ClimatePatternMapReader(
+                configuration.PatternTiles, runtime.PatternMaps, elevationMap, configuration.Climate);
             var terrainBuilder = new TerrainPatternTileBuilder(
-                configuration.PatternTiles,
-                configuration.Terrain);
-            var terrainMap = new ClimatePatternMapReader(
-                configuration.PatternTiles,
-                runtime.PatternMaps,
-                terrainBuilder, configuration.Climate);
+                configuration.PatternTiles, configuration.Terrain, elevationMap, climateMap);
+            var terrainMap = new TerrainPatternMapReader(
+                configuration.PatternTiles, runtime.PatternMaps, terrainBuilder);
             var hydrologyDrawer = new HydrologyPatternDrawer(
-                configuration.PatternTiles,
-                configuration.Hydrology,
-                terrainMap,
-                runtime.PatternMaps.WaterBrushes);
+                configuration.PatternTiles, configuration.Hydrology,
+                terrainMap, runtime.PatternMaps.WaterBrushes, climateMap, elevationMap);
             mapScheduler = new PatternMapPreparationScheduler(
-                runtime.PatternMaps,
-                terrainBuilder,
-                hydrologyDrawer,
-                configuration.MapBuildConcurrency, terrainMap);
+                runtime.PatternMaps, terrainBuilder, hydrologyDrawer,
+                configuration.MapBuildConcurrency);
             materializer = new PatternChunkMaterializer(
                 configuration.PatternTiles);
             this.persistence = persistence;
@@ -157,6 +162,9 @@ namespace MiniCivilization.World.Runtime
 
         public void Update(ChunkCoordinate nextTarget)
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage0.Auto();
+#endif
             ThrowIfDisposed();
             runtime.BeginStreamingChanges();
             try
@@ -255,6 +263,9 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessUnloads()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage1.Auto();
+#endif
             var count = Math.Min(unloadQueue.Count, configuration.ChunkUnloadPerFrame);
             for (var index = 0; index < count; index++)
             {
@@ -267,6 +278,9 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessPreparations()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage2.Auto();
+#endif
             var completed = 0;
             for (var index = 0; index < prepareQueue.Count
                  && completed < configuration.ChunkPreparePerFrame; index++)
@@ -304,6 +318,9 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessActivations()
         {
+#if ENABLE_PROFILER
+            using var profilerScope = ProfileStage3.Auto();
+#endif
             var count = Math.Min(activateQueue.Count, configuration.ChunkActivatePerFrame);
             for (var index = 0; index < count; index++)
             {
