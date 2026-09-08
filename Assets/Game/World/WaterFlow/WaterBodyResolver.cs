@@ -19,77 +19,113 @@ namespace MiniCivilization.World.WaterFlow
         internal static void RefreshStreaming(WorldRuntime runtime,
             IReadOnlyCollection<ChunkCoordinate> changed, StreamingScratch scratch)
         {
-            if (changed.Count == 0) return;
-            var world = runtime.Data;
-            var state = runtime.WaterFlowState;
-            var affected = scratch.Affected;
-            var seeds = scratch.Seeds;
-            var visited = scratch.Visited;
-            var queue = scratch.Queue;
-            var bodies = scratch.Bodies;
-            affected.Clear(); seeds.Clear(); visited.Clear(); queue.Clear(); bodies.Clear();
-
-            foreach (var chunk in changed)
+            if (runtime.WaterFlowState.TopologyGraph is not ChunkGraph graph)
             {
-                var sx = chunk.X * world.ChunkSizeX;
-                var sz = chunk.Z * world.ChunkSizeZ;
-                for (var z = sz; z < sz + world.ChunkSizeZ; z++)
-                for (var x = sx; x < sx + world.ChunkSizeX; x++)
-                {
-                    IncludeOldBody(x, z);
-                    if (runtime.IsChunkPrepared(chunk)
-                        && runtime.SurfaceCache.GetSurfaceHeight(x, z).HasWater)
-                        seeds.Add(new CellColumnCoordinate(x, z));
-                }
+                graph = new ChunkGraph();
+                runtime.WaterFlowState.TopologyGraph = graph;
+                var all = new List<ChunkCoordinate>();
+                foreach (var entry in runtime.ChunkRuntimes)
+                    if (runtime.IsChunkPrepared(entry.Key)) all.Add(entry.Key);
+                graph.Update(runtime, all);
             }
-            var additionsOnly = affected.Count == 0;
-            // Seed all pieces of a touched component, including pieces disconnected by removal.
-            foreach (var id in affected)
-                if (state.TryGetWaterBody(id, out var old))
-                    foreach (var cell in old.Cells) seeds.Add(new CellColumnCoordinate(cell.X, cell.Z));
+            else graph.Update(runtime, changed);
+        }
 
-            foreach (var seed in seeds)
+        // Nodes are connected components within one chunk. Revisit only affected bodies,
+        // never the cells of unchanged chunks, including when a large ocean splits.
+        internal sealed class ChunkGraph
+        {
+            private sealed class Node
             {
-                if (additionsOnly) affected.Clear();
-                if (!TryVisit(seed)) continue;
-                var body = new WaterBody(state.AllocateWaterBodyId());
-                while (queue.Count > 0)
-                {
-                    var column = queue.Dequeue();
-                    IncludeOldBody(column.X, column.Z);
-                    var height = runtime.SurfaceCache.GetSurfaceHeight(column.X, column.Z);
-                    AddExposedColumn(world, height, column.X, column.Z, body);
-                    body.SurfaceCellCount++;
-                    body.TouchesWorldEdge |= !world.IsInfinite &&
-                        (column.X == world.MinimumCellX || column.Z == world.MinimumCellZ ||
-                         column.X == world.MaximumCellXExclusive - 1 || column.Z == world.MaximumCellZExclusive - 1);
-                    foreach (var d in Directions)
-                        TryVisit(new CellColumnCoordinate(column.X + d.x, column.Z + d.z));
-                }
-                if (additionsOnly) state.MergeWaterBodies(affected, body);
-                else bodies.Add(body);
+                internal WaterBody Part;
+                internal readonly HashSet<Node> Edges = new();
+                internal WaterBody Body;
             }
-            if (!additionsOnly && (affected.Count > 0 || bodies.Count > 0)) state.ReplaceAffectedWaterBodies(affected, bodies);
-            bodies.Clear();
+            private readonly Dictionary<ChunkCoordinate, List<Node>> chunks = new();
+            private readonly Dictionary<CellColumnCoordinate, Node> columns = new();
+            private readonly HashSet<Node> seen = new();
+            private readonly Dictionary<int, HashSet<Node>> members = new();
+            private readonly HashSet<int> affected = new();
+            private readonly HashSet<Node> seeds = new();
+            private readonly List<Node> group = new();
+            private readonly List<WaterBody> partsBuffer = new();
+            private readonly List<WaterBody> additions = new();
+            private readonly Queue<Node> queue = new();
+            private int nextId = 1;
+            private readonly Func<int, int, int> lookup;
+            internal ChunkGraph() { lookup = Lookup; }
+            private int Lookup(int x, int z) => columns.TryGetValue(new CellColumnCoordinate(x, z), out var node) ? node.Body.Id : 0;
 
-            void IncludeOldBody(int x, int z)
+            internal void Update(WorldRuntime runtime, IReadOnlyCollection<ChunkCoordinate> changed)
             {
-                var id = state.GetIndexedWaterBodyId(x, z);
-                if (id != 0) affected.Add(id);
-            }
-            bool TryVisit(CellColumnCoordinate column)
-            {
-                if (additionsOnly)
+                if (changed.Count == 0) return;
+                var world = runtime.Data;
+                affected.Clear(); seeds.Clear(); additions.Clear();
+                foreach (var chunk in changed)
                 {
-                    var id = state.GetIndexedWaterBodyId(column.X, column.Z);
-                    if (id != 0) { affected.Add(id); return false; }
+                    if (chunks.Remove(chunk, out var old))
+                        foreach (var node in old)
+                        {
+                            if (node.Body != null)
+                            {
+                                affected.Add(node.Body.Id);
+                                members[node.Body.Id].Remove(node);
+                            }
+                            foreach (var other in node.Edges) other.Edges.Remove(node);
+                            foreach (var cell in node.Part.Cells) columns.Remove(new CellColumnCoordinate(cell.X, cell.Z));
+                        }
+                    if (!runtime.IsChunkPrepared(chunk)) continue;
+                    var parts = Resolve(world, runtime.SurfaceCache, new[] { chunk });
+                    var nodes = new List<Node>(parts.Count);
+                    foreach (var part in parts)
+                    {
+                        var node = new Node { Part = part };
+                        nodes.Add(node);
+                        seeds.Add(node);
+                        foreach (var cell in part.Cells) columns[new CellColumnCoordinate(cell.X, cell.Z)] = node;
+                    }
+                    chunks.Add(chunk, nodes);
                 }
-                if (!visited.Add(column)) return false;
-                var chunk = WorldCoordinateUtility.ToChunk(column.X, column.Z, world.ChunkSizeX);
-                if (!runtime.IsChunkPrepared(chunk)
-                    || !runtime.SurfaceCache.GetSurfaceHeight(column.X, column.Z).HasWater) return false;
-                queue.Enqueue(column);
-                return true;
+                foreach (var chunk in changed)
+                {
+                    if (!chunks.TryGetValue(chunk, out var nodes)) continue;
+                    var sx = chunk.X * world.ChunkSizeX;
+                    var sz = chunk.Z * world.ChunkSizeZ;
+                    for (var z = sz; z < sz + world.ChunkSizeZ; z++)
+                    { Connect(sx, z, sx - 1, z); Connect(sx + world.ChunkSizeX - 1, z, sx + world.ChunkSizeX, z); }
+                    for (var x = sx; x < sx + world.ChunkSizeX; x++)
+                    { Connect(x, sz, x, sz - 1); Connect(x, sz + world.ChunkSizeZ - 1, x, sz + world.ChunkSizeZ); }
+                }
+                // Only components touched by removal or a new edge can split or merge.
+                foreach (var id in affected)
+                    if (members.Remove(id, out var previous)) seeds.UnionWith(previous);
+                seen.Clear();
+                foreach (var root in seeds)
+                {
+                    if (!seen.Add(root)) continue;
+                    queue.Enqueue(root);
+                    group.Clear(); partsBuffer.Clear();
+                    while (queue.Count > 0)
+                    {
+                        var node = queue.Dequeue(); group.Add(node); partsBuffer.Add(node.Part);
+                        foreach (var edge in node.Edges) if (seen.Add(edge)) queue.Enqueue(edge);
+                    }
+                    var body = new WaterBody(nextId++, partsBuffer.ToArray());
+                    var membership = new HashSet<Node>(group);
+                    foreach (var node in group) node.Body = body;
+                    members.Add(body.Id, membership);
+                    additions.Add(body);
+                }
+                runtime.WaterFlowState.UpdateGraphBodies(affected, additions, lookup);
+                seeds.Clear(); seen.Clear(); group.Clear(); partsBuffer.Clear(); additions.Clear();
+            }
+            private void Connect(int x, int z, int nx, int nz)
+            {
+                if (!columns.TryGetValue(new CellColumnCoordinate(x, z), out var a)
+                    || !columns.TryGetValue(new CellColumnCoordinate(nx, nz), out var b)) return;
+                if (a.Body != null) affected.Add(a.Body.Id);
+                if (b.Body != null) affected.Add(b.Body.Id);
+                a.Edges.Add(b); b.Edges.Add(a);
             }
         }
 

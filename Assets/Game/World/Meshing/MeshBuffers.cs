@@ -7,6 +7,51 @@ using UnityEngine.Rendering;
 
 namespace MiniCivilization.World.Meshing
 {
+    internal sealed class WorldPatchMeshJob
+    {
+        private static readonly System.Collections.Concurrent.ConcurrentBag<WorldPatchMeshJob> pool = new();
+        internal readonly MeshBuffers Terrain = new() { Region = 1 };
+        internal readonly MeshBuffers TerrainBoundary = new() { Region = 2 };
+        internal readonly MeshBuffers Water = new() { Region = 1 };
+        internal readonly MeshBuffers WaterBoundary = new() { Region = 2 };
+        private readonly List<ExposedCell> cells = new();
+        private readonly HashSet<CellCoordinate> candidates = new();
+        internal int Kinds;
+        internal bool Full;
+        internal static WorldPatchMeshJob Build(WorldData snapshot, IReadOnlyList<ChunkCoordinate> active,
+            SurfaceAppearance[] palette, int x, int z, int size, int kinds, bool full)
+        {
+            if (!pool.TryTake(out var result)) result = new WorldPatchMeshJob();
+            result.Kinds = kinds; result.Full = full;
+            try
+            {
+                MaterialBlendResolver.WorkerPalette = palette;
+                var exposure = new WorldExposureCache(snapshot);
+                foreach (var chunk in active) exposure.PrepareChunk(chunk, false);
+                var query = new WorldSurfaceQuery(snapshot);
+                if ((kinds & 1) != 0)
+                {
+                    if (full) TerrainChunkMeshBuilder.Build(snapshot, x, z, size, null, query, exposure, result.Terrain, result.cells);
+                    TerrainChunkMeshBuilder.Build(snapshot, x, z, size, null, query, exposure, result.TerrainBoundary, result.cells, !full);
+                }
+                if ((kinds & 2) != 0)
+                {
+                    if (full) WaterChunkMeshBuilder.Build(snapshot, x, z, size, null, query, exposure, result.Water, result.cells, result.candidates);
+                    WaterChunkMeshBuilder.Build(snapshot, x, z, size, null, query, exposure, result.WaterBoundary, result.cells, result.candidates, !full);
+                }
+                return result;
+            }
+            catch { result.Return(); throw; }
+            finally { MaterialBlendResolver.WorkerPalette = null; }
+        }
+        internal void Return()
+        {
+            Terrain.Clear(); TerrainBoundary.Clear(); Water.Clear(); WaterBoundary.Clear();
+            cells.Clear(); candidates.Clear();
+            pool.Add(this);
+        }
+    }
+
     internal sealed class WorldMeshBuildScratch
     {
 
@@ -44,6 +89,13 @@ namespace MiniCivilization.World.Meshing
 
     internal sealed class MeshBuffers
     {
+        // 0: whole patch, 1: interior, 2: dependency boundary (two columns).
+        internal int Region;
+        internal bool IncludesColumn(int x, int z, int startX, int startZ, int size)
+        {
+            var boundary = x < startX + 2 || z < startZ + 2 || x >= startX + size - 2 || z >= startZ + size - 2;
+            return Region == 0 || (Region == 2) == boundary;
+        }
         internal TerrainCellMaterials TerrainMaterials { get; } = new();
 #if ENABLE_PROFILER
         private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Upload");
@@ -67,6 +119,7 @@ namespace MiniCivilization.World.Meshing
         public bool IsEmpty => positions.Count == 0;
         public void Clear()
         {
+            TerrainMaterials.Release();
             positions.Clear();
             normals.Clear();
             tangents.Clear();

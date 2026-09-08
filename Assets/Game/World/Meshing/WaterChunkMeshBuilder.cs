@@ -24,7 +24,7 @@ namespace MiniCivilization.World.Meshing
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
             List<ExposedCell> cells,
-            HashSet<CellCoordinate> candidateCells)
+            HashSet<CellCoordinate> candidateCells, bool collectCandidates = true)
         {
 #if ENABLE_PROFILER
             using var profilerScope = ProfileStage0.Auto();
@@ -34,6 +34,8 @@ namespace MiniCivilization.World.Meshing
             var startZ = patchZ * patchSize;
             var endX = startX + patchSize;
             var endZ = startZ + patchSize;
+            if (collectCandidates)
+            {
             exposureCache.CopyWaterCellsForPatch(
                 startX - 1,
                 startZ - 1,
@@ -49,12 +51,15 @@ namespace MiniCivilization.World.Meshing
                 cells,
                 candidateCells);
 
+            }
+
             for (var index = 0; index < cells.Count; index++)
             {
                 var coordinate = cells[index].Coordinate;
                 var x = coordinate.X;
                 var y = coordinate.Y;
                 var z = coordinate.Z;
+                if (!buffers.IncludesColumn(x, z, startX, startZ, patchSize)) continue;
                 var cell = world.GetCell(x, y, z);
                 if (!cell.HasWater
                     || !topology.TryResolveWater(x, y, z, out var profile))

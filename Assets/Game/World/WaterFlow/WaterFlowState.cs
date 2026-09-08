@@ -13,8 +13,45 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Dictionary<CellCoordinate, WaterData> stagedCells = new();
         private IReadOnlyList<WaterBody> waterBodies = Array.Empty<WaterBody>();
         private int nextBodyId = 1;
+        internal object TopologyGraph { get; set; }
+        private Func<int, int, int> graphLookup;
+
+        private readonly List<WaterBody> graphBodies = new();
+        private readonly Dictionary<int, int> graphBodyPositions = new();
+
+        internal void UpdateGraphBodies(IReadOnlyCollection<int> removed, IReadOnlyList<WaterBody> added,
+            Func<int, int, int> lookup)
+        {
+            if (graphLookup == null)
+            {
+                graphBodies.Clear(); graphBodyPositions.Clear();
+                waterBodyIdsByColumn.Clear(); waterBodiesById.Clear();
+                waterBodies = graphBodies;
+                graphLookup = lookup;
+            }
+            foreach (var id in removed)
+            {
+                if (!graphBodyPositions.Remove(id, out var index)) continue;
+                var lastIndex = graphBodies.Count - 1;
+                if (index != lastIndex)
+                {
+                    var last = graphBodies[lastIndex];
+                    graphBodies[index] = last;
+                    graphBodyPositions[last.Id] = index;
+                }
+                graphBodies.RemoveAt(lastIndex);
+                waterBodiesById.Remove(id);
+            }
+            foreach (var body in added)
+            {
+                graphBodyPositions.Add(body.Id, graphBodies.Count);
+                graphBodies.Add(body);
+                waterBodiesById.Add(body.Id, body);
+            }
+        }
 
         internal int GetIndexedWaterBodyId(int x, int z) =>
+            graphLookup != null ? graphLookup(x, z) :
             waterBodyIdsByColumn.TryGetValue(new CellColumnCoordinate(x, z), out var id) ? id : 0;
 
         internal int AllocateWaterBodyId() => nextBodyId++;
@@ -93,11 +130,7 @@ namespace MiniCivilization.World.WaterFlow
                 return 0;
             }
 
-            return waterBodyIdsByColumn.TryGetValue(
-                new CellColumnCoordinate(x, z),
-                out var id)
-                ? id
-                : 0;
+            return GetIndexedWaterBodyId(x, z);
         }
 
         public bool TryGetWaterBody(int x, int z, out WaterBody waterBody)
@@ -155,6 +188,9 @@ namespace MiniCivilization.World.WaterFlow
 
         internal void ReplaceWaterBodies(IReadOnlyList<WaterBody> bodies)
         {
+            graphLookup = null;
+            TopologyGraph = null;
+            graphBodies.Clear(); graphBodyPositions.Clear();
             waterBodies = bodies ?? Array.Empty<WaterBody>();
             waterBodyIdsByColumn.Clear();
             waterBodiesById.Clear();

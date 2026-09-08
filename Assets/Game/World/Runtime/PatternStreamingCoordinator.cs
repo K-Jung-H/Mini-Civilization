@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Generation.Patterns;
 using MiniCivilization.World.Persistence;
@@ -97,6 +98,27 @@ namespace MiniCivilization.World.Runtime
         private bool hasTarget;
         private ChunkCoordinate target;
         private bool disposed;
+        private readonly Dictionary<ChunkCoordinate, Task<GeneratedChunk>> cellBuilds = new();
+        private readonly HashSet<ChunkCoordinate> missingSavedChunks = new();
+        private readonly Dictionary<ChunkCoordinate, Task<Chunk>> loadBuilds = new();
+        private sealed class GeneratedChunk
+        {
+            internal Chunk Chunk;
+            internal IReadOnlyList<CellCoordinate> Sources;
+        }
+
+        private void StartCellBuild(ChunkCoordinate coordinate, PatternTilePair tile)
+        {
+            var settings = configuration.World;
+            cellBuilds.Add(coordinate, Task.Run(() =>
+            {
+                // The worker owns this WorldData; the live world's dictionaries are never shared.
+                var isolated = new WorldData(settings);
+                var result = materializer.Materialize(isolated, coordinate, tile);
+                isolated.TryGetChunk(coordinate, out var chunk);
+                return new GeneratedChunk { Chunk = chunk, Sources = result.SourceCells };
+            }));
+        }
 
         public PatternStreamingCoordinator(
             WorldRuntime runtime,
@@ -177,6 +199,7 @@ namespace MiniCivilization.World.Runtime
                 }
 
                 mapScheduler.Update();
+                CollectAbandonedCellBuilds();
                 ProcessUnloads();
                 ProcessPreparations();
                 ProcessActivations();
@@ -197,6 +220,13 @@ namespace MiniCivilization.World.Runtime
 
             disposed = true;
             mapScheduler.Dispose();
+            foreach (var task in cellBuilds.Values)
+                _ = task.ContinueWith(failed => { _ = failed.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+            cellBuilds.Clear();
+            foreach (var task in loadBuilds.Values)
+                _ = task.ContinueWith(failed => { _ = failed.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+            loadBuilds.Clear();
+            missingSavedChunks.Clear();
             renderChunks.Clear();
             updateChunks.Clear();
             prepareQueue.Clear();
@@ -269,6 +299,7 @@ namespace MiniCivilization.World.Runtime
             var count = Math.Min(unloadQueue.Count, configuration.ChunkUnloadPerFrame);
             for (var index = 0; index < count; index++)
             {
+                if (persistence != null && !persistence.CanAcceptWrites) break;
                 var coordinate = unloadQueue[0];
                 persistence?.SaveAndDetachChunk(coordinate);
                 runtime.ReleaseChunk(coordinate, unloadWorldData: true);
@@ -282,27 +313,64 @@ namespace MiniCivilization.World.Runtime
             using var profilerScope = ProfileStage2.Auto();
 #endif
             var completed = 0;
+            var probes = 0;
             for (var index = 0; index < prepareQueue.Count
+                 && index < configuration.MapBuildConcurrency
                  && completed < configuration.ChunkPreparePerFrame; index++)
             {
                 var coordinate = prepareQueue[index];
                 IReadOnlyList<CellCoordinate> sources = Array.Empty<CellCoordinate>();
-                var loaded = runtime.Data.IsChunkLoaded(coordinate)
-                    || persistence?.TryLoadChunk(coordinate) == true;
+                cellBuilds.TryGetValue(coordinate, out var build);
+                var loaded = runtime.Data.IsChunkLoaded(coordinate);
+                if (!loaded && build == null && !missingSavedChunks.Contains(coordinate))
+                {
+                    if (!loadBuilds.TryGetValue(coordinate, out var load))
+                    {
+                        if (cellBuilds.Count + loadBuilds.Count >= configuration.MapBuildConcurrency) continue;
+                        if (probes++ >= configuration.ChunkPreparePerFrame) break;
+                        load = persistence?.LoadChunkAsync(coordinate) ?? Task.FromResult<Chunk>(null);
+                        loadBuilds.Add(coordinate, load);
+                    }
+                    if (!load.IsCompleted || index != 0) continue;
+                    var saved = load.GetAwaiter().GetResult();
+                    loadBuilds.Remove(coordinate);
+                    if (saved == null) missingSavedChunks.Add(coordinate);
+                    else
+                    {
+                        runtime.Data.AttachGeneratedChunk(saved);
+                        loaded = true;
+                    }
+                }
                 if (!loaded)
                 {
-                    if (!runtime.PatternMaps.TryGetPair(
-                            configuration.PatternTiles.GetKeyForChunk(coordinate), out var tile))
+                    if (build != null)
+                    {
+                        if (!build.IsCompleted || index != 0) continue;
+                        var result = build.GetAwaiter().GetResult();
+                        cellBuilds.Remove(coordinate);
+                        runtime.BeginChunkPreparation(coordinate);
+                        runtime.Data.AttachGeneratedChunk(result.Chunk);
+                        sources = result.Sources;
+                        persistence?.MarkDirty(coordinate);
+                        missingSavedChunks.Remove(coordinate);
+                    }
+                    else
+                    {
+                        if (cellBuilds.Count + loadBuilds.Count >= configuration.MapBuildConcurrency) continue;
+                        if (!runtime.PatternMaps.TryGetPair(
+                                configuration.PatternTiles.GetKeyForChunk(coordinate), out var tile))
+                            continue;
+                        StartCellBuild(coordinate, tile);
                         continue;
-                    runtime.BeginChunkPreparation(coordinate);
-                    sources = materializer.Materialize(runtime.Data, coordinate, tile).SourceCells;
-                    persistence?.MarkDirty(coordinate);
+                    }
                 }
                 else
                 {
+                    if (index != 0) continue;
                     runtime.BeginChunkPreparation(coordinate);
                 }
 
+                if (index != 0) continue;
                 runtime.CompleteChunkPreparation(coordinate, sources);
                 if (loaded) persistence?.RestoreWaterFrontier(coordinate);
                 prepareQueue.RemoveAt(index--);
@@ -316,6 +384,26 @@ namespace MiniCivilization.World.Runtime
             }
         }
 
+        private void CollectAbandonedCellBuilds()
+        {
+            abandonedCellBuilds.Clear();
+            foreach (var pair in cellBuilds)
+                if ((prepareQueue.IndexOf(pair.Key) < 0 || prepareQueue.IndexOf(pair.Key) >= configuration.MapBuildConcurrency) && pair.Value.IsCompleted)
+                {
+                    _ = pair.Value.Exception;
+                    abandonedCellBuilds.Add(pair.Key);
+                }
+            foreach (var coordinate in abandonedCellBuilds) cellBuilds.Remove(coordinate);
+            abandonedCellBuilds.Clear();
+            foreach (var pair in loadBuilds)
+                if ((prepareQueue.IndexOf(pair.Key) < 0 || prepareQueue.IndexOf(pair.Key) >= configuration.MapBuildConcurrency) && pair.Value.IsCompleted)
+                { _ = pair.Value.Exception; abandonedCellBuilds.Add(pair.Key); }
+            foreach (var coordinate in abandonedCellBuilds) loadBuilds.Remove(coordinate);
+            missingSavedChunks.IntersectWith(renderChunks);
+        }
+
+        private readonly List<ChunkCoordinate> abandonedCellBuilds = new();
+
         private void ProcessActivations()
         {
 #if ENABLE_PROFILER
@@ -325,6 +413,7 @@ namespace MiniCivilization.World.Runtime
             for (var index = 0; index < count; index++)
             {
                 var coordinate = activateQueue[0];
+                if (prepareQueue.Count > 0 && ChunkDemand.ComparePriority(prepareQueue[0], coordinate, target) < 0) break;
                 runtime.ActivateChunk(coordinate);
                 runtime.SetChunkSimulationEnabled(coordinate, updateChunks.Contains(coordinate));
                 activateQueue.RemoveAt(0);

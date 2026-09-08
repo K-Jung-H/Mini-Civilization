@@ -73,6 +73,8 @@ namespace MiniCivilization.World.Runtime
         }
 
         internal ulong NextEntityId => nextEntityId;
+        internal EntityPersistentState CapturePersistentState(EntityId id) =>
+            entitiesById.TryGetValue(id, out var entity) ? CapturePersistentState(entity) : null;
 
         internal void RestoreNextEntityId(ulong value)
         {

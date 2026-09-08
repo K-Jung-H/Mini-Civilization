@@ -21,6 +21,8 @@ namespace MiniCivilization.World.WaterFlow
 
         private readonly HashSet<CellColumnCoordinate> pendingBodyColumns = new();
         private readonly HashSet<int> affectedWaterBodyIds = new();
+        private readonly HashSet<ChunkCoordinate> topologyChunks = new();
+        private readonly WaterBodyResolver.StreamingScratch topologyScratch = new();
         private WorldRuntime boundRuntime;
         private WorldData boundWorld;
         private bool waterBodyTopologyRefreshRequested;
@@ -92,21 +94,14 @@ namespace MiniCivilization.World.WaterFlow
 
             CommitResolvedChanges(result);
 
-            if (result.HasTopologyChanges
-                || waterBodyTopologyRefreshRequested)
+            if (result.HasTopologyChanges || waterBodyTopologyRefreshRequested
+                || result.HasRenderChanges || waterBodyMetricsRefreshRequested)
             {
-                State.ReplaceWaterBodies(
-                    WaterBodyResolver.ResolvePrepared(boundRuntime));
-            }
-            else if (result.HasRenderChanges
-                || waterBodyMetricsRefreshRequested)
-            {
-                WaterBodyResolver.RefreshMetrics(
-                    boundWorld,
-                    boundRuntime.SurfaceCache,
-                    State,
-                    pendingBodyColumns,
-                    affectedWaterBodyIds);
+                topologyChunks.Clear();
+                foreach (var column in pendingBodyColumns)
+                    topologyChunks.Add(WorldCoordinateUtility.ToChunk(column.X, column.Z, boundWorld.ChunkSizeX));
+                WaterBodyResolver.RefreshStreaming(boundRuntime, topologyChunks, topologyScratch);
+                topologyChunks.Clear();
             }
 
             pendingBodyColumns.Clear();

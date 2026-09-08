@@ -184,6 +184,33 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Func<CellCoordinate, bool> canProcessCell;
         private bool hasRunnableFrontier;
         private int cursor;
+        private readonly Dictionary<ChunkCoordinate, CellCoordinate[]> savedFrontierChunks = new();
+        private readonly Dictionary<ChunkCoordinate, List<CellCoordinate>> activeByChunk = new();
+        private readonly HashSet<ChunkCoordinate> dirtyFrontierChunks = new();
+
+        internal Dictionary<ChunkCoordinate, CellCoordinate[]> CaptureFrontierChunks()
+        {
+            foreach (var chunk in dirtyFrontierChunks)
+            {
+                var cells = new HashSet<CellCoordinate>();
+                if (chunkStates.TryGetValue(chunk, out var state)) cells.UnionWith(state.Frontier);
+                if (activeByChunk.TryGetValue(chunk, out var active)) cells.UnionWith(active);
+                if (cells.Count == 0) savedFrontierChunks.Remove(chunk);
+                else { var values = new CellCoordinate[cells.Count]; cells.CopyTo(values); savedFrontierChunks[chunk] = values; }
+            }
+            dirtyFrontierChunks.Clear();
+            return new Dictionary<ChunkCoordinate, CellCoordinate[]>(savedFrontierChunks);
+        }
+
+        private void ClearActiveWave()
+        {
+            foreach (var chunk in activeByChunk.Keys) dirtyFrontierChunks.Add(chunk);
+            activeByChunk.Clear();
+            activeWave.Clear();
+        }
+
+        private readonly Func<CellCoordinate[]> captureFrontier;
+        private readonly Func<bool> hasPendingSnapshot;
 
         public bool HasWork => activeWave.Count > 0 || chunkStates.Count > 0;
         public bool HasRunnableWork => activeWave.Count > 0
@@ -214,6 +241,8 @@ namespace MiniCivilization.World.WaterFlow
 
             this.chunkSizeXZ = chunkSizeXZ;
             this.canProcessCell = canProcessCell;
+            captureFrontier = CaptureFrontier;
+            hasPendingSnapshot = () => HasWork;
         }
 
         public void RestoreFrontier(
@@ -223,6 +252,7 @@ namespace MiniCivilization.World.WaterFlow
         {
             ValidateWorldAndState(world, state);
             CancelActiveWave(state, requeue: false);
+            foreach (var chunk in chunkStates.Keys) dirtyFrontierChunks.Add(chunk);
             chunkStates.Clear();
             if (frontier != null)
             {
@@ -289,6 +319,7 @@ namespace MiniCivilization.World.WaterFlow
             if (chunkStates.TryGetValue(coordinate, out var chunkState))
             {
                 chunkStates.Remove(coordinate);
+                dirtyFrontierChunks.Add(coordinate);
                 target.AddRange(chunkState.Frontier);
                 target.Sort();
             }
@@ -406,7 +437,7 @@ namespace MiniCivilization.World.WaterFlow
             BuildApplySet(world, state);
             ApplyStagedState(world, state);
             BuildNextWave(world);
-            activeWave.Clear();
+            ClearActiveWave();
             cursor = 0;
             AddFrontier(nextWave);
             RefreshRunnableFrontier();
@@ -963,7 +994,7 @@ namespace MiniCivilization.World.WaterFlow
 
         private void BuildActiveWave()
         {
-            activeWave.Clear();
+            ClearActiveWave();
             emptyChunks.Clear();
             foreach (var pair in chunkStates)
             {
@@ -982,6 +1013,9 @@ namespace MiniCivilization.World.WaterFlow
                     var cell = selectedCells[index];
                     chunkState.Frontier.Remove(cell);
                     activeWave.Add(cell);
+                    dirtyFrontierChunks.Add(pair.Key);
+                    if (!activeByChunk.TryGetValue(pair.Key, out var active)) activeByChunk.Add(pair.Key, active = new List<CellCoordinate>());
+                    active.Add(cell);
                 }
 
                 if (chunkState.Frontier.Count == 0)
@@ -1010,7 +1044,7 @@ namespace MiniCivilization.World.WaterFlow
                 AddFrontier(activeWave);
             }
 
-            activeWave.Clear();
+            ClearActiveWave();
             cursor = 0;
             result.Clear();
         }
@@ -1038,7 +1072,7 @@ namespace MiniCivilization.World.WaterFlow
                 chunkStates.Add(chunk, state);
             }
 
-            state.Frontier.Add(cell);
+            if (state.Frontier.Add(cell)) dirtyFrontierChunks.Add(chunk);
         }
 
         private bool streamingChanges;
@@ -1086,22 +1120,20 @@ namespace MiniCivilization.World.WaterFlow
                 frontierChangedDuringStreaming = true;
                 return;
             }
-            restartWave.Clear();
-            for (var index = 0; index < activeWave.Count; index++)
-            {
-                restartWave.Add(activeWave[index]);
-            }
-
-            foreach (var chunkState in chunkStates.Values)
-            {
-                restartWave.UnionWith(chunkState.Frontier);
-            }
-
-            var frontier = new CellCoordinate[restartWave.Count];
-            restartWave.CopyTo(frontier);
-            Array.Sort(frontier);
-            world.WaterFlowSchedule.ReplaceFrontier(frontier);
+            world.WaterFlowSchedule.InvalidateSnapshot(captureFrontier, hasPendingSnapshot);
             state.IsRecalculating = HasRunnableWork;
+        }
+
+        private CellCoordinate[] CaptureFrontier()
+        {
+            var parts = CaptureFrontierChunks();
+            var count = 0;
+            foreach (var part in parts.Values) count += part.Length;
+            var frontier = new CellCoordinate[count];
+            var offset = 0;
+            foreach (var part in parts.Values) { part.CopyTo(frontier, offset); offset += part.Length; }
+            Array.Sort(frontier);
+            return frontier;
         }
 
         private bool CanProcess(CellCoordinate cell) =>
@@ -1204,6 +1236,7 @@ namespace MiniCivilization.World.WaterFlow
                     coordinate.Y - 1,
                     coordinate.Z,
                     out var below)
+                && below.Water.Role != WaterRole.Source
                 && WaterFlowReachability.CanFlowDown(
                     coordinate.Y,
                     below,

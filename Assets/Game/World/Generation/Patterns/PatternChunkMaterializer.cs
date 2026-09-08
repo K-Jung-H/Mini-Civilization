@@ -104,6 +104,13 @@ namespace MiniCivilization.World.Generation.Patterns
                     sourceCells);
             }
 
+            // Source roles remain in every water cell; only runnable sources enter the work list.
+            for (var index = sourceCells.Count - 1; index >= 0; index--)
+                if (!MiniCivilization.World.WaterFlow.WaterSourceFrontierSelector.IsNeeded(world, sourceCells[index]))
+                {
+                    sourceCells[index] = sourceCells[sourceCells.Count - 1];
+                    sourceCells.RemoveAt(sourceCells.Count - 1);
+                }
             return new ChunkMaterializationResult(coordinate, sourceCells);
         }
 

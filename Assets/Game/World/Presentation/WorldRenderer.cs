@@ -104,6 +104,7 @@ namespace MiniCivilization.World.Presentation
                     preferCreate = true;
                 }
             }
+            WorldRenderPatchView.ProcessMeshJobs(boundWorld, priorityTarget, meshPatchPerFrame);
             MeshWorkMillisecondsLastFrame = (System.Diagnostics.Stopwatch.GetTimestamp() - started)
                 * 1000d / System.Diagnostics.Stopwatch.Frequency;
         }
@@ -117,12 +118,20 @@ namespace MiniCivilization.World.Presentation
             foreach (var patch in readyBoundaryRefreshes)
             {
                 boundaryRefreshes.Remove(patch);
-                if (renderedPatchViews.ContainsKey(patch)) QueueFullPatch(patch);
+                if (renderedPatchViews.ContainsKey(patch) && !pendingFullPatches.Contains(patch))
+                {
+                    QueueFullPatch(patch);
+                    boundaryOnlyPatches.Add(patch);
+                }
             }
         }
 
+        private readonly HashSet<Vector2Int> boundaryOnlyPatches = new();
+
         private void QueueFullPatch(Vector2Int patch)
         {
+            if (renderedPatchViews.TryGetValue(patch, out var view)) view.InvalidatePendingMesh();
+            boundaryOnlyPatches.Remove(patch);
             boundaryRefreshes.Remove(patch);
             pendingFullPatches.Add(patch);
             pendingTerrainPatches.Remove(patch);
@@ -288,6 +297,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
+                view.InvalidatePendingMesh();
                 if (patch == ToPatchCoordinate(coordinate))
                 {
                     // Content inside a shared patch must appear/disappear without a debounce.
@@ -396,6 +406,7 @@ namespace MiniCivilization.World.Presentation
             const WorldChangeType waterChanges =
                 WorldChangeType.WaterTopology
                 | WorldChangeType.WaterSurface;
+
             var rebuildFull =
                 (changeSet.ChangeTypes & geometryChanges) != 0
                 || (changeSet.ChangeTypes & materialChanges) != 0;
@@ -425,6 +436,8 @@ namespace MiniCivilization.World.Presentation
                     var patch = new Vector2Int(
                         startX / activeRenderPatchSize,
                         startZ / activeRenderPatchSize);
+                    if (renderedPatchViews.TryGetValue(patch, out var changedView)) changedView.InvalidatePendingMesh();
+                    boundaryOnlyPatches.Remove(patch);
                     if (rebuildFull)
                     {
                         pendingFullPatches.Add(patch);
@@ -476,6 +489,11 @@ namespace MiniCivilization.World.Presentation
                     {
                         var view = renderedPatchViews[patch];
                         RebuiltPatchesLastFrame++;
+                        if (boundaryOnlyPatches.Remove(patch))
+                        {
+                            view.RebuildBoundary(boundWorld, surfaceCatalog, terrainMaterial, waterMaterial, exposureCache);
+                            continue;
+                        }
                         BuildPatch(
                             view,
                             patch.x,
@@ -645,6 +663,7 @@ namespace MiniCivilization.World.Presentation
                         z / activeRenderPatchSize);
                     if (!pendingFullPatches.Contains(patch))
                     {
+                        if (renderedPatchViews.TryGetValue(patch, out var view)) view.InvalidatePendingMesh();
                         pendingTerrainPatches.Add(patch);
                     }
                 }
@@ -689,6 +708,7 @@ namespace MiniCivilization.World.Presentation
             pendingRoadPatches.Clear();
             pendingCreatePatches.Clear();
             boundaryRefreshes.Clear();
+            boundaryOnlyPatches.Clear();
             readyBoundaryRefreshes.Clear();
             preferCreate = true;
             CoalescedBoundaryRequests = 0;
@@ -790,6 +810,7 @@ namespace MiniCivilization.World.Presentation
 
         private void ReturnPatchToPool(Vector2Int patch)
         {
+            boundaryOnlyPatches.Remove(patch);
 #if ENABLE_PROFILER
             using var profilerScope = ProfileStage3.Auto();
 #endif

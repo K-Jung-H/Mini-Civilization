@@ -95,6 +95,8 @@ internal static class StreamingRuntimeChecks
         DryStreamingCheck();
         DependencyCheck();
         MaterialCacheCheck();
+        FrontierSnapshotCheck();
+        SnapshotAndPartitionCheck();
     }
 
     static void AllocationCheck()
@@ -232,5 +234,77 @@ internal static class StreamingRuntimeChecks
             Check(!materials.HasUniformTop(), "Biome seam incorrectly takes uniform fast path");
         }
         Console.WriteLine("PASS material cache: biome boundaries, cliff overrides, non-grid vertices, per-cell reset");
+    }
+
+    static void SnapshotAndPartitionCheck()
+    {
+        var runtime = WorldRuntime.Create(NewWorld(8));
+        for (var z = -1; z <= 1; z++) for (var x = -1; x <= 1; x++) Add(runtime, new ChunkCoordinate(x, z), true);
+        var world = runtime.Data;
+        var snapshot = NewWorld(8);
+        var active = new System.Collections.Generic.List<ChunkCoordinate>();
+        for (var z = -1; z <= 1; z++) for (var x = -1; x <= 1; x++)
+        {
+            var c = new ChunkCoordinate(x, z);
+            world.TryGetChunk(c, out var chunk);
+            snapshot.AttachGeneratedChunk(chunk.CopyCells()); active.Add(c);
+        }
+        world.TryGetChunk(default, out var originalChunk);
+        snapshot.TryGetChunk(default, out var snapshotChunk);
+        var storage = typeof(ChunkSection).GetField("cells", BindingFlags.Instance | BindingFlags.NonPublic);
+        Check(ReferenceEquals(storage.GetValue(originalChunk.SectionsByY[0]), storage.GetValue(snapshotChunk.SectionsByY[0])), "snapshot copied entire unchanged cell array");
+        world.SetCellBulk(0, 0, 0, default);
+        Check(!ReferenceEquals(storage.GetValue(originalChunk.SectionsByY[0]), storage.GetValue(snapshotChunk.SectionsByY[0])), "live write failed to detach shared storage");
+        Check(snapshot.GetCell(0, 0, 0).HasWater, "live bulk write mutated shared snapshot");
+        snapshot.SetCellBulk(1, 0, 0, default);
+        Check(world.GetCell(1, 0, 0).HasWater, "snapshot bulk write mutated live cells");
+        var exposure = new WorldExposureCache(snapshot);
+        foreach (var c in active) exposure.PrepareChunk(c, false);
+        var query = new WorldSurfaceQuery(snapshot);
+        var cells = new System.Collections.Generic.List<ExposedCell>();
+        var candidates = new System.Collections.Generic.HashSet<CellCoordinate>();
+        var terrain = new MeshBuffers(); var water = new MeshBuffers();
+        TerrainChunkMeshBuilder.Build(snapshot, 0, 0, 8, null, query, exposure, terrain, cells);
+        WaterChunkMeshBuilder.Build(snapshot, 0, 0, 8, null, query, exposure, water, cells, candidates);
+        var job = System.Threading.Tasks.Task.Run(() => WorldPatchMeshJob.Build(snapshot, active, null, 0, 0, 8, 3, true)).GetAwaiter().GetResult();
+        Check(Triangles(terrain).SequenceEqual(Triangles(job.Terrain, job.TerrainBoundary)), "terrain partition changed triangle attributes");
+        Check(Triangles(water).SequenceEqual(Triangles(job.Water, job.WaterBoundary)), "water partition changed triangle attributes");
+        var boundary = WorldPatchMeshJob.Build(snapshot, active, null, 0, 0, 8, 3, false);
+        Check(Triangles(boundary.TerrainBoundary).SequenceEqual(Triangles(job.TerrainBoundary)), "boundary-only terrain differs");
+        Check(Triangles(boundary.WaterBoundary).SequenceEqual(Triangles(job.WaterBoundary)), "boundary-only water differs");
+        boundary.Return(); job.Return();
+        Console.WriteLine("PASS copy-on-write isolation and worker interior/boundary triangle attributes after single candidate collection");
+    }
+    static string[] Triangles(params MeshBuffers[] buffers)
+    {
+        var result = new System.Collections.Generic.List<string>();
+        var fields = typeof(MeshBuffers).GetFields(BindingFlags.Instance | BindingFlags.NonPublic);
+        foreach (var buffer in buffers)
+        {
+            var indices = (System.Collections.IList)fields.Single(f => f.Name == "indices").GetValue(buffer);
+            var attributes = fields.Where(f => f.Name != "indices" && typeof(System.Collections.IList).IsAssignableFrom(f.FieldType))
+                .Select(f => (System.Collections.IList)f.GetValue(buffer)).ToArray();
+            for (var i = 0; i < indices.Count; i += 3)
+                result.Add(string.Join("/", Enumerable.Range(i, 3).Select(k => string.Join("|", attributes.Select(a => a[(int)indices[k]])))));
+        }
+        return result.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+    }
+
+    static void FrontierSnapshotCheck()
+    {
+        var runtime = WorldRuntime.Create(NewWorld());
+        Add(runtime, default, true);
+        var resolver = runtime.WaterFlowResolver;
+        resolver.RestoreFrontier(runtime.Data, runtime.WaterFlowState, new[] { new CellCoordinate(1, 0, 1) });
+        var schedule = runtime.Data.WaterFlowSchedule;
+        Check(schedule.HasPendingFlow, "Pending flag forces no snapshot but must remain accurate");
+        var first = schedule.FrontierCells;
+        Check(ReferenceEquals(first, schedule.FrontierCells), "Repeated reads duplicate snapshot");
+        resolver.RestoreChunkFrontier(runtime.Data, runtime.WaterFlowState, new[] { new CellCoordinate(2, 0, 2) });
+        var second = schedule.FrontierCells;
+        Check(first.Count == 1 && second.Count == 2, "Published snapshot mutated or stale");
+        resolver.RestoreFrontier(runtime.Data, runtime.WaterFlowState, Array.Empty<CellCoordinate>());
+        Check(!schedule.HasPendingFlow && schedule.FrontierCells.Count == 0, "Empty frontier snapshot stale");
+        Console.WriteLine("PASS lazy frontier snapshots: repeat reads, immutable prior snapshot, invalidation and empty state");
     }
 }

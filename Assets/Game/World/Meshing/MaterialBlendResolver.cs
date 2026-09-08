@@ -11,6 +11,7 @@ namespace MiniCivilization.World.Meshing
         private WorldData world;
         private WorldSurfaceCatalog catalog;
         private int x, y, z;
+        internal void Release() { world = null; catalog = null; resolved = 0; }
 
         internal void BeginCell(WorldData world, WorldSurfaceCatalog catalog, int x, int y, int z)
         {
@@ -55,6 +56,16 @@ namespace MiniCivilization.World.Meshing
 
     public static class MaterialBlendResolver
     {
+        [System.ThreadStatic] internal static SurfaceAppearance[] WorkerPalette;
+        internal static SurfaceAppearance[] CapturePalette(WorldSurfaceCatalog catalog)
+        {
+            var result = new SurfaceAppearance[65];
+            for (var biome = 0; biome < 8; biome++)
+            for (var surface = 0; surface < 8; surface++)
+                result[biome * 8 + surface] = ResolveTerrainAppearance(catalog, (TerrainBiome)biome, (SurfaceType)surface);
+            result[64] = ResolveWaterAppearance(catalog);
+            return result;
+        }
         private const float BlendBand = 0.2f;
         private const float TotalBlendWidth = BlendBand * 2f;
 
@@ -136,6 +147,7 @@ namespace MiniCivilization.World.Meshing
             TerrainBiome biome,
             SurfaceType surface)
         {
+            if (WorkerPalette != null) return WorkerPalette[(int)biome * 8 + (int)surface];
             return catalog != null
                 ? catalog.ResolveTerrain(biome, surface)
                 : DefaultSurfacePalette.ResolveTerrain(biome, surface);
@@ -144,6 +156,7 @@ namespace MiniCivilization.World.Meshing
         internal static SurfaceAppearance ResolveWaterAppearance(
             WorldSurfaceCatalog catalog)
         {
+            if (WorkerPalette != null) return WorkerPalette[64];
             return catalog != null
                 ? catalog.ResolveWater()
                 : DefaultSurfacePalette.ResolveWater();

@@ -38,6 +38,35 @@ internal static class StreamingChecks
         Check(runtime.Prepared.Skip(preparedBefore).All(c => !c.Equals(retained)), "retained active chunk not prepared again");
         Check(persistence.FlushCount == 2, "save state committed once per unload batch");
         Console.WriteLine("PASS production streaming coordinator: independent limits, nearest activation, farthest unload, target reversal, immediate simulation exclusion, batch save");
+        var delayedRuntime = new WorldRuntime(new WorldData(world));
+        var delayedStore = new WorldPersistenceService(delayedRuntime);
+        var nearestLoad = new System.Threading.Tasks.TaskCompletionSource<Chunk>();
+        delayedStore.Loader = c => c.Equals(default(ChunkCoordinate)) ? nearestLoad.Task : System.Threading.Tasks.Task.FromResult<Chunk>(null);
+        using var delayed = new PatternStreamingCoordinator(delayedRuntime, config, delayedStore);
+        for (var i = 0; i < 100; i++) delayed.Update(default);
+        Check(delayedRuntime.Activated.Count == 0, "far completion cannot overtake delayed nearest load");
+        Check(delayedStore.LoadCalls.Count <= config.MapBuildConcurrency && delayedStore.LoadCalls.Values.All(n => n == 1), "pending loads bounded and never queried repeatedly");
+        nearestLoad.SetResult(null);
+        var drain = System.Diagnostics.Stopwatch.StartNew();
+        while (delayedRuntime.Activated.Count < 9 && drain.Elapsed.TotalSeconds < 20) { delayed.Update(default); System.Threading.Thread.Yield(); }
+        Check(delayedRuntime.Activated.Count == 9 && delayedStore.LoadCalls.Values.All(n => n == 1), "negative save lookup performed once per chunk");
+        Check(delayedRuntime.Activated.SequenceEqual(ChunkDemand.Build(delayedRuntime.Data, default, 1)), "reversed completion retains nearest activation order");
+        Console.WriteLine("PASS delayed persistence: bounded admission, one negative lookup, nearest activation despite reversed completion");
+        var generated = new WorldRuntime(new WorldData(world));
+        using var asyncCoordinator = new PatternStreamingCoordinator(generated, config);
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (generated.Activated.Count < 9 && deadline.Elapsed.TotalSeconds < 20)
+        {
+            asyncCoordinator.Update(default);
+            System.Threading.Thread.Yield();
+        }
+        Check(generated.Activated.SequenceEqual(ChunkDemand.Build(generated.Data, default, 1)), "async activation preserves full distance order");
+        Check(generated.Activated.Count == 9, "asynchronous materialization drains actual generated chunks");
+        Check(generated.Prepared.All(c => generated.Data.IsChunkLoaded(c)), "only complete worker buffers become ready");
+        asyncCoordinator.Update(new ChunkCoordinate(12, 12));
+        asyncCoordinator.Update(default);
+        Check(generated.ChunkRuntimes.Keys.All(c => Math.Abs(c.X) <= 1 && Math.Abs(c.Z) <= 1), "obsolete jobs not attached after target reversal");
+        Console.WriteLine("PASS asynchronous Cell worker: actual maps, completion, target reversal");
     }
     private static void Check(bool condition, string message)
     { if (!condition) throw new InvalidOperationException(message); }
@@ -76,7 +105,19 @@ namespace MiniCivilization.World.Persistence
         private readonly WorldRuntime runtime;
         private bool dirty;
         internal int FlushCount;
+        internal Func<ChunkCoordinate, System.Threading.Tasks.Task<Chunk>> Loader;
+        internal readonly Dictionary<ChunkCoordinate, int> LoadCalls = new();
+        internal bool CanAcceptWrites => true;
         internal WorldPersistenceService(WorldRuntime runtime) { this.runtime = runtime; }
+        internal System.Threading.Tasks.Task<Chunk> LoadChunkAsync(ChunkCoordinate c)
+        {
+            LoadCalls[c] = LoadCalls.TryGetValue(c, out var count) ? count + 1 : 1;
+            if (Loader != null) return Loader(c);
+            var isolated = new WorldData(runtime.Data.Settings);
+            isolated.EnsureChunkLoaded(c);
+            isolated.TryGetChunk(c, out var chunk);
+            return System.Threading.Tasks.Task.FromResult(chunk);
+        }
         internal bool TryLoadChunk(ChunkCoordinate c) { runtime.Data.EnsureChunkLoaded(c); return true; }
         internal void MarkDirty(ChunkCoordinate c) { }
         internal void RestoreWaterFrontier(ChunkCoordinate c) { }

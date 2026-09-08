@@ -179,6 +179,7 @@ namespace MiniCivilization.World.Persistence
 
         private void OnDestroy()
         {
+            persistence?.CompleteWrites();
             if (isTemporarySession)
             {
                 repository?.DeletePackage();

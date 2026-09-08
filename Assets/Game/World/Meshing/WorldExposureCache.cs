@@ -42,6 +42,7 @@ namespace MiniCivilization.World.Meshing
         }
 
         public int PreparedChunkCount => preparedChunks.Count;
+        internal bool IsPrepared(ChunkCoordinate coordinate) => preparedChunks.Contains(coordinate);
         public int PreparedSectionCount => sections.Count;
 
         public void PrepareChunk(ChunkCoordinate coordinate, bool refreshNeighbors = true)

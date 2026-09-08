@@ -25,7 +25,7 @@ namespace MiniCivilization.World.Meshing
             WorldSurfaceQuery topology,
             WorldExposureCache exposureCache,
             MeshBuffers buffers,
-            List<ExposedCell> cells)
+            List<ExposedCell> cells, bool collectCandidates = true)
         {
 #if ENABLE_PROFILER
             using var profilerScope = ProfileStage0.Auto();
@@ -36,6 +36,8 @@ namespace MiniCivilization.World.Meshing
             var endX = startX + patchSize;
             var endZ = startZ + patchSize;
 
+            if (collectCandidates)
+            {
             exposureCache.CopySolidCellsForPatch(
                 startX,
                 startZ,
@@ -43,12 +45,15 @@ namespace MiniCivilization.World.Meshing
                 endZ,
                 cells);
 
+            }
+
             for (var index = 0; index < cells.Count; index++)
             {
                 var coordinate = cells[index].Coordinate;
                 var x = coordinate.X;
                 var y = coordinate.Y;
                 var z = coordinate.Z;
+                if (!buffers.IncludesColumn(x, z, startX, startZ, patchSize)) continue;
                 var cell = world.GetCell(x, y, z);
                 var exposure = cells[index].Exposure;
                 var materials = buffers.TerrainMaterials;

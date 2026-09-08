@@ -108,103 +108,204 @@ namespace MiniCivilization.World.Presentation
                     waterMaterial);
             }
 
-            var terrainBuffers = TerrainChunkMeshBuilder.Build(
-                world,
-                patchX,
-                patchZ,
-                patchSize,
-                catalog,
-                surfaceQuery,
-                exposureCache,
-                scratch.Terrain,
-                scratch.SolidCells);
-            terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
-                $"Terrain [{patchX}, {patchZ}]",
-                terrainFilter.sharedMesh);
-            terrainRenderer.sharedMaterial = terrainMaterial;
-            terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
-            terrainRenderer.receiveShadows = true;
-            terrainRenderer.enabled = !terrainBuffers.IsEmpty;
-            CaptureStreamingDependencies(world);
+            RequestMeshes(world, catalog, terrainMaterial, waterMaterial, exposureCache, 3, false);
             RebuildRoad(world, roadTopology, roadVisualCatalog);
-
-            var waterBuffers = WaterChunkMeshBuilder.Build(
-                world,
-                patchX,
-                patchZ,
-                patchSize,
-                catalog,
-                surfaceQuery,
-                exposureCache,
-                scratch.Water,
-                scratch.WaterCells,
-                scratch.WaterCellsSet);
-            waterFilter.sharedMesh = waterBuffers.CreateMesh(
-                $"Water [{patchX}, {patchZ}]",
-                waterFilter.sharedMesh);
-            waterRenderer.sharedMaterial = waterMaterial;
-            waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
-            waterRenderer.receiveShadows = true;
-            waterRenderer.enabled = !waterBuffers.IsEmpty;
-
         }
 
-        internal void RebuildWater(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            Material waterMaterial,
-            WorldSurfaceQuery surfaceQuery,
-            WorldExposureCache exposureCache,
-            WorldMeshBuildScratch scratch)
+        internal void RebuildWater(WorldData world, WorldSurfaceCatalog catalog, Material waterMaterial,
+            WorldSurfaceQuery surfaceQuery, WorldExposureCache exposureCache, WorldMeshBuildScratch scratch) =>
+            RequestMeshes(world, catalog, null, waterMaterial, exposureCache, 2, false);
+
+        internal void RebuildTerrain(WorldData world, WorldSurfaceCatalog catalog, Material terrainMaterial,
+            WorldSurfaceQuery surfaceQuery, WorldExposureCache exposureCache, WorldMeshBuildScratch scratch) =>
+            RequestMeshes(world, catalog, terrainMaterial, null, exposureCache, 1, false);
+
+        internal void RebuildBoundary(WorldData world, WorldSurfaceCatalog catalog, Material terrainMaterial,
+            Material waterMaterial, WorldExposureCache exposureCache) =>
+            RequestMeshes(world, catalog, terrainMaterial, waterMaterial, exposureCache, 3, true);
+
+        private static readonly System.Collections.Generic.HashSet<WorldRenderPatchView> pendingJobs = new();
+        internal static void ProcessMeshJobs(WorldData world, ChunkCoordinate target, int budget)
         {
-            EnsureChildren();
-            var waterBuffers = WaterChunkMeshBuilder.Build(
-                world,
-                patchX,
-                patchZ,
-                patchSize,
-                catalog,
-                surfaceQuery,
-                exposureCache,
-                scratch.Water,
-                scratch.WaterCells,
-                scratch.WaterCellsSet);
-            waterFilter.sharedMesh = waterBuffers.CreateMesh(
-                $"Water [{patchX}, {patchZ}]",
-                waterFilter.sharedMesh);
-            waterRenderer.sharedMaterial = waterMaterial;
-            waterRenderer.shadowCastingMode = ShadowCastingMode.Off;
-            waterRenderer.receiveShadows = true;
-            waterRenderer.enabled = !waterBuffers.IsEmpty;
+            if (world == null) return;
+            // Only requested jobs participate; dormant views have no Update callback.
+            while (true)
+            {
+                WorldRenderPatchView stale = null;
+                foreach (var view in pendingJobs)
+                    if (ReferenceEquals(view.requestedWorld, world) && view.awaitingRefresh && view.meshTask != null && view.meshTask.IsCompleted)
+                    { stale = view; break; }
+                if (stale == null) break;
+                stale.CompleteMesh(false);
+            }
+            for (var i = 0; i < budget; i++)
+            {
+                var nearest = FindNearest(world, target, false);
+                if (nearest == null || nearest.meshTask == null || !nearest.meshTask.IsCompleted) break;
+                nearest.CompleteMesh();
+            }
+            for (var i = 0; i < budget; i++)
+            {
+                var nearest = FindNearest(world, target, true);
+                if (nearest == null) break;
+                if (!nearest.TryStartMesh())
+                {
+                    // A target change can leave both slots occupied by farther completed work.
+                    // Retire one such result without displaying it, then admit the nearer request.
+                    WorldRenderPatchView obsolete = null;
+                    foreach (var view in pendingJobs)
+                        if (ReferenceEquals(view.requestedWorld, world) && view.meshTask != null && view.meshTask.IsCompleted)
+                        { obsolete = view; break; }
+                    if (obsolete == null) break;
+                    obsolete.CompleteMesh(false);
+                    if (!nearest.TryStartMesh()) break;
+                }
+            }
+        }
+        private static WorldRenderPatchView FindNearest(WorldData world, ChunkCoordinate target, bool waiting)
+        {
+            WorldRenderPatchView best = null;
+            ulong bestDistance = ulong.MaxValue;
+            foreach (var view in pendingJobs)
+            {
+                if (!ReferenceEquals(view.requestedWorld, world) ||
+                    view.awaitingRefresh || (waiting && view.meshTask != null)) continue;
+                var span = System.Math.Max(1, view.patchSize / world.ChunkSizeX);
+                var minX = (long)view.patchX * span;
+                var minZ = (long)view.patchZ * span;
+                var dx = (ulong)System.Math.Max(0L, System.Math.Max(minX - target.X, target.X - (minX + span - 1)));
+                var dz = (ulong)System.Math.Max(0L, System.Math.Max(minZ - target.Z, target.Z - (minZ + span - 1)));
+                var x2 = dx * dx; var z2 = dz * dz;
+                var distance = ulong.MaxValue - x2 < z2 ? ulong.MaxValue : x2 + z2;
+                if (ReferenceEquals(best, null) || distance < bestDistance || (distance == bestDistance &&
+                    (view.patchZ < best.patchZ || (view.patchZ == best.patchZ && view.patchX < best.patchX))))
+                { best = view; bestDistance = distance; }
+            }
+            return best;
+        }
+        private static readonly System.Threading.SemaphoreSlim workerSlots = new(2);
+        private System.Threading.Tasks.Task<WorldPatchMeshJob> meshTask;
+        private int generation, taskGeneration, requestedKinds;
+        private bool requestedFull, awaitingRefresh;
+        private WorldData requestedWorld;
+        private WorldSurfaceCatalog requestedCatalog;
+        private WorldExposureCache requestedExposure;
+        private Material requestedTerrainMaterial, requestedWaterMaterial;
+        private MeshFilter terrainBoundaryFilter, waterBoundaryFilter;
+        private MeshRenderer terrainBoundaryRenderer, waterBoundaryRenderer;
+
+        private void RequestMeshes(WorldData world, WorldSurfaceCatalog catalog, Material terrain,
+            Material water, WorldExposureCache exposure, int kinds, bool boundaryOnly)
+        {
+            generation++;
+            awaitingRefresh = false;
+            requestedKinds |= kinds;
+            requestedFull |= !boundaryOnly;
+            requestedWorld = world; requestedCatalog = catalog; requestedExposure = exposure;
+            if (terrain != null) requestedTerrainMaterial = terrain;
+            if (water != null) requestedWaterMaterial = water;
+            pendingJobs.Add(this);
+            if (!Application.isPlaying && TryStartMesh())
+            {
+                meshTask.GetAwaiter().GetResult();
+                CompleteMesh();
+            }
         }
 
-        internal void RebuildTerrain(
-            WorldData world,
-            WorldSurfaceCatalog catalog,
-            Material terrainMaterial,
-            WorldSurfaceQuery surfaceQuery,
-            WorldExposureCache exposureCache,
-            WorldMeshBuildScratch scratch)
+        private void CompleteMesh(bool apply = true)
         {
-            EnsureChildren();
-            var terrainBuffers = TerrainChunkMeshBuilder.Build(
-                world,
-                patchX,
-                patchZ,
-                patchSize,
-                catalog,
-                surfaceQuery,
-                exposureCache,
-                scratch.Terrain,
-                scratch.SolidCells);
-            terrainFilter.sharedMesh = terrainBuffers.CreateMesh(
-                $"Terrain [{patchX}, {patchZ}]",
-                terrainFilter.sharedMesh);
-            terrainRenderer.sharedMaterial = terrainMaterial;
-            terrainRenderer.shadowCastingMode = ShadowCastingMode.On;
-            terrainRenderer.receiveShadows = true;
-            terrainRenderer.enabled = !terrainBuffers.IsEmpty;
-            CaptureStreamingDependencies(world);
+            if (meshTask != null && meshTask.IsCompleted)
+            {
+                var finished = meshTask;
+                meshTask = null;
+                workerSlots.Release();
+                if (finished.IsFaulted)
+                {
+                    var error = finished.Exception;
+                    requestedKinds = 0; requestedFull = false;
+                    Debug.LogException(error);
+                }
+                else if (apply && taskGeneration == generation)
+                {
+                    var result = finished.Result;
+                    if ((result.Kinds & 1) != 0 && result.Full) Apply(result.Terrain, terrainFilter, terrainRenderer, requestedTerrainMaterial, true);
+                    if ((result.Kinds & 1) != 0) Apply(result.TerrainBoundary, terrainBoundaryFilter, terrainBoundaryRenderer, requestedTerrainMaterial, true);
+                    if ((result.Kinds & 2) != 0 && result.Full) Apply(result.Water, waterFilter, waterRenderer, requestedWaterMaterial, false);
+                    if ((result.Kinds & 2) != 0) Apply(result.WaterBoundary, waterBoundaryFilter, waterBoundaryRenderer, requestedWaterMaterial, false);
+                    requestedKinds = 0; requestedFull = false;
+                }
+                if (finished.Status == System.Threading.Tasks.TaskStatus.RanToCompletion) finished.Result.Return();
+            }
+            if (requestedKinds == 0 || awaitingRefresh) pendingJobs.Remove(this);
+        }
+
+        private bool TryStartMesh()
+        {
+            if (awaitingRefresh || meshTask != null || requestedKinds == 0 || requestedWorld == null || !workerSlots.Wait(0)) return false;
+            try
+            {
+                EnsureChildren();
+                var world = requestedWorld;
+                var snapshot = new WorldData(world.Settings);
+                var active = new System.Collections.Generic.List<ChunkCoordinate>();
+                var first = WorldCoordinateUtility.ToChunk(patchX * patchSize - 2, patchZ * patchSize - 2, world.ChunkSizeX);
+                var last = WorldCoordinateUtility.ToChunk((patchX + 1) * patchSize + 1, (patchZ + 1) * patchSize + 1, world.ChunkSizeX);
+                for (var z = first.Z; z <= last.Z; z++)
+                for (var x = first.X; x <= last.X; x++)
+                {
+                    var coordinate = new ChunkCoordinate(x, z);
+                    if (world.TryGetChunk(coordinate, out var chunk)) snapshot.AttachGeneratedChunk(chunk.CopyCells());
+                    if (requestedExposure.IsPrepared(coordinate)) active.Add(coordinate);
+                }
+                var palette = MaterialBlendResolver.CapturePalette(requestedCatalog);
+                var px = patchX; var pz = patchZ; var size = patchSize;
+                var kinds = requestedKinds; var full = requestedFull;
+                taskGeneration = generation;
+                CaptureStreamingDependencies(world);
+                meshTask = System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        return WorldPatchMeshJob.Build(snapshot, active, palette, px, pz, size, kinds, full);
+                    }
+                    finally { MaterialBlendResolver.WorkerPalette = null; }
+                });
+                return true;
+            }
+            catch { workerSlots.Release(); throw; }
+        }
+
+        private static void Apply(MeshBuffers buffers, MeshFilter filter, MeshRenderer renderer, Material material, bool terrain)
+        {
+            if (buffers == null) return;
+            filter.sharedMesh = buffers.CreateMesh(terrain ? "Terrain" : "Water", filter.sharedMesh);
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = terrain ? ShadowCastingMode.On : ShadowCastingMode.Off;
+            renderer.receiveShadows = true;
+            renderer.enabled = !buffers.IsEmpty;
+        }
+
+        private void OnDisable()
+        {
+            pendingJobs.Remove(this);
+            generation++;
+            requestedKinds = 0; requestedFull = false;
+            requestedWorld = null; requestedCatalog = null; requestedExposure = null;
+            if (meshTask != null)
+                _ = meshTask.ContinueWith(task => { try { if (task.IsFaulted) _ = task.Exception; else if (task.Status == System.Threading.Tasks.TaskStatus.RanToCompletion) task.Result.Return(); } finally { workerSlots.Release(); } });
+            // Running workers own only immutable snapshots; their stale results are discarded.
+            meshTask = null;
+            if (terrainRenderer != null) terrainRenderer.enabled = false;
+            if (waterRenderer != null) waterRenderer.enabled = false;
+            if (terrainBoundaryRenderer != null) terrainBoundaryRenderer.enabled = false;
+            if (waterBoundaryRenderer != null) waterBoundaryRenderer.enabled = false;
+        }
+        internal void InvalidatePendingMesh()
+        {
+            if (requestedKinds == 0) return;
+            generation++;
+            awaitingRefresh = true;
+            if (meshTask == null) pendingJobs.Remove(this);
         }
 
         internal void RebuildRoad(
@@ -278,6 +379,7 @@ namespace MiniCivilization.World.Presentation
                     world.CellSize,
                     patchSize));
             terrainRenderer.SetPropertyBlock(terrainProperties);
+            terrainBoundaryRenderer.SetPropertyBlock(terrainProperties);
         }
 
         public void ReleaseMeshes()
@@ -295,6 +397,8 @@ namespace MiniCivilization.World.Presentation
 
         private void EnsureChildren()
         {
+            EnsureRenderChild("Terrain Boundary", ref terrainBoundaryFilter, ref terrainBoundaryRenderer);
+            EnsureRenderChild("Water Boundary", ref waterBoundaryFilter, ref waterBoundaryRenderer);
             EnsureRenderChild(
                 "Terrain",
                 ref terrainFilter,
@@ -342,6 +446,7 @@ namespace MiniCivilization.World.Presentation
             if (terrainRenderer != null)
             {
                 terrainRenderer.SetPropertyBlock(null);
+                if (terrainBoundaryRenderer != null) terrainBoundaryRenderer.SetPropertyBlock(null);
             }
 
             ReleaseObject(roadPatchMap);

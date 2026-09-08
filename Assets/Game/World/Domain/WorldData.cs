@@ -5,7 +5,8 @@ namespace MiniCivilization.World.Domain
 {
     public sealed class ChunkSection
     {
-        private readonly CellData[] cells;
+        private CellData[] cells;
+        private bool cellsShared;
         private int nonDefaultCellCount;
 
         public ChunkSectionCoordinate Coordinate { get; }
@@ -40,16 +41,38 @@ namespace MiniCivilization.World.Domain
                 return false;
             }
 
+            EnsureWritableCells();
             TrackDefaultTransition(previous, cell);
             cells[index] = cell;
             return true;
         }
 
         public ReadOnlySpan<CellData> AsSpan() => cells;
+        // Cell arrays become immutable while shared. A later write detaches only this section.
+        private ChunkSection(ChunkSection source)
+        {
+            Coordinate = source.Coordinate;
+            SizeX = source.SizeX; SizeY = source.SizeY; SizeZ = source.SizeZ;
+            cells = source.cells;
+            nonDefaultCellCount = source.nonDefaultCellCount;
+            cellsShared = true;
+        }
+        internal ChunkSection Copy()
+        {
+            cellsShared = true;
+            return new ChunkSection(this);
+        }
+        private void EnsureWritableCells()
+        {
+            if (!cellsShared) return;
+            cells = (CellData[])cells.Clone();
+            cellsShared = false;
+        }
 
         internal void SetCellRaw(LocalCellIndex localIndex, CellData cell)
         {
             var index = ValidateIndex(localIndex);
+            EnsureWritableCells();
             TrackDefaultTransition(cells[index], cell);
             cells[index] = cell;
         }
@@ -150,6 +173,13 @@ namespace MiniCivilization.World.Domain
         internal void AddEntity(EntityData entity)
         {
             entities.Add(entity);
+        }
+
+        internal Chunk CopyCells()
+        {
+            var result = new Chunk(Coordinate, sectionsByY.Length);
+            for (var i = 0; i < sectionsByY.Length; i++) result.sectionsByY[i] = sectionsByY[i]?.Copy();
+            return result;
         }
 
         internal bool RemoveEntity(EntityData entity) =>
@@ -469,6 +499,13 @@ namespace MiniCivilization.World.Domain
             }
 
             return GetOrCreateChunk(coordinate);
+        }
+
+        internal void AttachGeneratedChunk(Chunk chunk)
+        {
+            if (chunk == null || !IsChunkWithinBounds(chunk.Coordinate))
+                throw new ArgumentException("Invalid generated chunk.", nameof(chunk));
+            loadedChunks.Add(chunk.Coordinate, chunk);
         }
 
         internal void UnloadChunk(ChunkCoordinate coordinate)
