@@ -177,20 +177,27 @@ namespace MiniCivilization.World.Runtime
                 WetColumns = new bool[horizontalCellCount];
                 InputGround = new bool[horizontalCellCount];
                 InputWet = new bool[horizontalCellCount];
+                WaterParents = new byte[horizontalCellCount];
             }
 
             public ushort[] OpenHeights { get; }
-            public ushort[] WaterDistances { get; set; }
-            public bool[] WetColumns { get; set; }
+            public ushort[] WaterDistances { get; }
+            public bool[] WetColumns { get; }
             public bool[] InputGround { get; }
             public bool[] InputWet { get; }
+            public byte[] WaterParents { get; }
         }
 
         private readonly WorldData world;
         private readonly SurfaceCache surface;
         private readonly Dictionary<ChunkCoordinate, ChunkCacheData> chunks =
             new();
-        private readonly Queue<CellColumnCoordinate> waterQueue = new();
+        private readonly Queue<CellColumnCoordinate> dirtyColumns = new();
+        private readonly Queue<CellColumnCoordinate> raiseQueue = new();
+        private readonly Queue<CellColumnCoordinate> lowerQueue = new();
+        private readonly HashSet<CellColumnCoordinate> dirtySet = new();
+        private readonly HashSet<CellColumnCoordinate> raiseSet = new();
+        private readonly HashSet<CellColumnCoordinate> lowerSet = new();
 
         internal NavigationCache(WorldData world, SurfaceCache surface)
         {
@@ -248,161 +255,30 @@ namespace MiniCivilization.World.Runtime
                     changed.X,
                     changed.Z);
                 if (RefreshDistanceInput(coordinate, column, changed.X, changed.Z))
-                    RebuildWaterDistances();
+                    EnqueueDirtyWithNeighbors(changed.X, changed.Z);
             }
         }
 
-        private IEnumerator<int> distanceWork;
-        private Dictionary<ChunkCoordinate, ChunkCacheData> distanceWorking;
-        private bool distancesRequested;
         public void RebuildWaterDistances()
         {
-            distanceWork?.Dispose(); distanceWork = null;
-            distanceWorking = null;
-            distancesRequested = true;
+            foreach (var pair in chunks)
+            {
+                var startX = pair.Key.X * world.ChunkSizeX;
+                var startZ = pair.Key.Z * world.ChunkSizeZ;
+                for (var z = startZ; z < startZ + world.ChunkSizeZ; z++)
+                for (var x = startX; x < startX + world.ChunkSizeX; x++)
+                    EnqueueDirty(x, z);
+            }
         }
+
         internal void AdvanceWaterDistances(int budget = 2048)
         {
-
-            if (!distancesRequested) return;
-            if (distanceWork == null)
-            { distanceWork = BuildWaterDistances().GetEnumerator(); }
             var start = System.Diagnostics.Stopwatch.GetTimestamp();
             for (var i = 0; i < budget; i++)
             {
-                if (!distanceWork.MoveNext())
-                {
-                    distanceWork.Dispose(); distanceWork = null;
-                    distanceWorking = null; distancesRequested = false; return;
-                }
+                if (!AdvanceWaterDistance()) return;
                 if ((System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d /
                     System.Diagnostics.Stopwatch.Frequency >= 2d) return;
-            }
-        }
-        private bool TryGetDistanceWorking(int x, int z, out ChunkCoordinate coordinate, out ChunkCacheData column)
-        {
-            coordinate = WorldCoordinateUtility.ToChunk(x, z, world.ChunkSizeX);
-            return distanceWorking.TryGetValue(coordinate, out column);
-        }
-        private bool HasWorkingDryNeighbor(int x, int z)
-        {
-            foreach (var direction in Directions)
-                if (TryGetDistanceWorking(x + direction.x, z + direction.z, out var coordinate, out var column) &&
-                    !column.WetColumns[ToLocalColumnIndex(coordinate, x + direction.x, z + direction.z)] &&
-                    column.InputGround[ToLocalColumnIndex(coordinate, x + direction.x, z + direction.z)]) return true;
-            return false;
-        }
-        private IEnumerable<int> BuildWaterDistances()
-        {
-            distanceWorking = new Dictionary<ChunkCoordinate, ChunkCacheData>();
-            foreach (var pair in chunks)
-            { distanceWorking.Add(pair.Key, new ChunkCacheData(HorizontalCellCount, 0)); yield return 0; }
-            waterQueue.Clear();
-            foreach (var pair in distanceWorking)
-            {
-                var coordinate = pair.Key;
-                var column = pair.Value;
-                var startX = coordinate.X * world.ChunkSizeX;
-                var startZ = coordinate.Z * world.ChunkSizeZ;
-                var endX = startX + world.ChunkSizeX;
-                var endZ = startZ + world.ChunkSizeZ;
-                for (var z = startZ; z < endZ; z++)
-                for (var x = startX; x < endX; x++)
-                {
-                    var localIndex = ToLocalColumnIndex(coordinate, x, z);
-                    var input = chunks[coordinate];
-                    var wet = input.InputWet[localIndex];
-                    column.InputGround[localIndex] = input.InputGround[localIndex];
-                    column.WetColumns[localIndex] = wet;
-                    column.WaterDistances[localIndex] = wet
-                        ? ushort.MaxValue
-                        : (ushort)0;
-                    yield return 0;
-                }
-            }
-
-            foreach (var pair in distanceWorking)
-            {
-                var coordinate = pair.Key;
-                var column = pair.Value;
-                var startX = coordinate.X * world.ChunkSizeX;
-                var startZ = coordinate.Z * world.ChunkSizeZ;
-                var endX = startX + world.ChunkSizeX;
-                var endZ = startZ + world.ChunkSizeZ;
-                for (var z = startZ; z < endZ; z++)
-                for (var x = startX; x < endX; x++)
-                {
-                    yield return 0;
-                    var localIndex = ToLocalColumnIndex(coordinate, x, z);
-                    if (!column.WetColumns[localIndex]
-                        || !HasWorkingDryNeighbor(x, z))
-                    {
-                        continue;
-                    }
-
-                    column.WaterDistances[localIndex] = 1;
-                    waterQueue.Enqueue(new CellColumnCoordinate(x, z));
-                }
-            }
-
-            while (waterQueue.Count > 0)
-            {
-                yield return 0;
-                var current = waterQueue.Dequeue();
-                if (!TryGetDistanceWorking(
-                        current.X,
-                        current.Z,
-                        out var currentCoordinate,
-                        out var currentColumn))
-                {
-                    continue;
-                }
-
-                var currentIndex = ToLocalColumnIndex(
-                    currentCoordinate,
-                    current.X,
-                    current.Z);
-                var nextDistance = currentColumn.WaterDistances[currentIndex]
-                    == ushort.MaxValue
-                        ? ushort.MaxValue
-                        : (ushort)Math.Min(
-                            ushort.MaxValue,
-                            currentColumn.WaterDistances[currentIndex] + 1);
-                for (var directionIndex = 0;
-                     directionIndex < Directions.Length;
-                     directionIndex++)
-                {
-                    var direction = Directions[directionIndex];
-                    var nextX = current.X + direction.x;
-                    var nextZ = current.Z + direction.z;
-                    if (!TryGetDistanceWorking(
-                            nextX,
-                            nextZ,
-                            out var nextCoordinate,
-                            out var nextColumn))
-                    {
-                        continue;
-                    }
-
-                    var nextIndex = ToLocalColumnIndex(
-                        nextCoordinate,
-                        nextX,
-                        nextZ);
-                    if (!nextColumn.WetColumns[nextIndex]
-                        || nextColumn.WaterDistances[nextIndex] <= nextDistance)
-                    {
-                        continue;
-                    }
-
-                    nextColumn.WaterDistances[nextIndex] = nextDistance;
-                    waterQueue.Enqueue(new CellColumnCoordinate(nextX, nextZ));
-                }
-            }
-            // No yields during publication: readers see only the previous or completed field.
-            foreach (var pair in distanceWorking)
-            {
-                chunks[pair.Key].WaterDistances = pair.Value.WaterDistances;
-                chunks[pair.Key].WetColumns = pair.Value.WetColumns;
             }
         }
 
@@ -420,7 +296,7 @@ namespace MiniCivilization.World.Runtime
                 if (TryGetChunkCacheData(changed.X, changed.Z, out var coordinate, out var column)
                     && RefreshDistanceInput(coordinate, column, changed.X, changed.Z))
                 {
-                    RebuildWaterDistances();
+                    EnqueueDirtyWithNeighbors(changed.X, changed.Z);
                 }
             }
         }
@@ -447,8 +323,7 @@ namespace MiniCivilization.World.Runtime
                 RefreshDistanceInput(coordinate, column, x, z);
             }
 
-            // Prepared membership is itself an input to the distance field.
-            RebuildWaterDistances();
+            EnqueueChunk(coordinate);
 
             return true;
         }
@@ -456,15 +331,181 @@ namespace MiniCivilization.World.Runtime
         internal bool ReleaseChunk(
             ChunkCoordinate coordinate)
         {
-            if (!chunks.Remove(coordinate))
+            if (!chunks.TryGetValue(coordinate, out _))
             {
                 return false;
             }
-
-            // Prepared membership is itself an input to the distance field.
-            RebuildWaterDistances();
+            EnqueueChunkBorder(coordinate);
+            chunks.Remove(coordinate);
 
             return true;
+        }
+
+        private bool AdvanceWaterDistance()
+        {
+            if (dirtyColumns.Count > 0)
+            {
+                var coordinate = dirtyColumns.Dequeue();
+                dirtySet.Remove(coordinate);
+                QueueRaise(coordinate.X, coordinate.Z);
+                foreach (var direction in Directions)
+                    QueueRaise(coordinate.X + direction.x, coordinate.Z + direction.z);
+                return true;
+            }
+
+            if (raiseQueue.Count > 0)
+            {
+                var coordinate = raiseQueue.Dequeue();
+                raiseSet.Remove(coordinate);
+                if (!TryGetChunkCacheData(coordinate.X, coordinate.Z, out var chunk, out var column)) return true;
+                var index = ToLocalColumnIndex(chunk, coordinate.X, coordinate.Z);
+                if (!column.InputWet[index])
+                {
+                    column.WetColumns[index] = false;
+                    column.WaterDistances[index] = 0;
+                    column.WaterParents[index] = 0;
+                }
+                else if (!HasValidParent(coordinate.X, coordinate.Z, column.WaterDistances[index], column.WaterParents[index]))
+                {
+                    column.WetColumns[index] = true;
+                    column.WaterDistances[index] = ushort.MaxValue;
+                    column.WaterParents[index] = 0;
+                    foreach (var direction in Directions)
+                    {
+                        var nextX = coordinate.X + direction.x;
+                        var nextZ = coordinate.Z + direction.z;
+                        if (PointsTo(nextX, nextZ, coordinate.X, coordinate.Z)) QueueRaise(nextX, nextZ);
+                    }
+                }
+                QueueLower(coordinate.X, coordinate.Z);
+                foreach (var direction in Directions) QueueLower(coordinate.X + direction.x, coordinate.Z + direction.z);
+                return true;
+            }
+
+            if (lowerQueue.Count == 0) return false;
+            var cell = lowerQueue.Dequeue();
+            lowerSet.Remove(cell);
+            if (!TryGetChunkCacheData(cell.X, cell.Z, out var owner, out var data)) return true;
+            var local = ToLocalColumnIndex(owner, cell.X, cell.Z);
+            if (!data.InputWet[local]) return true;
+            var best = ushort.MaxValue;
+            byte parent = 0;
+            foreach (var direction in Directions)
+            {
+                var x = cell.X + direction.x;
+                var z = cell.Z + direction.z;
+                if (!TryGetChunkCacheData(x, z, out var neighborChunk, out var neighbor)) continue;
+                var neighborIndex = ToLocalColumnIndex(neighborChunk, x, z);
+                if (!neighbor.InputWet[neighborIndex] && neighbor.InputGround[neighborIndex])
+                {
+                    best = 1;
+                    parent = 5;
+                    break;
+                }
+                if (!neighbor.InputWet[neighborIndex] || neighbor.WaterDistances[neighborIndex] == ushort.MaxValue) continue;
+                var candidate = (ushort)Math.Min(ushort.MaxValue, neighbor.WaterDistances[neighborIndex] + 1);
+                if (candidate < best)
+                {
+                    best = candidate;
+                    parent = DirectionToParent(direction.x, direction.z);
+                }
+            }
+            if (best >= data.WaterDistances[local]) return true;
+            data.WetColumns[local] = true;
+            data.WaterDistances[local] = best;
+            data.WaterParents[local] = parent;
+            foreach (var direction in Directions) QueueLower(cell.X + direction.x, cell.Z + direction.z);
+            return true;
+        }
+
+        private void EnqueueDirtyWithNeighbors(int x, int z)
+        {
+            EnqueueDirty(x, z);
+            foreach (var direction in Directions) EnqueueDirty(x + direction.x, z + direction.z);
+        }
+
+        private void EnqueueDirty(int x, int z)
+        {
+            if (!TryGetChunkCacheData(x, z, out _, out _)) return;
+            var cell = new CellColumnCoordinate(x, z);
+            if (dirtySet.Add(cell)) dirtyColumns.Enqueue(cell);
+        }
+
+        private void QueueRaise(int x, int z)
+        {
+            if (!TryGetChunkCacheData(x, z, out _, out _)) return;
+            var cell = new CellColumnCoordinate(x, z);
+            if (raiseSet.Add(cell)) raiseQueue.Enqueue(cell);
+        }
+
+        private void QueueLower(int x, int z)
+        {
+            if (!TryGetChunkCacheData(x, z, out _, out _)) return;
+            var cell = new CellColumnCoordinate(x, z);
+            if (lowerSet.Add(cell)) lowerQueue.Enqueue(cell);
+        }
+
+        private void EnqueueChunk(ChunkCoordinate chunk)
+        {
+            var startX = chunk.X * world.ChunkSizeX;
+            var startZ = chunk.Z * world.ChunkSizeZ;
+            for (var z = startZ; z < startZ + world.ChunkSizeZ; z++)
+            for (var x = startX; x < startX + world.ChunkSizeX; x++) EnqueueDirty(x, z);
+        }
+
+        private void EnqueueChunkBorder(ChunkCoordinate chunk)
+        {
+            var startX = chunk.X * world.ChunkSizeX;
+            var startZ = chunk.Z * world.ChunkSizeZ;
+            for (var z = startZ - 1; z <= startZ + world.ChunkSizeZ; z++)
+            {
+                EnqueueDirty(startX - 1, z);
+                EnqueueDirty(startX + world.ChunkSizeX, z);
+            }
+            for (var x = startX; x < startX + world.ChunkSizeX; x++)
+            {
+                EnqueueDirty(x, startZ - 1);
+                EnqueueDirty(x, startZ + world.ChunkSizeZ);
+            }
+        }
+
+        private bool HasValidParent(int x, int z, ushort distance, byte parent)
+        {
+            if (distance == 0 || distance == ushort.MaxValue) return false;
+            if (parent == 5)
+            {
+                foreach (var direction in Directions)
+                    if (TryGetChunkCacheData(x + direction.x, z + direction.z, out var chunk, out var column))
+                    {
+                        var index = ToLocalColumnIndex(chunk, x + direction.x, z + direction.z);
+                        if (!column.InputWet[index] && column.InputGround[index]) return true;
+                    }
+                return false;
+            }
+            ParentOffset(parent, out var offsetX, out var offsetZ);
+            if (!TryGetChunkCacheData(x + offsetX, z + offsetZ, out var parentChunk, out var parentColumn)) return false;
+            var parentIndex = ToLocalColumnIndex(parentChunk, x + offsetX, z + offsetZ);
+            return parentColumn.InputWet[parentIndex]
+                && parentColumn.WaterDistances[parentIndex] != ushort.MaxValue
+                && parentColumn.WaterDistances[parentIndex] + 1 == distance;
+        }
+
+        private bool PointsTo(int x, int z, int targetX, int targetZ)
+        {
+            if (!TryGetChunkCacheData(x, z, out var chunk, out var column)) return false;
+            var parent = column.WaterParents[ToLocalColumnIndex(chunk, x, z)];
+            ParentOffset(parent, out var offsetX, out var offsetZ);
+            return x + offsetX == targetX && z + offsetZ == targetZ;
+        }
+
+        private static byte DirectionToParent(int x, int z) => (x, z) switch
+        {
+            (1, 0) => 1, (-1, 0) => 2, (0, 1) => 3, (0, -1) => 4, _ => 0
+        };
+
+        private static void ParentOffset(byte parent, out int x, out int z)
+        {
+            (x, z) = parent switch { 1 => (1, 0), 2 => (-1, 0), 3 => (0, 1), 4 => (0, -1), _ => (0, 0) };
         }
 
         private bool RefreshDistanceInput(ChunkCoordinate coordinate, ChunkCacheData column, int x, int z)

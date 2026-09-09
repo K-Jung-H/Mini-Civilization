@@ -50,8 +50,8 @@ namespace MiniCivilization.World.WaterFlow
             {
                 internal WaterBody Part;
                 internal readonly HashSet<Node> Edges = new();
-                internal WaterBody Body;
-                internal WaterBody PreviousBody;
+                internal int BodyId;
+                internal int PreviousBodyId;
                 internal long Epoch;
             }
             private sealed class ColumnEntry
@@ -64,6 +64,7 @@ namespace MiniCivilization.World.WaterFlow
             private readonly Dictionary<ChunkCoordinate, List<Node>> chunks = new();
             private readonly Dictionary<CellColumnCoordinate, ColumnEntry> columns = new();
             private readonly Dictionary<int, HashSet<Node>> members = new();
+            private readonly Dictionary<int, WaterBody> bodies = new();
             private readonly HashSet<ChunkCoordinate> pending = new();
             private readonly HashSet<ChunkCoordinate> metricPending = new();
             private readonly Func<int, int, int> lookup;
@@ -78,8 +79,7 @@ namespace MiniCivilization.World.WaterFlow
                 if (!columns.TryGetValue(new CellColumnCoordinate(x, z), out var entry)) return 0;
                 var node = entry.Epoch > committedEpoch ? entry.Previous : entry.Current;
                 if (node == null) return 0;
-                var body = node.Epoch > committedEpoch ? node.PreviousBody : node.Body;
-                return body?.Id ?? 0;
+                return node.Epoch > committedEpoch ? node.PreviousBodyId : node.BodyId;
             }
 
             internal void Update(WorldRuntime runtime, IReadOnlyCollection<ChunkCoordinate> changed)
@@ -129,6 +129,7 @@ namespace MiniCivilization.World.WaterFlow
                 var newNodes = new List<Node>();
                 var touchedColumns = new HashSet<CellColumnCoordinate>();
                 var affinity = new Dictionary<Node, HashSet<int>>();
+                var removedParts = new Dictionary<int, List<WaterBody>>();
                 var maySplit = false;
 
                 foreach (var coordinate in changed)
@@ -155,9 +156,12 @@ namespace MiniCivilization.World.WaterFlow
                     {
                         foreach (var node in previous)
                         {
-                            var bodyId = node.Body.Id;
+                            var bodyId = node.BodyId;
                             affected.Add(bodyId);
                             members[bodyId].Remove(node);
+                            if (!removedParts.TryGetValue(bodyId, out var removed))
+                                removedParts.Add(bodyId, removed = new List<WaterBody>());
+                            removed.Add(node.Part);
                             Node destination = null;
                             var preserved = true;
                             foreach (var cell in node.Part.Cells)
@@ -213,66 +217,18 @@ namespace MiniCivilization.World.WaterFlow
 
                 var candidates = new HashSet<Node>();
                 foreach (var node in newNodes) { candidates.Add(node); yield return 0; }
-                foreach (var id in affected)
-                    if (members.Remove(id, out var previous))
-                        foreach (var node in previous) { candidates.Add(node); yield return 0; }
-
                 var groups = new Dictionary<Node, List<Node>>();
+                var additions = new List<WaterBody>();
                 if (!maySplit)
                 {
-                    // Addition-only changes preserve old components: union their representatives.
-                    // No BFS over the unchanged ocean's edges is required.
-                    var parents = new Dictionary<Node, Node>();
-                    var sizes = new Dictionary<Node, int>();
-                    var representatives = new Dictionary<int, Node>();
-                    foreach (var node in candidates)
-                    {
-                        parents.Add(node, node);
-                        sizes.Add(node, 1);
-                        yield return 0;
-                    }
-                    foreach (var node in candidates)
-                    {
-                        if (node.Body != null) JoinBody(node, node.Body.Id);
-                        if (affinity.TryGetValue(node, out var ids))
-                            foreach (var id in ids) JoinBody(node, id);
-                        yield return 0;
-                    }
-                    foreach (var node in newNodes)
-                        foreach (var edge in node.Edges) { Union(node, edge); yield return 0; }
-                    foreach (var node in candidates)
-                    {
-                        var root = Find(node);
-                        if (!groups.TryGetValue(root, out var group)) groups.Add(root, group = new List<Node>());
-                        group.Add(node);
-                        yield return 0;
-                    }
-
-                    Node Find(Node node)
-                    {
-                        var root = node;
-                        while (parents[root] != root) root = parents[root];
-                        while (parents[node] != node)
-                        {
-                            var next = parents[node]; parents[node] = root; node = next;
-                        }
-                        return root;
-                    }
-                    void Union(Node a, Node b)
-                    {
-                        a = Find(a); b = Find(b);
-                        if (a == b) return;
-                        if (sizes[a] < sizes[b]) { var swap = a; a = b; b = swap; }
-                        parents[b] = a; sizes[a] += sizes[b];
-                    }
-                    void JoinBody(Node node, int id)
-                    {
-                        if (representatives.TryGetValue(id, out var representative)) Union(node, representative);
-                        else representatives.Add(id, node);
-                    }
+                    foreach (var step in MergePreserved(newNodes, affected, affinity, removedParts,
+                        epoch, additions, candidates)) yield return step;
                 }
                 else
                 {
+                    foreach (var id in affected)
+                        if (members.Remove(id, out var previous))
+                            foreach (var node in previous) { candidates.Add(node); yield return 0; }
                     var seen = new HashSet<Node>();
                     var queue = new Queue<Node>();
                     foreach (var root in candidates)
@@ -295,15 +251,14 @@ namespace MiniCivilization.World.WaterFlow
                     }
                 }
 
-                var additions = new List<WaterBody>();
                 foreach (var group in groups.Values)
                 {
                     var body = new WaterBody(nextId++);
                     var membership = new HashSet<Node>();
                     foreach (var node in group)
                     {
-                        node.PreviousBody = node.Body;
-                        node.Body = body;
+                        node.PreviousBodyId = node.BodyId;
+                        node.BodyId = body.Id;
                         node.Epoch = epoch;
                         membership.Add(node);
                         body.AddPart(node.Part);
@@ -314,6 +269,8 @@ namespace MiniCivilization.World.WaterFlow
                 }
 
                 // Both the body index and lookup epoch become visible in this non-yielding commit.
+                foreach (var id in affected) bodies.Remove(id);
+                foreach (var body in additions) bodies.Add(body.Id, body);
                 runtime.WaterFlowState.UpdateGraphBodies(affected, additions, lookup);
                 committedEpoch = epoch;
                 foreach (var column in touchedColumns)
@@ -323,8 +280,120 @@ namespace MiniCivilization.World.WaterFlow
                     if (entry.Current == null) columns.Remove(column);
                     yield return 0;
                 }
-                foreach (var node in candidates) { node.PreviousBody = null; yield return 0; }
+                foreach (var node in candidates) { node.PreviousBodyId = 0; yield return 0; }
                 foreach (var coordinate in changed) { metricPending.Add(coordinate); yield return 0; }
+            }
+
+            private IEnumerable<int> MergePreserved(List<Node> newNodes, HashSet<int> affected,
+                Dictionary<Node, HashSet<int>> affinity, Dictionary<int, List<WaterBody>> removedParts,
+                long epoch, List<WaterBody> additions, HashSet<Node> reassigned)
+            {
+                // Union only body representatives and new components. Unchanged members of the
+                // largest body remain in place; only smaller memberships are relabelled.
+                var parents = new Dictionary<int, int>();
+                var sizes = new Dictionary<int, int>();
+                var tokens = new Dictionary<Node, int>();
+                foreach (var id in affected)
+                {
+                    parents.Add(id, id);
+                    sizes.Add(id, members[id].Count);
+                    yield return 0;
+                }
+                foreach (var node in newNodes)
+                {
+                    var id = nextId++;
+                    tokens.Add(node, id);
+                    parents.Add(id, id);
+                    sizes.Add(id, 1);
+                    yield return 0;
+                }
+                foreach (var node in newNodes)
+                {
+                    var id = tokens[node];
+                    if (affinity.TryGetValue(node, out var ids))
+                        foreach (var oldId in ids) { Union(id, oldId); yield return 0; }
+                    foreach (var edge in node.Edges)
+                    {
+                        Union(id, edge.BodyId == 0 ? tokens[edge] : edge.BodyId);
+                        yield return 0;
+                    }
+                }
+                var oldGroups = new Dictionary<int, List<int>>();
+                var newGroups = new Dictionary<int, List<Node>>();
+                foreach (var id in affected)
+                {
+                    var root = Find(id);
+                    if (!oldGroups.TryGetValue(root, out var ids)) oldGroups.Add(root, ids = new List<int>());
+                    ids.Add(id);
+                    yield return 0;
+                }
+                foreach (var node in newNodes)
+                {
+                    var root = Find(tokens[node]);
+                    if (!newGroups.TryGetValue(root, out var nodes)) newGroups.Add(root, nodes = new List<Node>());
+                    nodes.Add(node);
+                    if (!oldGroups.ContainsKey(root)) oldGroups.Add(root, new List<int>());
+                    yield return 0;
+                }
+                foreach (var group in oldGroups)
+                {
+                    var survivor = 0;
+                    foreach (var id in group.Value)
+                    {
+                        if (survivor == 0 || members[id].Count > members[survivor].Count
+                            || (members[id].Count == members[survivor].Count && id < survivor)) survivor = id;
+                        yield return 0;
+                    }
+                    var body = survivor == 0 ? new WaterBody(group.Key) : bodies[survivor].CopyComposition();
+                    var membership = survivor == 0 ? new HashSet<Node>() : members[survivor];
+                    if (survivor != 0 && removedParts.TryGetValue(survivor, out var removed))
+                        foreach (var part in removed) { body.RemovePart(part); yield return 0; }
+                    foreach (var id in group.Value)
+                    {
+                        if (id == survivor) continue;
+                        foreach (var node in members[id])
+                        {
+                            Assign(node, body, membership);
+                            yield return 0;
+                        }
+                        members.Remove(id);
+                    }
+                    if (newGroups.TryGetValue(group.Key, out var added))
+                        foreach (var node in added)
+                        {
+                            Assign(node, body, membership);
+                            yield return 0;
+                        }
+                    members[body.Id] = membership;
+                    additions.Add(body);
+                    yield return 0;
+                }
+
+                int Find(int id)
+                {
+                    var root = id;
+                    while (parents[root] != root) root = parents[root];
+                    while (parents[id] != id) { var next = parents[id]; parents[id] = root; id = next; }
+                    return root;
+                }
+                void Union(int a, int b)
+                {
+                    a = Find(a); b = Find(b);
+                    if (a == b) return;
+                    if (sizes[a] < sizes[b] || (sizes[a] == sizes[b] && a > b))
+                    { var swap = a; a = b; b = swap; }
+                    parents[b] = a;
+                    sizes[a] += sizes[b];
+                }
+                void Assign(Node node, WaterBody body, HashSet<Node> membership)
+                {
+                    node.PreviousBodyId = node.BodyId;
+                    node.BodyId = body.Id;
+                    node.Epoch = epoch;
+                    membership.Add(node);
+                    body.AddPart(node.Part);
+                    reassigned.Add(node);
+                }
             }
 
             private void SetColumn(CellColumnCoordinate column, Node node, long epoch)
@@ -342,8 +411,8 @@ namespace MiniCivilization.World.WaterFlow
                     || !columns.TryGetValue(new CellColumnCoordinate(nx, nz), out var bEntry)) return;
                 var a = aEntry.Current; var b = bEntry.Current;
                 if (a == null || b == null) return;
-                if (a.Body != null) affected.Add(a.Body.Id);
-                if (b.Body != null) affected.Add(b.Body.Id);
+                if (a.BodyId != 0) affected.Add(a.BodyId);
+                if (b.BodyId != 0) affected.Add(b.BodyId);
                 a.Edges.Add(b); b.Edges.Add(a);
             }
 
@@ -373,7 +442,7 @@ namespace MiniCivilization.World.WaterFlow
                     var ground = runtime.SurfaceCache.GetSurfaceHeight(coordinate.X, coordinate.Z).GroundHeight;
                     var delta = CalculateExposedUnits(current, coordinate.Y, ground) - CalculateExposedUnits(previous, coordinate.Y, ground);
                     node.Part.VolumeUnits += delta;
-                    node.Body.VolumeUnits += delta;
+                    bodies[node.BodyId].VolumeUnits += delta;
                 }
             }
 
@@ -398,7 +467,7 @@ namespace MiniCivilization.World.WaterFlow
                             metricPending.Add(coordinate);
                             continue;
                         }
-                        node.Body.VolumeUnits += volume - node.Part.VolumeUnits;
+                        bodies[node.BodyId].VolumeUnits += volume - node.Part.VolumeUnits;
                         node.Part.VolumeUnits = volume;
                         yield return 0;
                     }

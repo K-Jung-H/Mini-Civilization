@@ -189,6 +189,7 @@ namespace MiniCivilization.World.WaterFlow
         private long waveRevision;
         private readonly Dictionary<ChunkCoordinate, (Chunk Chunk, long Revision)> waveDependencies = new();
         private bool wavePrepared;
+        private bool discardedWave;
         private WorldData preparedWorld;
         private readonly HashSet<ChunkSectionCoordinate> publishedChunks = new();
         private readonly Dictionary<ChunkCoordinate, HashSet<int>> snapshotSections = new();
@@ -417,6 +418,7 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             completedResult = null;
+            discardedWave = false;
             if (waveWork != null && DependenciesChanged(world))
                 CancelActiveWave(state, requeue: true);
             if (waveWork == null)
@@ -432,6 +434,12 @@ namespace MiniCivilization.World.WaterFlow
                 if (!waveWork.MoveNext())
                 {
                     waveWork.Dispose(); waveWork = null;
+                    if (discardedWave)
+                    {
+                        discardedWave = false;
+                        state.IsRecalculating = HasRunnableWork;
+                        return false;
+                    }
                     state.IsRecalculating = HasRunnableWork;
                     completedResult = result;
                     return true;
@@ -446,12 +454,17 @@ namespace MiniCivilization.World.WaterFlow
         {
             result.Clear(); state.CancelResolutionPass();
             foreach (var work in PrepareWave()) yield return work;
-            wavePrepared = true;
             if (activeWave.Count == 0) { state.IsRecalculating = false; yield break; }
+            foreach (var work in CaptureWaveDependencies(world)) yield return work;
+            if (DependenciesChanged(world))
+            {
+                DiscardActiveWave(state);
+                yield break;
+            }
+            wavePrepared = true;
             for (cursor = 0; cursor < activeWave.Count; cursor++)
             {
                 var cell = activeWave[cursor];
-                TrackDependencies(world, cell);
                 state.StageResolvedCell(cell, ResolveDesiredWater(world, state, cell, parameters));
                 yield return 0;
             }
@@ -494,6 +507,11 @@ namespace MiniCivilization.World.WaterFlow
                 publishedChunks.Add(new ChunkSectionCoordinate(chunk.X, cell.Y / world.ChunkSectionSizeY, chunk.Z));
                 yield return 0;
             }
+            if (DependenciesChanged(world))
+            {
+                DiscardActiveWave(state);
+                yield break;
+            }
             world.PublishWaterCells(preparedWorld, publishedChunks);
             preparedWorld = null;
             snapshotSections.Clear();
@@ -512,6 +530,30 @@ namespace MiniCivilization.World.WaterFlow
                     || (chunk != null && chunk.CellRevision != pair.Value.Revision)) return true;
             }
             return false;
+        }
+
+        private IEnumerable<int> CaptureWaveDependencies(WorldData world)
+        {
+            foreach (var cell in activeWave)
+            {
+                TrackDependencies(world, cell);
+                yield return 0;
+            }
+        }
+
+        private void DiscardActiveWave(WaterFlowState state)
+        {
+            state.CancelResolutionPass();
+            AddFrontier(activeWave);
+            ClearActiveWave();
+            cursor = 0;
+            preparedWorld = null;
+            publishedChunks.Clear();
+            snapshotSections.Clear();
+            waveDependencies.Clear();
+            wavePrepared = false;
+            result.Clear();
+            discardedWave = true;
         }
 
         private void TrackDependencies(WorldData world, CellCoordinate cell)
