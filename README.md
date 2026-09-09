@@ -44,7 +44,7 @@ git clone <repository-url>
 
 1. Unity Hub에 프로젝트 폴더를 추가합니다.
 2. Unity `6000.3.11f1`로 프로젝트를 엽니다.
-3. [Main Scene](Assets/Scenes/Main%20Scene.unity)을 엽니다.
+3. [Main Scene](Assets/Content/Scenes/Main%20Scene.unity)을 엽니다.
 4. Play Mode를 시작합니다.
 
 Unity가 `Packages/manifest.json`을 기준으로 필요한 패키지를 복원합니다.
@@ -53,29 +53,33 @@ Unity가 `Packages/manifest.json`을 기준으로 필요한 패키지를 복원�
 
 | Scene | 용도 |
 |---|---|
-| `Assets/Scenes/Main Scene.unity` | 월드 생성·편집·물·엔티티를 실행하는 메인 Scene |
-| `Assets/Scenes/Edit Scene.unity` | 엔티티 Prefab의 크기·위치와 Building Local Cell을 확인하는 Authoring Scene |
+| `Assets/Content/Scenes/Main Scene.unity` | 월드 생성·편집·물·엔티티를 실행하는 메인 Scene |
+| `Assets/Content/Scenes/Edit Scene.unity` | 엔티티 Prefab의 크기·위치와 Building Local Cell을 확인하는 Authoring Scene |
 
 ## 주요 구조
 
 ```text
-Assets/Game/World
-├─ Domain          저장되는 월드 사실 데이터와 변경 데이터
-├─ Runtime         WorldRuntime, Cache, EntityRuntime, Manager
-├─ Generation      Pattern Tile 기반 지형·수문 생성과 Chunk materialization
-├─ WaterFlow       물 상태, 해석, 확산 Simulation
-├─ Editing         월드·엔티티 편집 입력과 적용
-├─ Interaction     Cell 선택, Raycast, 정보 표시
-├─ Meshing         Terrain·Water Mesh 생성
-├─ Presentation    Renderer, UI, EntityController, Render Profile
-├─ Definitions     Entity Catalog와 계열별 Definition Container
-├─ Entities        sealed Entity 상태머신과 Building Layout
-└─ Authoring       Entity Prefab과 Local Cell 시각화 도구
+Assets/
+├─ Scripts/
+│  └─ World/
+│     ├─ Domain          저장되는 월드 사실 데이터와 변경 데이터
+│     ├─ Runtime         WorldRuntime, Cache, EntityRuntime, Manager
+│     ├─ Generation      Pattern Tile 기반 지형·수문 생성과 Chunk materialization
+│     ├─ WaterFlow       물 상태, 해석, 확산 Simulation
+│     ├─ Editing         월드·엔티티 편집 입력과 적용
+│     ├─ Interaction     Cell 선택, Raycast, 정보 표시
+│     ├─ Meshing         Terrain·Water Mesh 생성
+│     ├─ Presentation    Renderer, UI, EntityController, Render Profile
+│     ├─ Definitions     Entity Catalog와 계열별 Definition Container
+│     ├─ Entities        sealed Entity 상태머신과 Building Layout
+│     └─ Authoring       Entity Prefab과 Local Cell 시각화 도구
+├─ Content/               Scene, 모델, 폰트, Prefab, Material, Texture, Shader, 설정 에셋
+└─ TextMesh Pro/          Unity 제공 리소스
 ```
 
 ### 월드 흐름
 
-월드 생성의 현재 구조와 규칙은 [월드 생성 기준](Docs/WorldGeneration/README.md)을 따릅니다.
+월드 생성의 현재 구조와 규칙은 `Assets/Scripts/World/Generation` 및 관련 Domain·Runtime 코드가 기준입니다.
 
 ```text
 WorldGenerationSettings
