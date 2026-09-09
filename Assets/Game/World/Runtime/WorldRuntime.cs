@@ -9,10 +9,6 @@ namespace MiniCivilization.World.Runtime
 {
     public sealed class WorldRuntime
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker WaterTopologyProfile = new("World.Streaming.WaterTopology");
-        private static readonly Unity.Profiling.ProfilerMarker VisibilityDataProfile = new("World.Streaming.VisibilityData");
-#endif
         private readonly Dictionary<ChunkCoordinate, ChunkRuntime>
             chunkRuntimes = new();
 
@@ -49,7 +45,6 @@ namespace MiniCivilization.World.Runtime
         private bool simulationChangedDuringStreaming;
         private bool dataUnloadedDuringStreaming;
         private readonly HashSet<ChunkCoordinate> waterTopologyChunks = new();
-        private readonly WaterBodyResolver.StreamingScratch waterTopologyScratch = new();
 
         internal void BeginStreamingChanges()
         {
@@ -159,9 +154,7 @@ namespace MiniCivilization.World.Runtime
             }
 
             SurfaceCache.PrepareChunk(coordinate);
-            NavigationCache.PrepareChunk(
-                coordinate,
-                rebuildWaterDistances: false);
+            NavigationCache.PrepareChunk(coordinate);
             if (chunkRuntime.SetState(ChunkState.Ready))
             {
                 ChunkStateChanged?.Invoke(chunkRuntime);
@@ -188,18 +181,8 @@ namespace MiniCivilization.World.Runtime
         private void FlushStreamingDataChanges()
         {
             if (waterTopologyChunks.Count == 0) return;
-            {
-#if ENABLE_PROFILER
-                using var profile = WaterTopologyProfile.Auto();
-#endif
-                WaterBodyResolver.RefreshStreaming(this, waterTopologyChunks, waterTopologyScratch);
-            }
-            {
-#if ENABLE_PROFILER
-                using var profile = VisibilityDataProfile.Auto();
-#endif
-                StreamingDataChanged?.Invoke(waterTopologyChunks);
-            }
+            WaterBodyResolver.RefreshStreaming(this, waterTopologyChunks);
+            StreamingDataChanged?.Invoke(waterTopologyChunks);
             waterTopologyChunks.Clear();
         }
 
@@ -298,9 +281,7 @@ namespace MiniCivilization.World.Runtime
                     $"Chunk {coordinate} cannot be released from {chunkRuntime.State}.");
             }
 
-            NavigationCache.ReleaseChunk(
-                coordinate,
-                rebuildWaterDistances: false);
+            NavigationCache.ReleaseChunk(coordinate);
             SurfaceCache.ReleaseChunk(coordinate);
             if (chunkRuntime.SetState(ChunkState.Unloaded))
             {

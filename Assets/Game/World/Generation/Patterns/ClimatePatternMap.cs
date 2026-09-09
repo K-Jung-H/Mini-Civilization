@@ -8,19 +8,33 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public sealed class ClimateSettings
     {
+        [Tooltip("온도 영역의 기준 크기로, 클수록 넓은 범위에서 완만하게 변합니다(셀).")]
         [Min(1)] public float TemperatureRegionScaleCells = 512f;
+        [Tooltip("습도 영역의 기준 크기로, 클수록 넓은 범위에서 완만하게 변합니다(셀).")]
         [Min(1)] public float MoistureRegionScaleCells = 640f;
+        [Tooltip("기준 고도보다 한 셀 높아질 때 감소하는 온도값.")]
         [Min(0)] public float AltitudeCoolingPerCell = 0.003f;
+        [Tooltip("고도에 따른 온도 감소가 시작되는 높이(셀).")]
         public float AltitudeReferenceHeight = 20f;
+        [Tooltip("한랭 바이옴을 판정하는 온도 경계값(0~1).")]
         [Range(0, 1)] public float ColdThreshold = 0.3f;
+        [Tooltip("고온 바이옴을 판정하는 온도 경계값(0~1).")]
         [Range(0, 1)] public float HotThreshold = 0.65f;
+        [Tooltip("건조한 기후를 판정하는 습도 경계값(0~1).")]
         [Range(0, 1)] public float DryThreshold = 0.35f;
+        [Tooltip("숲 바이옴을 판정하는 습도 경계값(0~1).")]
         [Range(0, 1)] public float ForestThreshold = 0.6f;
+        [Tooltip("습지 바이옴을 판정하는 습도 경계값(0~1).")]
         [Range(0, 1)] public float WetlandThreshold = 0.75f;
+        [Tooltip("습지 바이옴을 허용하는 최대 고도(셀).")]
         public float WetlandMaximumHeight = 22f;
+        [Tooltip("산악 바이옴을 판정하는 최소 고도(셀).")]
         [Min(0)] public float MountainMinimumHeight = 55f;
+        [Tooltip("Mesa 등 기후 변형 영역의 기준 크기(셀).")]
         [Min(1)] public int VariantRegionScaleCells = 256;
+        [Tooltip("사막 영역에서 Mesa 변형을 선택할 확률(0~1).")]
         [Range(0, 1)] public float MesaOccurrence = 0.25f;
+        [Tooltip("바이옴과 변형별 지형 패턴 선택 가중치 배율.")]
         public BiomeTerrainRule[] TerrainRules =
         {
             new() { Biome = TerrainBiome.Desert, Smooth = 6, Rugged = 2, Mountain = 1, Canyon = 1 },
@@ -28,6 +42,7 @@ namespace MiniCivilization.World.Generation.Patterns
             new() { Biome = TerrainBiome.Field, Smooth = 6, Rugged = 2, Mountain = 1, Canyon = 1 },
             new() { Biome = TerrainBiome.Forest, Smooth = 3, Rugged = 4, Mountain = 2, Canyon = 1 }
         };
+        [Tooltip("바이옴별 호수·연못·강의 발생 확률과 면적 배율.")]
         public BiomeHydrologyRule[] HydrologyRules =
         {
             new() { Biome = TerrainBiome.Desert, BasinOccurrence = 0.2f,
@@ -89,11 +104,17 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct BiomeTerrainRule
     {
+        [Tooltip("이 규칙을 적용할 바이옴.")]
         public TerrainBiome Biome;
+        [Tooltip("이 지형 가중치 규칙을 적용할 기후 변형.")]
         public ClimateRegionVariant Variant;
+        [Tooltip("완만한 지형의 기본 가중치에 곱할 배율.")]
         [Min(0)] public float Smooth;
+        [Tooltip("거친 지형의 기본 가중치에 곱할 배율.")]
         [Min(0)] public float Rugged;
+        [Tooltip("산악 지형의 기본 가중치에 곱할 배율.")]
         [Min(0)] public float Mountain;
+        [Tooltip("협곡 지형의 기본 가중치에 곱할 배율.")]
         [Min(0)] public float Canyon;
         public static BiomeTerrainRule Default => new() { Smooth = 1, Rugged = 1, Mountain = 1, Canyon = 1 };
         internal void Validate()
@@ -109,9 +130,13 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct BiomeHydrologyRule
     {
+        [Tooltip("이 규칙을 적용할 바이옴.")]
         public TerrainBiome Biome;
+        [Tooltip("호수·연못의 기본 발생 확률에 곱할 배율(0~1).")]
         [Range(0, 1)] public float BasinOccurrence;
+        [Tooltip("호수·연못의 기본 면적에 곱할 배율(0~1).")]
         [Range(0, 1)] public float BasinArea;
+        [Tooltip("강의 기본 발생 확률에 곱할 배율(0~1).")]
         [Range(0, 1)] public float RiverOccurrence;
     }
 
@@ -158,10 +183,12 @@ namespace MiniCivilization.World.Generation.Patterns
         public ClimatePatternCell(ElevationPatternCell elevation, float temperature, float moisture, ClimateBiome climate, TerrainBiome biome, ClimateRegionVariant variant = ClimateRegionVariant.Standard)
         { Elevation = elevation; Temperature = temperature; Moisture = moisture; Climate = climate; Biome = biome; Variant = variant; }
         public ElevationPatternCell Elevation { get; }
+        [Tooltip("이 지형 가중치 규칙을 적용할 기후 변형.")]
         public ClimateRegionVariant Variant { get; }
         public float Temperature { get; }
         public float Moisture { get; }
         public ClimateBiome Climate { get; }
+        [Tooltip("이 규칙을 적용할 바이옴.")]
         public TerrainBiome Biome { get; }
     }
 

@@ -46,9 +46,6 @@ namespace MiniCivilization.World.Presentation
         internal void ClearStreamingDependencies() => streamingDependencies.ClearStreamingDependencies();
         private void CaptureStreamingDependencies(WorldData world) =>
             streamingDependencies.CaptureStreamingDependencies(world, patchX, patchZ, patchSize);
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.RoadTextures");
-#endif
 
         private static readonly int RoadPatchMapProperty = Shader.PropertyToID(
             "_RoadPatchMap");
@@ -313,9 +310,6 @@ namespace MiniCivilization.World.Presentation
             WorldRoadTopology roadTopology,
             RoadVisualCatalog catalog)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             EnsureChildren();
             if (world == null
                 || roadTopology == null

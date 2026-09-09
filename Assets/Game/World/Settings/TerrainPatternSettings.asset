@@ -13,18 +13,10 @@ MonoBehaviour:
   m_Name: TerrainPatternSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.TerrainPatternSettings
   patternTileChunkSpan: 1
-  terrainBaseHeightCells: 32
   noiseRouter:
     continentalness:
       mode: 0
       scale: 0.004
-      layers: 4
-      frequencySpacing: 2
-      persistence: 0.4
-      octaveSeedStride: 1013
-    erosion:
-      mode: 0
-      scale: 0.0055
       layers: 4
       frequencySpacing: 2
       persistence: 0.4
@@ -46,20 +38,6 @@ MonoBehaviour:
     ruggedShare: 0.24
     mountainShare: 0.2
     canyonShare: 0.16
-    seaShare: 0.16
-  baseSurface:
-    surfaceByContinentalness:
-      atZero: -5
-      atQuarter: -2
-      atHalf: 0
-      atThreeQuarters: 3
-      atOne: 6
-    surfaceByErosion:
-      atZero: 2
-      atQuarter: 1
-      atHalf: 0
-      atThreeQuarters: -1
-      atOne: -2
   smooth:
     domainWarp:
       field:

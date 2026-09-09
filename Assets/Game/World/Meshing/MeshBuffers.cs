@@ -97,9 +97,6 @@ namespace MiniCivilization.World.Meshing
             return Region == 0 || (Region == 2) == boundary;
         }
         internal TerrainCellMaterials TerrainMaterials { get; } = new();
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Upload");
-#endif
 
         private readonly List<Vector3> positions = new();
         private readonly List<Vector3> normals = new();
@@ -226,9 +223,6 @@ namespace MiniCivilization.World.Meshing
 
         public Mesh CreateMesh(string name, Mesh reusableMesh = null)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             var mesh = reusableMesh != null ? reusableMesh : new Mesh();
             mesh.Clear();
             mesh.name = name;

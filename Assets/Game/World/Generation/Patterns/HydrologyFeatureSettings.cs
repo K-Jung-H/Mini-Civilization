@@ -7,24 +7,43 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct BasinFeatureSettings
     {
+        [Tooltip("생성 후보 지점 사이의 간격으로, 클수록 후보가 줄어듭니다(셀).")]
         [SerializeField] private int candidateLatticeSpacingCells;
+        [Tooltip("각 후보 지점에서 생성을 시도할 기본 확률(0~1).")]
         [SerializeField] private float occurrence;
+        [Tooltip("호수·연못의 목표 면적 범위(셀 수).")]
         [SerializeField] private PatternRange areaCells;
+        [Tooltip("연못으로 분류할 최대 면적으로, World의 Pond Maximum Area와 같아야 합니다.")]
         [SerializeField] private int pondMaximumAreaCells;
+        [Tooltip("최대 수심 범위(셀).")]
         [SerializeField] private PatternRange maximumDepthCells;
+        [Tooltip("호수·연못이 확장될 위치별 비용을 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField potentialField;
+        [Tooltip("노이즈 값을 호수·연못의 확장 비용으로 변환하는 곡선.")]
         [SerializeField] private PatternCurve potentialResponse;
+        [Tooltip("물가와 주변 지형을 연결하는 전이 폭(셀).")]
         [SerializeField] private int shoreTransitionCells;
+        [Tooltip("물가 전이 구간의 지형 혼합 곡선.")]
         [SerializeField] private PatternCurve shoreTransition;
+        [Tooltip("물가에서 내부로 들어갈수록 깊어지는 정도를 정하는 곡선.")]
         [SerializeField] private PatternCurve depthByInterior;
+        [Tooltip("호수·연못 바닥의 요철 노이즈.")]
         [SerializeField] private PatternNoiseField bedField;
+        [Tooltip("호수·연못 바닥 요철의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange bedAmplitudeCells;
+        [Tooltip("생성 기준점에서 호수·연못이 확장할 수 있는 최대 거리(셀).")]
         [SerializeField] private int maximumReachCells;
+        [Tooltip("노이즈 기반 확장 비용의 가중치.")]
         [SerializeField] private float potentialCost;
+        [Tooltip("인접 지형의 높이 차이에 부과하는 확장 비용 가중치.")]
         [SerializeField] private float terrainDeformationCost;
+        [Tooltip("경사가 큰 방향으로 확장하기 어렵게 하는 비용 가중치.")]
         [SerializeField] private float slopeCost;
+        [Tooltip("수면 높이 결정 시 지형을 깎는 비용의 가중치.")]
         [SerializeField] private float cutCost;
+        [Tooltip("수면 높이 결정 시 지형을 메우는 비용의 가중치.")]
         [SerializeField] private float fillCost;
+        [Tooltip("수면 높이 결정 시 가장자리 지형과의 높이 차이에 부과하는 비용 가중치.")]
         [SerializeField] private float rimCost;
 
         internal BasinFeatureSettingsData CreateData() => new(
@@ -52,32 +71,23 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct SeaFeatureSettings
     {
-        [SerializeField] private PatternDomainWarp domainWarp;
-        [SerializeField] private PatternNoiseField basinField;
-        [SerializeField] private float basinVariation;
-        [SerializeField] private PatternCurve depthByInterior;
-        [SerializeField] private PatternRange maximumDepthCells;
-        [SerializeField] private PatternNoiseField seabedField;
-        [SerializeField] private PatternRange seabedAmplitudeCells;
+        [Tooltip("해수면의 기준 높이(셀).")]
         [SerializeField] private int surfaceCell;
+        [Tooltip("해수면 기준 셀에 더하는 세부 높이(높이 단계).")]
         [SerializeField] private int surfaceStep;
 
         internal SeaFeatureSettingsData CreateData() => new(
-            domainWarp.CreateData(),
-            basinField.CreateData(),
-            basinVariation,
-            depthByInterior.CreateData(),
-            maximumDepthCells.CreateData(WorldGrid.HeightStepsPerCell),
-            seabedField.CreateData(),
-            seabedAmplitudeCells.CreateData(WorldGrid.HeightStepsPerCell),
             checked(surfaceCell * WorldGrid.HeightStepsPerCell + surfaceStep));
     }
 
     [Serializable]
     public struct RiverDistribution
     {
+        [Tooltip("선택 가능한 최솟값.")]
         [SerializeField] private float minimum;
+        [Tooltip("분포의 중심이 되는 기준값.")]
         [SerializeField] private float average;
+        [Tooltip("선택 가능한 최댓값.")]
         [SerializeField] private float maximum;
 
         internal RiverDistributionData CreateData() => new(
@@ -89,29 +99,53 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct RiverFeatureSettings
     {
+        [Tooltip("생성 후보 지점 사이의 간격으로, 클수록 후보가 줄어듭니다(셀).")]
         [SerializeField] private int candidateLatticeSpacingCells;
+        [Tooltip("강 생성 기준점의 무작위 위치 이동 범위(셀).")]
         [SerializeField] private int anchorJitterCells;
+        [Tooltip("각 후보 지점에서 생성을 시도할 기본 확률(0~1).")]
         [SerializeField] private float occurrence;
+        [Tooltip("강줄기를 구성하는 최소 노드 수.")]
         [SerializeField] private int minimumNodeCount;
+        [Tooltip("강줄기 노드 수 분포의 중심값.")]
         [SerializeField] private int averageNodeCount;
+        [Tooltip("강줄기를 구성하는 최대 노드 수.")]
         [SerializeField] private int maximumNodeCount;
+        [Tooltip("강줄기의 노드별 회전 각도 범위(도).")]
         [SerializeField] private PatternRange nodeTurnDegrees;
+        [Tooltip("강줄기의 굽이치는 형태를 정하는 노이즈.")]
         [SerializeField] private PatternNoiseField curvatureField;
+        [Tooltip("강 경로의 높이 차이를 회피 비용으로 환산하는 기준 높이(셀).")]
         [SerializeField] private float terrainHeightChangeReferenceCells;
+        [Tooltip("강 경로가 큰 지형 높이 차이를 피하는 강도.")]
         [SerializeField] private float terrainAvoidanceStrength;
+        [Tooltip("본류에서 파생되는 전체 지류의 최대 개수.")]
         [SerializeField] private int maximumDescendantBranchCount;
+        [Tooltip("각 노드에서 지류가 발생할 확률(0~1).")]
         [SerializeField] private float branchOccurrencePerNode;
+        [Tooltip("부모 강줄기 노드 수에 대한 지류 노드 수의 비율.")]
         [SerializeField] private RiverDistribution branchNodeCountRatio;
+        [Tooltip("지류를 생성하기 위해 필요한 최소 노드 수.")]
         [SerializeField] private int minimumBranchNodeCount;
+        [Tooltip("지류가 부모 강줄기에서 갈라지는 각도(도).")]
         [SerializeField] private RiverDistribution branchOpeningAngleDegrees;
+        [Tooltip("부모 강줄기 너비에 대한 지류 너비 비율.")]
         [SerializeField] private RiverDistribution branchWidthRatio;
+        [Tooltip("부모 강줄기 깊이에 대한 지류 깊이 비율.")]
         [SerializeField] private RiverDistribution branchDepthRatio;
+        [Tooltip("강 너비와 수면 위치의 변화를 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField widthField;
+        [Tooltip("강 너비 범위(셀).")]
         [SerializeField] private PatternRange widthCells;
+        [Tooltip("강 중심과 가장자리 사이의 단면 형태를 정하는 곡선.")]
         [SerializeField] private PatternCurve crossSection;
+        [Tooltip("깎아내리는 깊이 범위(셀).")]
         [SerializeField] private PatternRange depthCells;
+        [Tooltip("기존 지표면에서 강 수면을 낮추는 깊이 범위(셀).")]
         [SerializeField] private PatternRange waterInsetCells;
+        [Tooltip("강바닥 요철 노이즈.")]
         [SerializeField] private PatternNoiseField riverbedField;
+        [Tooltip("강바닥 요철의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange riverbedAmplitudeCells;
 
         internal RiverFeatureSettingsData CreateData() => new(
@@ -146,8 +180,11 @@ namespace MiniCivilization.World.Generation.Patterns
         menuName = "Mini Civilization/World/Hydrology Feature Settings")]
     public sealed class HydrologyFeatureSettings : ScriptableObject
     {
+        [Tooltip("해수면 설정으로, 현재 해양 범위와 해저 높이는 Elevation에서 결정합니다.")]
         [SerializeField] private SeaFeatureSettings sea;
+        [Tooltip("호수·연못의 생성 빈도, 면적, 깊이와 물가 설정.")]
         [SerializeField] private BasinFeatureSettings basins;
+        [Tooltip("강의 생성 빈도, 경로, 지류와 단면 설정.")]
         [SerializeField] private RiverFeatureSettings river;
 
         public HydrologyFeatureSettingsData CreateData(
@@ -254,41 +291,13 @@ namespace MiniCivilization.World.Generation.Patterns
 
     public readonly struct SeaFeatureSettingsData
     {
-        public SeaFeatureSettingsData(
-            TerrainDomainWarpData domainWarp,
-            TerrainNoiseFieldData basinField,
-            float basinVariation,
-            TerrainCurveData depthByInterior,
-            TerrainRangeData maximumDepth,
-            TerrainNoiseFieldData seabedField,
-            TerrainRangeData seabedAmplitude,
-            int surfaceHeight)
+        public SeaFeatureSettingsData(int surfaceHeight)
         {
-            if (!float.IsFinite(basinVariation)
-                || basinVariation < 0f
-                || surfaceHeight < 0
-                || maximumDepth.Minimum <= 0f)
-            {
+            if (surfaceHeight < 0)
                 throw new ArgumentOutOfRangeException(nameof(surfaceHeight));
-            }
-
-            DomainWarp = domainWarp;
-            BasinField = basinField;
-            BasinVariation = basinVariation;
-            DepthByInterior = depthByInterior;
-            MaximumDepth = maximumDepth;
-            SeabedField = seabedField;
-            SeabedAmplitude = seabedAmplitude;
             SurfaceHeight = surfaceHeight;
         }
 
-        public TerrainDomainWarpData DomainWarp { get; }
-        public TerrainNoiseFieldData BasinField { get; }
-        public float BasinVariation { get; }
-        public TerrainCurveData DepthByInterior { get; }
-        public TerrainRangeData MaximumDepth { get; }
-        public TerrainNoiseFieldData SeabedField { get; }
-        public TerrainRangeData SeabedAmplitude { get; }
         public int SurfaceHeight { get; }
     }
 

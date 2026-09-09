@@ -17,13 +17,6 @@ namespace MiniCivilization.World.Presentation
 
     public sealed class WorldRenderer : MonoBehaviour
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Render.MeshQueue");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage1 = new("World.Render.VisibilityChange");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage2 = new("World.Render.FullPatch");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage3 = new("World.Render.RemovePatch");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage4 = new("World.Render.Reprioritize");
-#endif
 
         [Header("Rendering")]
         [SerializeField] private WorldSurfaceCatalog surfaceCatalog;
@@ -47,9 +40,6 @@ namespace MiniCivilization.World.Presentation
         public int PendingRebuildCount => pendingFullPatches.Count + pendingTerrainPatches.Count
             + pendingWaterPatches.Count + pendingRoadPatches.Count;
         public long CoalescedBoundaryRequests { get; private set; }
-        public int CreatedPatchesLastFrame { get; private set; }
-        public int RebuiltPatchesLastFrame { get; private set; }
-        public double MeshWorkMillisecondsLastFrame { get; private set; }
 
 
         private readonly RenderPatchPriorityQueue pendingFullPatches = new();
@@ -81,12 +71,6 @@ namespace MiniCivilization.World.Presentation
 
         private void LateUpdate()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
-            CreatedPatchesLastFrame = 0;
-            RebuiltPatchesLastFrame = 0;
-            var started = System.Diagnostics.Stopwatch.GetTimestamp();
             FlushBoundaryRefreshes();
             for (var index = 0; index < meshPatchPerFrame; index++)
             {
@@ -105,8 +89,6 @@ namespace MiniCivilization.World.Presentation
                 }
             }
             WorldRenderPatchView.ProcessMeshJobs(boundWorld, priorityTarget, meshPatchPerFrame);
-            MeshWorkMillisecondsLastFrame = (System.Diagnostics.Stopwatch.GetTimestamp() - started)
-                * 1000d / System.Diagnostics.Stopwatch.Frequency;
         }
 
         private void FlushBoundaryRefreshes()
@@ -224,9 +206,6 @@ namespace MiniCivilization.World.Presentation
         private void OnTerrainRenderStateChanged(
             ChunkRuntime chunkRuntime)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage1.Auto();
-#endif
             if (boundRuntime == null
                 || chunkRuntime == null
                 || activeChunksPerPatch <= 0)
@@ -344,7 +323,6 @@ namespace MiniCivilization.World.Presentation
                     renderedPatchViews.Add(patch, view);
                     remaining--;
                     BuildPatch(view, patch.x, patch.y);
-                    CreatedPatchesLastFrame++;
                     pendingFullPatches.Remove(patch);
                     pendingTerrainPatches.Remove(patch);
                     pendingWaterPatches.Remove(patch);
@@ -488,7 +466,6 @@ namespace MiniCivilization.World.Presentation
                     if (ContainsPatch(patch))
                     {
                         var view = renderedPatchViews[patch];
-                        RebuiltPatchesLastFrame++;
                         if (boundaryOnlyPatches.Remove(patch))
                         {
                             view.RebuildBoundary(boundWorld, surfaceCatalog, terrainMaterial, waterMaterial, exposureCache);
@@ -515,7 +492,6 @@ namespace MiniCivilization.World.Presentation
                     }
 
                     var terrainView = renderedPatchViews[patch];
-                    RebuiltPatchesLastFrame++;
                     RebuildTerrainPatch(terrainView);
                     if (rebuildWaterWithTerrain)
                     {
@@ -538,7 +514,6 @@ namespace MiniCivilization.World.Presentation
                     }
 
                     var view = renderedPatchViews[patch];
-                    RebuiltPatchesLastFrame++;
                     RebuildWaterPatch(view);
 
                     continue;
@@ -547,7 +522,6 @@ namespace MiniCivilization.World.Presentation
                 if (selected == pendingRoadPatches && pendingRoadPatches.TryTake(out patch)
                     && ContainsPatch(patch))
                 {
-                    RebuiltPatchesLastFrame++;
                     RebuildRoadPatch(renderedPatchViews[patch]);
                 }
             }
@@ -745,9 +719,6 @@ namespace MiniCivilization.World.Presentation
             int patchX,
             int patchZ)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage2.Auto();
-#endif
             boundaryRefreshes.Remove(new Vector2Int(patchX, patchZ));
             view.Build(
                 boundWorld,
@@ -811,9 +782,6 @@ namespace MiniCivilization.World.Presentation
         private void ReturnPatchToPool(Vector2Int patch)
         {
             boundaryOnlyPatches.Remove(patch);
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage3.Auto();
-#endif
             boundaryRefreshes.Remove(patch);
             if (!renderedPatchViews.Remove(patch, out var view)
                 || view == null)
@@ -861,9 +829,6 @@ namespace MiniCivilization.World.Presentation
 
         private void UpdatePatchPriorities()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage4.Auto();
-#endif
             pendingFullPatches.SetPriorityTarget(
                 priorityTarget,
                 activeChunksPerPatch,

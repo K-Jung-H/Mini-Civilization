@@ -9,9 +9,6 @@ namespace MiniCivilization.World.WaterFlow
     [DisallowMultipleComponent]
     public sealed class WorldWaterFlowController : MonoBehaviour
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Water.Update");
-#endif
 
         [Header("Simulation Budget")]
         [SerializeField, Min(0.01f)]
@@ -19,14 +16,12 @@ namespace MiniCivilization.World.WaterFlow
         [SerializeField, Min(1)]
         private int maxCellsPerFrame = 2048;
 
-        private readonly HashSet<CellColumnCoordinate> pendingBodyColumns = new();
-        private readonly HashSet<int> affectedWaterBodyIds = new();
         private readonly HashSet<ChunkCoordinate> topologyChunks = new();
-        private readonly WaterBodyResolver.StreamingScratch topologyScratch = new();
+        private readonly HashSet<ChunkCoordinate> externalBodyChunks = new();
+        private readonly HashSet<ChunkCoordinate> externalMetricChunks = new();
         private WorldRuntime boundRuntime;
         private WorldData boundWorld;
         private bool waterBodyTopologyRefreshRequested;
-        private bool waterBodyMetricsRefreshRequested;
         private WaterFlowParameters activeParameters;
         private float simulationAccumulator;
 
@@ -42,9 +37,6 @@ namespace MiniCivilization.World.WaterFlow
 
         private void Update()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             if (boundWorld == null
                 || State == null
                 || boundRuntime?.WaterFlowResolver == null
@@ -75,38 +67,18 @@ namespace MiniCivilization.World.WaterFlow
                 return;
             }
 
-            foreach (var column in result.ChangedColumns)
-            {
-                pendingBodyColumns.Add(column);
-            }
-
-            if (result.HasTopologyChanges
-                || waterBodyTopologyRefreshRequested)
-            {
-                WaterTypeResolver.RefreshChanged(
-                    boundWorld,
-                    pendingBodyColumns,
-                    result.LogicalChangedCells,
-                    result.RenderChangedCells,
-                    result.WaterTypeChangedCells,
-                    result.ChangedColumns);
-            }
-
             CommitResolvedChanges(result);
 
-            if (result.HasTopologyChanges || waterBodyTopologyRefreshRequested
-                || result.HasRenderChanges || waterBodyMetricsRefreshRequested)
-            {
-                topologyChunks.Clear();
-                foreach (var column in pendingBodyColumns)
-                    topologyChunks.Add(WorldCoordinateUtility.ToChunk(column.X, column.Z, boundWorld.ChunkSizeX));
-                WaterBodyResolver.RefreshStreaming(boundRuntime, topologyChunks, topologyScratch);
-                topologyChunks.Clear();
-            }
-
-            pendingBodyColumns.Clear();
+            topologyChunks.Clear();
+            foreach (var cell in result.TopologyChangedCells)
+                topologyChunks.Add(WorldCoordinateUtility.ToChunk(cell.X, cell.Z, boundWorld.ChunkSizeX));
+            topologyChunks.UnionWith(externalBodyChunks);
+            if (topologyChunks.Count > 0)
+                WaterBodyResolver.RefreshStreaming(boundRuntime, topologyChunks);
+            WaterBodyResolver.RefreshAmountMetrics(boundRuntime, result.PreviousWater, topologyChunks);
+            WaterBodyResolver.RefreshChunkMetrics(boundRuntime, externalMetricChunks, topologyChunks);
+            topologyChunks.Clear(); externalBodyChunks.Clear(); externalMetricChunks.Clear();
             waterBodyTopologyRefreshRequested = false;
-            waterBodyMetricsRefreshRequested = false;
             StateChanged?.Invoke(State);
         }
 
@@ -135,9 +107,8 @@ namespace MiniCivilization.World.WaterFlow
                     "World runtime water state has not been prepared.");
             }
 
-            pendingBodyColumns.Clear();
+            externalBodyChunks.Clear(); externalMetricChunks.Clear();
             waterBodyTopologyRefreshRequested = false;
-            waterBodyMetricsRefreshRequested = false;
             simulationAccumulator = 0f;
             LastAppliedChangeId = runtime.CurrentChangeId;
             StateChanged?.Invoke(State);
@@ -155,9 +126,7 @@ namespace MiniCivilization.World.WaterFlow
             boundRuntime = null;
             activeParameters = default;
             waterBodyTopologyRefreshRequested = false;
-            waterBodyMetricsRefreshRequested = false;
-            pendingBodyColumns.Clear();
-            affectedWaterBodyIds.Clear();
+            externalBodyChunks.Clear(); externalMetricChunks.Clear();
             simulationAccumulator = 0f;
             LastAppliedChangeId = WorldChangeId.None;
             StateChanged?.Invoke(null);
@@ -219,19 +188,15 @@ namespace MiniCivilization.World.WaterFlow
                     State,
                     changeSet.ChangedCells,
                     changeSet.ChangedColumns);
-                for (var index = 0;
-                     index < changeSet.ChangedColumns.Count;
-                     index++)
-                {
-                    pendingBodyColumns.Add(
-                        changeSet.ChangedColumns[index]);
-                }
-
+                if (changeSet.Includes(WorldChangeType.CellStructure) || changeSet.Includes(WorldChangeType.WaterTopology))
+                    foreach (var column in changeSet.ChangedColumns)
+                        externalBodyChunks.Add(WorldCoordinateUtility.ToChunk(column.X, column.Z, boundWorld.ChunkSizeX));
                 waterBodyTopologyRefreshRequested |=
                     changeSet.Includes(WorldChangeType.CellStructure)
                     || changeSet.Includes(WorldChangeType.WaterTopology);
-                waterBodyMetricsRefreshRequested |=
-                    changeSet.Includes(WorldChangeType.WaterSurface);
+                if (changeSet.Includes(WorldChangeType.WaterSurface))
+                    foreach (var column in changeSet.ChangedColumns)
+                        externalMetricChunks.Add(WorldCoordinateUtility.ToChunk(column.X, column.Z, boundWorld.ChunkSizeX));
             }
 
             LastAppliedChangeId = changeSet.ChangeId;
@@ -249,6 +214,7 @@ namespace MiniCivilization.World.WaterFlow
         private void CommitResolvedChanges(
             WaterFlowRecalculationResult result)
         {
+
             var changedColumns = ToSortedArray(result.ChangedColumns);
             var logicalCells = ToSortedArray(
                 result.LogicalChangedCells);

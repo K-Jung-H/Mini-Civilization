@@ -58,9 +58,6 @@ namespace MiniCivilization.World.Persistence
 
     internal sealed class WorldPersistenceService
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker FlushProfile = new("World.Persistence.FlushDetached");
-#endif
         private WorldSaveRepository repository;
         private WorldSaveData saveData;
         private readonly int chunkSizeX;
@@ -309,9 +306,6 @@ namespace MiniCivilization.World.Persistence
 
         internal void FlushDetachedChunks(bool force = false)
         {
-#if ENABLE_PROFILER
-            using var profile = FlushProfile.Auto();
-#endif
             if (writes.IsFaulted) writer.Complete();
             while (pendingChunkWrites.Count > 0 && pendingChunkWrites.Peek().Write.IsCompletedSuccessfully)
             {

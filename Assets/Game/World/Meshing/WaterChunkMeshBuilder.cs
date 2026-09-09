@@ -8,9 +8,6 @@ namespace MiniCivilization.World.Meshing
 {
     internal static class WaterChunkMeshBuilder
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Water");
-#endif
 
         private const float Shoulder = 0.2f;
 
@@ -26,9 +23,6 @@ namespace MiniCivilization.World.Meshing
             List<ExposedCell> cells,
             HashSet<CellCoordinate> candidateCells, bool collectCandidates = true)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             buffers.Clear();
             var startX = patchX * patchSize;
             var startZ = patchZ * patchSize;

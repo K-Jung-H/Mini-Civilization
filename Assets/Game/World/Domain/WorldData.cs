@@ -104,10 +104,11 @@ namespace MiniCivilization.World.Domain
 
     public sealed class Chunk
     {
-        private readonly ChunkSection[] sectionsByY;
+        private ChunkSection[] sectionsByY;
         private readonly List<EntityData> entities = new();
 
         public ChunkCoordinate Coordinate { get; }
+        internal long CellRevision { get; set; }
         public IReadOnlyList<ChunkSection> SectionsByY => sectionsByY;
         public IReadOnlyList<EntityData> Entities => entities;
 
@@ -175,6 +176,15 @@ namespace MiniCivilization.World.Domain
             entities.Add(entity);
         }
 
+        internal void PublishSection(Chunk prepared, int sectionY) => sectionsByY[sectionY] = prepared.sectionsByY[sectionY];
+
+        internal Chunk CopySections(IEnumerable<int> sectionIndices)
+        {
+            var result = new Chunk(Coordinate, sectionsByY.Length);
+            foreach (var index in sectionIndices) result.sectionsByY[index] = sectionsByY[index]?.Copy();
+            return result;
+        }
+
         internal Chunk CopyCells()
         {
             var result = new Chunk(Coordinate, sectionsByY.Length);
@@ -192,6 +202,7 @@ namespace MiniCivilization.World.Domain
             loadedChunks = new();
         private readonly Dictionary<EntityId, EntityData> entitiesById = new();
 
+        internal long CellRevision { get; private set; }
         public WorldSettingsData Settings { get; }
         public int Size => Settings.WorldSize;
         public WorldType WorldType => Settings.WorldType;
@@ -313,6 +324,11 @@ namespace MiniCivilization.World.Domain
                 loadedChunks[ToChunk(x, z)].ReleaseSectionIfEmpty(sectionY);
             }
 
+            if (changed)
+            {
+                CellRevision++;
+                loadedChunks[ToChunk(x, z)].CellRevision++;
+            }
             return changed;
         }
 
@@ -506,6 +522,21 @@ namespace MiniCivilization.World.Domain
             if (chunk == null || !IsChunkWithinBounds(chunk.Coordinate))
                 throw new ArgumentException("Invalid generated chunk.", nameof(chunk));
             loadedChunks.Add(chunk.Coordinate, chunk);
+            CellRevision++;
+        }
+
+        internal void PublishWaterCells(WorldData prepared, IEnumerable<ChunkSectionCoordinate> changed)
+        {
+
+            // Main-thread publication contains no callbacks/yields; entities retain their Chunk.
+            foreach (var coordinate in changed)
+            {
+                var chunkCoordinate = new ChunkCoordinate(coordinate.X, coordinate.Z);
+                var chunk = loadedChunks[chunkCoordinate];
+                chunk.PublishSection(prepared.loadedChunks[chunkCoordinate], coordinate.Y);
+                chunk.CellRevision++;
+            }
+            CellRevision++;
         }
 
         internal void UnloadChunk(ChunkCoordinate coordinate)
@@ -522,6 +553,7 @@ namespace MiniCivilization.World.Domain
             }
 
             loadedChunks.Remove(coordinate);
+            CellRevision++;
         }
 
         internal void SetCellBulk(int x, int y, int z, CellData cell)
@@ -558,6 +590,8 @@ namespace MiniCivilization.World.Domain
             }
 
             section.SetCellRaw(localIndex, cell);
+            CellRevision++;
+            loadedChunks[ToChunk(x, z)].CellRevision++;
             if (section.IsEmpty)
             {
                 loadedChunks[ToChunk(x, z)].ReleaseSectionIfEmpty(sectionY);
@@ -574,6 +608,7 @@ namespace MiniCivilization.World.Domain
 
             chunk = new Chunk(coordinate, ChunkSectionCountY);
             loadedChunks.Add(coordinate, chunk);
+            CellRevision++;
             return chunk;
         }
 

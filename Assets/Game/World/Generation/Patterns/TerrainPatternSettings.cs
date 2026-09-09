@@ -15,11 +15,17 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct PatternNoiseField
     {
+        [Tooltip("노이즈 출력 형태: 기본값, 부호값, 능선 또는 부호가 있는 능선.")]
         [SerializeField] private PatternNoiseMode mode;
+        [Tooltip("노이즈 좌표 배율로, 작을수록 넓고 완만한 패턴이 됩니다.")]
         [SerializeField] private float scale;
+        [Tooltip("겹쳐서 합산할 노이즈 층 수.")]
         [SerializeField] private int layers;
+        [Tooltip("다음 노이즈 층의 주파수 배율.")]
         [SerializeField] private float frequencySpacing;
+        [Tooltip("다음 노이즈 층에 적용할 진폭 비율.")]
         [SerializeField] private float persistence;
+        [Tooltip("노이즈 층마다 시드를 바꾸는 간격.")]
         [SerializeField] private int octaveSeedStride;
 
         internal TerrainNoiseFieldData CreateData() => new(
@@ -34,10 +40,15 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct PatternCurve
     {
+        [Tooltip("입력 0일 때의 출력값.")]
         [SerializeField] private float atZero;
+        [Tooltip("입력 0.25일 때의 출력값.")]
         [SerializeField] private float atQuarter;
+        [Tooltip("입력 0.5일 때의 출력값.")]
         [SerializeField] private float atHalf;
+        [Tooltip("입력 0.75일 때의 출력값.")]
         [SerializeField] private float atThreeQuarters;
+        [Tooltip("입력 1일 때의 출력값.")]
         [SerializeField] private float atOne;
 
         internal TerrainCurveData CreateData(float scale = 1f) => new(
@@ -51,7 +62,9 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct PatternRange
     {
+        [Tooltip("선택 가능한 최솟값.")]
         [SerializeField] private float minimum;
+        [Tooltip("선택 가능한 최댓값.")]
         [SerializeField] private float maximum;
 
         internal TerrainRangeData CreateData(float scale = 1f) => new(
@@ -62,7 +75,9 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct PatternDomainWarp
     {
+        [Tooltip("좌표를 왜곡하는 데 사용할 노이즈.")]
         [SerializeField] private PatternNoiseField field;
+        [Tooltip("좌표 왜곡의 최대 이동 크기(셀).")]
         [SerializeField] private float strengthCells;
 
         internal TerrainDomainWarpData CreateData() => new(
@@ -73,28 +88,36 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct TerrainNoiseRouterSettings
     {
+        [Tooltip("대륙·해양 분포와 기본 고도를 결정하는 노이즈.")]
         [SerializeField] private PatternNoiseField continentalness;
-        [SerializeField] private PatternNoiseField erosion;
 
         internal TerrainNoiseRouterData CreateData() => new(
-            continentalness.CreateData(),
-            erosion.CreateData());
+            continentalness.CreateData());
     }
 
     [Serializable]
     public struct TerrainRegionSettings
     {
+        [Tooltip("지형 패턴 영역의 기준 크기(셀).")]
         [SerializeField] private int sizeCells;
+        [Tooltip("영역 크기에 비례한 중심점의 무작위 이동 비율.")]
         [SerializeField] private float centerJitter;
+        [Tooltip("지형 영역의 경계를 왜곡하는 노이즈.")]
         [SerializeField] private PatternNoiseField warpField;
+        [Tooltip("지형 영역 경계의 좌표 왜곡 크기(셀).")]
         [SerializeField] private float warpStrengthCells;
+        [Tooltip("서로 다른 지형 패턴을 부드럽게 섞는 경계 폭(셀).")]
         [SerializeField] private float boundaryBlendCells;
+        [Tooltip("영역 내부 진행도를 계산하는 기준 거리의 비율.")]
         [SerializeField] private float interiorReachRatio;
+        [Tooltip("완만한 지형 패턴의 기본 선택 가중치.")]
         [SerializeField] private float smoothShare;
+        [Tooltip("거친 지형 패턴의 기본 선택 가중치.")]
         [SerializeField] private float ruggedShare;
+        [Tooltip("산악 지형 패턴의 기본 선택 가중치.")]
         [SerializeField] private float mountainShare;
+        [Tooltip("협곡 지형 패턴의 기본 선택 가중치.")]
         [SerializeField] private float canyonShare;
-        [SerializeField] private float seaShare;
 
         internal TerrainRegionData CreateData() => new(
             sizeCells,
@@ -106,31 +129,23 @@ namespace MiniCivilization.World.Generation.Patterns
             smoothShare,
             ruggedShare,
             mountainShare,
-            canyonShare,
-            seaShare);
-    }
-
-    [Serializable]
-    public struct TerrainBaseSurfaceSettings
-    {
-        [SerializeField] private PatternCurve surfaceByContinentalness;
-        [SerializeField] private PatternCurve surfaceByErosion;
-
-        internal TerrainBaseSurfaceData CreateData() => new(
-            surfaceByContinentalness.CreateData(
-                WorldGrid.HeightStepsPerCell),
-            surfaceByErosion.CreateData(
-                WorldGrid.HeightStepsPerCell));
+            canyonShare);
     }
 
     [Serializable]
     public struct TerrainSurfaceFormSettings
     {
+        [Tooltip("패턴 모양의 규칙성을 줄이는 좌표 왜곡 설정.")]
         [SerializeField] private PatternDomainWarp domainWarp;
+        [Tooltip("지형의 큰 굴곡을 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField shapeField;
+        [Tooltip("큰 굴곡 노이즈를 높이 변화로 변환하는 곡선.")]
         [SerializeField] private PatternCurve shapeResponse;
+        [Tooltip("큰 굴곡의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange shapeAmplitudeCells;
+        [Tooltip("지형 표면의 세부 요철 노이즈.")]
         [SerializeField] private PatternNoiseField detailField;
+        [Tooltip("세부 요철의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainSurfaceFormData CreateData() => new(
@@ -145,14 +160,23 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct MountainFormSettings
     {
+        [Tooltip("패턴 모양의 규칙성을 줄이는 좌표 왜곡 설정.")]
         [SerializeField] private PatternDomainWarp domainWarp;
+        [Tooltip("산악 지형의 큰 산체 형태를 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField massField;
+        [Tooltip("산체 노이즈를 높이 기여도로 변환하는 곡선.")]
         [SerializeField] private PatternCurve massResponse;
+        [Tooltip("산체 높이의 범위(셀).")]
         [SerializeField] private PatternRange heightCells;
+        [Tooltip("산 능선의 형태를 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField ridgeField;
+        [Tooltip("능선 노이즈를 높이 기여도로 변환하는 곡선.")]
         [SerializeField] private PatternCurve ridgeResponse;
+        [Tooltip("능선의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange ridgeStrengthCells;
+        [Tooltip("지형 표면의 세부 요철 노이즈.")]
         [SerializeField] private PatternNoiseField detailField;
+        [Tooltip("세부 요철의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainMountainFormData CreateData() => new(
@@ -170,15 +194,25 @@ namespace MiniCivilization.World.Generation.Patterns
     [Serializable]
     public struct CanyonFormSettings
     {
+        [Tooltip("패턴 모양의 규칙성을 줄이는 좌표 왜곡 설정.")]
         [SerializeField] private PatternDomainWarp domainWarp;
+        [Tooltip("협곡의 넓은 함몰 영역을 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField basinField;
+        [Tooltip("함몰 노이즈를 깊이 기여도로 변환하는 곡선.")]
         [SerializeField] private PatternCurve basinResponse;
+        [Tooltip("전체 협곡 깊이에 대한 넓은 함몰의 깊이 비율.")]
         [SerializeField] private PatternRange basinDepthRatio;
+        [Tooltip("협곡 내부 골짜기의 형태를 만드는 노이즈.")]
         [SerializeField] private PatternNoiseField valleyField;
+        [Tooltip("골짜기 노이즈를 깊이 기여도로 변환하는 곡선.")]
         [SerializeField] private PatternCurve valleyResponse;
+        [Tooltip("전체 협곡 깊이에 대한 골짜기의 깊이 비율.")]
         [SerializeField] private PatternRange valleyDepthRatio;
+        [Tooltip("깎아내리는 깊이 범위(셀).")]
         [SerializeField] private PatternRange depthCells;
+        [Tooltip("지형 표면의 세부 요철 노이즈.")]
         [SerializeField] private PatternNoiseField detailField;
+        [Tooltip("세부 요철의 높이 변화 범위(셀).")]
         [SerializeField] private PatternRange detailAmplitudeCells;
 
         internal TerrainCanyonFormData CreateData() => new(
@@ -199,23 +233,26 @@ namespace MiniCivilization.World.Generation.Patterns
         menuName = "Mini Civilization/World/Terrain Pattern Settings")]
     public sealed class TerrainPatternSettings : ScriptableObject
     {
+        [Tooltip("패턴맵 타일 한 변에 포함되는 청크 수.")]
         [SerializeField] private int patternTileChunkSpan;
-        [SerializeField] private int terrainBaseHeightCells;
+        [Tooltip("기본 고도 분포를 만드는 노이즈 설정.")]
         [SerializeField] private TerrainNoiseRouterSettings noiseRouter;
+        [Tooltip("지형 패턴 영역의 크기, 경계와 선택 가중치.")]
         [SerializeField] private TerrainRegionSettings region;
-        [SerializeField] private TerrainBaseSurfaceSettings baseSurface;
+        [Tooltip("완만한 지형의 굴곡과 세부 요철 설정.")]
         [SerializeField] private TerrainSurfaceFormSettings smooth;
+        [Tooltip("거친 지형의 굴곡과 세부 요철 설정.")]
         [SerializeField] private TerrainSurfaceFormSettings rugged;
+        [Tooltip("산체·능선의 형태와 높이 설정.")]
         [SerializeField] private MountainFormSettings mountain;
+        [Tooltip("협곡·골짜기의 형태와 깊이 설정.")]
         [SerializeField] private CanyonFormSettings canyon;
 
         public TerrainPatternSettingsData CreateData(int worldSeed) => new(
             worldSeed,
             patternTileChunkSpan,
-            checked(terrainBaseHeightCells * WorldGrid.HeightStepsPerCell),
             noiseRouter.CreateData(),
             region.CreateData(),
-            baseSurface.CreateData(),
             smooth.CreateData(),
             rugged.CreateData(),
             mountain.CreateData(),
@@ -354,15 +391,12 @@ namespace MiniCivilization.World.Generation.Patterns
     public readonly struct TerrainNoiseRouterData
     {
         public TerrainNoiseRouterData(
-            TerrainNoiseFieldData continentalness,
-            TerrainNoiseFieldData erosion)
+            TerrainNoiseFieldData continentalness)
         {
             Continentalness = continentalness;
-            Erosion = erosion;
         }
 
         public TerrainNoiseFieldData Continentalness { get; }
-        public TerrainNoiseFieldData Erosion { get; }
     }
 
     public readonly struct TerrainRegionData
@@ -377,8 +411,7 @@ namespace MiniCivilization.World.Generation.Patterns
             float smoothShare,
             float ruggedShare,
             float mountainShare,
-            float canyonShare,
-            float seaShare)
+            float canyonShare)
         {
             if (sizeCells <= 0
                 || !float.IsFinite(centerJitter)
@@ -393,14 +426,12 @@ namespace MiniCivilization.World.Generation.Patterns
                 || !float.IsFinite(ruggedShare)
                 || !float.IsFinite(mountainShare)
                 || !float.IsFinite(canyonShare)
-                || !float.IsFinite(seaShare)
                 || smoothShare < 0f
                 || ruggedShare < 0f
                 || mountainShare < 0f
                 || canyonShare < 0f
-                || seaShare < 0f
                 || smoothShare + ruggedShare + mountainShare
-                    + canyonShare + seaShare <= 0f)
+                    + canyonShare <= 0f)
             {
                 throw new ArgumentOutOfRangeException(nameof(sizeCells));
             }
@@ -415,7 +446,6 @@ namespace MiniCivilization.World.Generation.Patterns
             RuggedShare = ruggedShare;
             MountainShare = mountainShare;
             CanyonShare = canyonShare;
-            SeaShare = seaShare;
         }
 
         public int SizeCells { get; }
@@ -428,23 +458,8 @@ namespace MiniCivilization.World.Generation.Patterns
         public float RuggedShare { get; }
         public float MountainShare { get; }
         public float CanyonShare { get; }
-        public float SeaShare { get; }
         public float TotalShare => SmoothShare + RuggedShare
-            + MountainShare + CanyonShare + SeaShare;
-    }
-
-    public readonly struct TerrainBaseSurfaceData
-    {
-        public TerrainBaseSurfaceData(
-            TerrainCurveData surfaceByContinentalness,
-            TerrainCurveData surfaceByErosion)
-        {
-            SurfaceByContinentalness = surfaceByContinentalness;
-            SurfaceByErosion = surfaceByErosion;
-        }
-
-        public TerrainCurveData SurfaceByContinentalness { get; }
-        public TerrainCurveData SurfaceByErosion { get; }
+            + MountainShare + CanyonShare;
     }
 
     public readonly struct TerrainSurfaceFormData
@@ -551,16 +566,14 @@ namespace MiniCivilization.World.Generation.Patterns
         public TerrainPatternSettingsData(
             int worldSeed,
             int patternTileChunkSpan,
-            int terrainBaseHeight,
             TerrainNoiseRouterData noiseRouter,
             TerrainRegionData region,
-            TerrainBaseSurfaceData baseSurface,
             TerrainSurfaceFormData smooth,
             TerrainSurfaceFormData rugged,
             TerrainMountainFormData mountain,
             TerrainCanyonFormData canyon)
         {
-            if (patternTileChunkSpan <= 0 || terrainBaseHeight < 0)
+            if (patternTileChunkSpan <= 0)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(patternTileChunkSpan));
@@ -568,10 +581,8 @@ namespace MiniCivilization.World.Generation.Patterns
 
             WorldSeed = worldSeed;
             PatternTileChunkSpan = patternTileChunkSpan;
-            TerrainBaseHeight = terrainBaseHeight;
             NoiseRouter = noiseRouter;
             Region = region;
-            BaseSurface = baseSurface;
             Smooth = smooth;
             Rugged = rugged;
             Mountain = mountain;
@@ -580,10 +591,8 @@ namespace MiniCivilization.World.Generation.Patterns
 
         public int WorldSeed { get; }
         public int PatternTileChunkSpan { get; }
-        public int TerrainBaseHeight { get; }
         public TerrainNoiseRouterData NoiseRouter { get; }
         public TerrainRegionData Region { get; }
-        public TerrainBaseSurfaceData BaseSurface { get; }
         public TerrainSurfaceFormData Smooth { get; }
         public TerrainSurfaceFormData Rugged { get; }
         public TerrainMountainFormData Mountain { get; }

@@ -86,6 +86,8 @@ namespace MiniCivilization.World.Runtime
             var target = ResolveStreamingTargetChunk();
             worldRenderer?.SetStreamingPriorityTarget(target);
             streamingCoordinator.Update(target);
+            CurrentWorldRuntime.NavigationCache.AdvanceWaterDistances();
+            MiniCivilization.World.WaterFlow.WaterBodyResolver.Advance(CurrentWorldRuntime);
         }
 
         public void MarkDirty()

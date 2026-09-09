@@ -526,10 +526,8 @@ namespace MiniCivilization.World.Persistence
         {
             writer.Write(terrain.WorldSeed);
             writer.Write(terrain.PatternTileChunkSpan);
-            writer.Write(terrain.TerrainBaseHeight);
             WriteNoiseRouter(writer, terrain.NoiseRouter);
             WriteRegion(writer, terrain.Region);
-            WriteBaseSurface(writer, terrain.BaseSurface);
             WriteSurfaceForm(writer, terrain.Smooth);
             WriteSurfaceForm(writer, terrain.Rugged);
             WriteMountainForm(writer, terrain.Mountain);
@@ -540,10 +538,8 @@ namespace MiniCivilization.World.Persistence
             BinaryReader reader) => new(
             reader.ReadInt32(),
             reader.ReadInt32(),
-            reader.ReadInt32(),
             ReadNoiseRouter(reader),
             ReadRegion(reader),
-            ReadBaseSurface(reader),
             ReadSurfaceForm(reader),
             ReadSurfaceForm(reader),
             ReadMountainForm(reader),
@@ -647,11 +643,10 @@ namespace MiniCivilization.World.Persistence
             TerrainNoiseRouterData value)
         {
             WriteNoise(writer, value.Continentalness);
-            WriteNoise(writer, value.Erosion);
         }
 
         private static TerrainNoiseRouterData ReadNoiseRouter(BinaryReader reader) =>
-            new(ReadNoise(reader), ReadNoise(reader));
+            new(ReadNoise(reader));
 
         private static void WriteRegion(
             BinaryWriter writer,
@@ -667,7 +662,6 @@ namespace MiniCivilization.World.Persistence
             writer.Write(value.RuggedShare);
             writer.Write(value.MountainShare);
             writer.Write(value.CanyonShare);
-            writer.Write(value.SeaShare);
         }
 
         private static TerrainRegionData ReadRegion(BinaryReader reader) => new(
@@ -680,19 +674,7 @@ namespace MiniCivilization.World.Persistence
             ReadFiniteSingle(reader),
             ReadFiniteSingle(reader),
             ReadFiniteSingle(reader),
-            ReadFiniteSingle(reader),
             ReadFiniteSingle(reader));
-
-        private static void WriteBaseSurface(
-            BinaryWriter writer,
-            TerrainBaseSurfaceData value)
-        {
-            WriteCurve(writer, value.SurfaceByContinentalness);
-            WriteCurve(writer, value.SurfaceByErosion);
-        }
-
-        private static TerrainBaseSurfaceData ReadBaseSurface(BinaryReader reader) =>
-            new(ReadCurve(reader), ReadCurve(reader));
 
         private static void WriteSurfaceForm(
             BinaryWriter writer,
@@ -818,29 +800,10 @@ namespace MiniCivilization.World.Persistence
                 ReadFiniteSingle(reader),
                 ReadFiniteSingle(reader));
 
-        private static void WriteSea(
-            BinaryWriter writer,
-            SeaFeatureSettingsData value)
-        {
-            WriteDomainWarp(writer, value.DomainWarp);
-            WriteNoise(writer, value.BasinField);
-            writer.Write(value.BasinVariation);
-            WriteCurve(writer, value.DepthByInterior);
-            WriteRange(writer, value.MaximumDepth);
-            WriteNoise(writer, value.SeabedField);
-            WriteRange(writer, value.SeabedAmplitude);
+        private static void WriteSea(BinaryWriter writer, SeaFeatureSettingsData value) =>
             writer.Write(value.SurfaceHeight);
-        }
 
-        private static SeaFeatureSettingsData ReadSea(BinaryReader reader) => new(
-            ReadDomainWarp(reader),
-            ReadNoise(reader),
-            ReadFiniteSingle(reader),
-            ReadCurve(reader),
-            ReadRange(reader),
-            ReadNoise(reader),
-            ReadRange(reader),
-            reader.ReadInt32());
+        private static SeaFeatureSettingsData ReadSea(BinaryReader reader) => new(reader.ReadInt32());
 
         private static void WriteRiver(
             BinaryWriter writer,

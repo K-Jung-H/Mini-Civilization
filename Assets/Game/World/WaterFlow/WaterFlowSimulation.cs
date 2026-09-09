@@ -4,6 +4,7 @@ using MiniCivilization.World.Domain;
 
 namespace MiniCivilization.World.WaterFlow
 {
+
     internal readonly struct WaterFlowParameters : IEquatable<WaterFlowParameters>
     {
         public readonly byte SpreadAmountLoss;
@@ -130,6 +131,7 @@ namespace MiniCivilization.World.WaterFlow
 
     internal sealed class WaterFlowRecalculationResult
     {
+        public readonly Dictionary<CellCoordinate, WaterData> PreviousWater = new();
         public readonly HashSet<CellCoordinate> LogicalChangedCells = new();
         public readonly HashSet<CellCoordinate> RenderChangedCells = new();
         public readonly HashSet<CellCoordinate> TopologyChangedCells = new();
@@ -143,6 +145,7 @@ namespace MiniCivilization.World.WaterFlow
 
         public void Clear()
         {
+            PreviousWater.Clear();
             LogicalChangedCells.Clear();
             RenderChangedCells.Clear();
             TopologyChangedCells.Clear();
@@ -170,8 +173,6 @@ namespace MiniCivilization.World.WaterFlow
         };
 
         private readonly List<CellCoordinate> activeWave = new();
-        private readonly List<CellCoordinate> selectedCells = new();
-        private readonly List<ChunkCoordinate> emptyChunks = new();
         private readonly Dictionary<ChunkCoordinate, ChunkWaterFlowState>
             chunkStates = new();
         private readonly HashSet<CellCoordinate> restartWave = new();
@@ -184,6 +185,14 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Func<CellCoordinate, bool> canProcessCell;
         private bool hasRunnableFrontier;
         private int cursor;
+        private IEnumerator<int> waveWork;
+        private long waveRevision;
+        private readonly Dictionary<ChunkCoordinate, (Chunk Chunk, long Revision)> waveDependencies = new();
+        private bool wavePrepared;
+        private WorldData preparedWorld;
+        private readonly HashSet<ChunkSectionCoordinate> publishedChunks = new();
+        private readonly Dictionary<ChunkCoordinate, HashSet<int>> snapshotSections = new();
+        private readonly SortedSet<CellCoordinate> orderedWave = new();
         private readonly Dictionary<ChunkCoordinate, CellCoordinate[]> savedFrontierChunks = new();
         private readonly Dictionary<ChunkCoordinate, List<CellCoordinate>> activeByChunk = new();
         private readonly HashSet<ChunkCoordinate> dirtyFrontierChunks = new();
@@ -212,10 +221,10 @@ namespace MiniCivilization.World.WaterFlow
         private readonly Func<CellCoordinate[]> captureFrontier;
         private readonly Func<bool> hasPendingSnapshot;
 
-        public bool HasWork => activeWave.Count > 0 || chunkStates.Count > 0;
-        public bool HasRunnableWork => activeWave.Count > 0
+        public bool HasWork => waveWork != null || activeWave.Count > 0 || chunkStates.Count > 0;
+        public bool HasRunnableWork => waveWork != null || activeWave.Count > 0
             || hasRunnableFrontier;
-        public bool IsWaveInProgress => cursor > 0;
+        public bool IsWaveInProgress => waveWork != null;
         public int PendingCellCount
         {
             get
@@ -285,6 +294,8 @@ namespace MiniCivilization.World.WaterFlow
                 return;
             }
 
+            if (waveWork != null && (!wavePrepared || DependenciesChanged(world)))
+                CancelActiveWave(state, requeue: true);
             for (var index = 0; index < frontier.Count; index++)
             {
                 var cell = frontier[index];
@@ -315,7 +326,8 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             target.Clear();
-            CancelActiveWave(state, requeue: true);
+            if (!wavePrepared || waveDependencies.ContainsKey(coordinate) || activeByChunk.ContainsKey(coordinate))
+                CancelActiveWave(state, requeue: true);
             if (chunkStates.TryGetValue(coordinate, out var chunkState))
             {
                 chunkStates.Remove(coordinate);
@@ -335,7 +347,6 @@ namespace MiniCivilization.World.WaterFlow
             IReadOnlyCollection<CellColumnCoordinate> changedColumns)
         {
             ValidateWorldAndState(world, state);
-            CancelActiveWave(state, requeue: true);
             restartWave.Clear();
 
             if (changedCells != null)
@@ -371,6 +382,8 @@ namespace MiniCivilization.World.WaterFlow
                 }
             }
 
+            if (!wavePrepared || DependenciesChanged(world))
+                CancelActiveWave(state, requeue: true);
             AddFrontier(restartWave);
             RefreshRunnableFrontier();
             PersistFrontier(world, state);
@@ -381,7 +394,10 @@ namespace MiniCivilization.World.WaterFlow
             WaterFlowState state)
         {
             ValidateWorldAndState(world, state);
-            CancelActiveWave(state, requeue: true);
+            if (!wavePrepared) CancelActiveWave(state, requeue: true);
+            else
+                foreach (var cell in activeWave)
+                    if (!CanProcess(cell)) { CancelActiveWave(state, requeue: true); break; }
             RefreshRunnableFrontier();
             PersistFrontier(world, state);
         }
@@ -393,6 +409,7 @@ namespace MiniCivilization.World.WaterFlow
             int maximumCells,
             out WaterFlowRecalculationResult completedResult)
         {
+
             ValidateWorldAndState(world, state);
             if (maximumCells <= 0)
             {
@@ -400,51 +417,116 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             completedResult = null;
-            if (activeWave.Count == 0)
+            if (waveWork != null && DependenciesChanged(world))
+                CancelActiveWave(state, requeue: true);
+            if (waveWork == null)
             {
-                BuildActiveWave();
-                if (activeWave.Count == 0)
+                waveRevision = world.CellRevision;
+                waveDependencies.Clear();
+                wavePrepared = false;
+                waveWork = RunWave(world, state, parameters).GetEnumerator();
+            }
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (var work = 0; work < maximumCells; work++)
+            {
+                if (!waveWork.MoveNext())
                 {
-                    state.IsRecalculating = false;
-                    return false;
+                    waveWork.Dispose(); waveWork = null;
+                    state.IsRecalculating = HasRunnableWork;
+                    completedResult = result;
+                    return true;
                 }
+                if ((System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d /
+                    System.Diagnostics.Stopwatch.Frequency >= 2d) break;
             }
+            return false;
+        }
 
-            if (cursor == 0)
-            {
-                result.Clear();
-                state.CancelResolutionPass();
-            }
-
-            var stop = Math.Min(activeWave.Count, cursor + maximumCells);
-            for (; cursor < stop; cursor++)
+        private IEnumerable<int> RunWave(WorldData world, WaterFlowState state, WaterFlowParameters parameters)
+        {
+            result.Clear(); state.CancelResolutionPass();
+            foreach (var work in PrepareWave()) yield return work;
+            wavePrepared = true;
+            if (activeWave.Count == 0) { state.IsRecalculating = false; yield break; }
+            for (cursor = 0; cursor < activeWave.Count; cursor++)
             {
                 var cell = activeWave[cursor];
-                state.StageResolvedCell(
-                    cell,
-                    ResolveDesiredWater(
-                        world,
-                        state,
-                        cell,
-                        parameters));
+                TrackDependencies(world, cell);
+                state.StageResolvedCell(cell, ResolveDesiredWater(world, state, cell, parameters));
+                yield return 0;
             }
-
-            if (cursor < activeWave.Count)
+            if (!state.HasStagedCells)
             {
-                return false;
+                ClearActiveWave(); cursor = 0;
+                RefreshRunnableFrontier(); PersistFrontier(world, state);
+                yield break;
             }
+            // Snapshot construction and writes are private until the entire wave is ready.
+            foreach (var work in BuildApplySet(world, state)) yield return work;
+            snapshotSections.Clear();
+            foreach (var cell in applyCells)
+            {
+                for (var z = cell.Z - 1; z <= cell.Z + 1; z++)
+                for (var x = cell.X - 1; x <= cell.X + 1; x++)
+                {
+                    if (!world.IsColumnLoaded(x, z)) continue;
+                    var coordinate = ToChunk(new CellCoordinate(x, cell.Y, z));
+                    if (!snapshotSections.TryGetValue(coordinate, out var sections))
+                        snapshotSections.Add(coordinate, sections = new HashSet<int>());
+                    for (var y = Math.Max(0, cell.Y - 1); y <= Math.Min(world.Height - 1, cell.Y + 1); y++)
+                        sections.Add(y / world.ChunkSectionSizeY);
+                }
+                yield return 0;
+            }
+            preparedWorld = new WorldData(world.Settings);
+            foreach (var pair in snapshotSections)
+            {
+                if (world.TryGetChunk(pair.Key, out var chunk))
+                    preparedWorld.AttachGeneratedChunk(chunk.CopySections(pair.Value));
+                yield return 0;
+            }
+            foreach (var work in ApplyStagedState(preparedWorld, state)) yield return work;
+            foreach (var work in BuildNextWave(preparedWorld)) yield return work;
+            publishedChunks.Clear();
+            foreach (var cell in result.LogicalChangedCells)
+            {
+                var chunk = ToChunk(cell);
+                publishedChunks.Add(new ChunkSectionCoordinate(chunk.X, cell.Y / world.ChunkSectionSizeY, chunk.Z));
+                yield return 0;
+            }
+            world.PublishWaterCells(preparedWorld, publishedChunks);
+            preparedWorld = null;
+            snapshotSections.Clear();
+            ClearActiveWave(); cursor = 0;
+            RefreshRunnableFrontier(); PersistFrontier(world, state);
+        }
 
-            BuildApplySet(world, state);
-            ApplyStagedState(world, state);
-            BuildNextWave(world);
-            ClearActiveWave();
-            cursor = 0;
-            AddFrontier(nextWave);
-            RefreshRunnableFrontier();
-            PersistFrontier(world, state);
+        private bool DependenciesChanged(WorldData world)
+        {
+            if (waveRevision == world.CellRevision) return false;
+            waveRevision = world.CellRevision;
+            foreach (var pair in waveDependencies)
+            {
+                world.TryGetChunk(pair.Key, out var chunk);
+                if (!ReferenceEquals(chunk, pair.Value.Chunk)
+                    || (chunk != null && chunk.CellRevision != pair.Value.Revision)) return true;
+            }
+            return false;
+        }
 
-            completedResult = result;
-            return true;
+        private void TrackDependencies(WorldData world, CellCoordinate cell)
+        {
+            // Two horizontal cells cover donor look-ahead and visual neighbour queries.
+            var minimum = ToChunk(new CellCoordinate(cell.X - 2, cell.Y, cell.Z - 2));
+            var maximum = ToChunk(new CellCoordinate(cell.X + 2, cell.Y, cell.Z + 2));
+            for (var z = minimum.Z; z <= maximum.Z; z++)
+            for (var x = minimum.X; x <= maximum.X; x++)
+            {
+                var coordinate = new ChunkCoordinate(x, z);
+                if (waveDependencies.ContainsKey(coordinate)) continue;
+                world.TryGetChunk(coordinate, out var chunk);
+                waveDependencies.Add(coordinate, (chunk, chunk?.CellRevision ?? 0));
+            }
         }
 
         private static WaterData ResolveDesiredWater(
@@ -488,6 +570,9 @@ namespace MiniCivilization.World.WaterFlow
 
             var desired = default(WaterData);
             var hasHorizontalInflow = false;
+            var selectedDonor = default(CellCoordinate);
+            var hasSelectedDonor = false;
+            var currentTypeSupported = false;
             var connectsToSourceBelow = IsSourceImmediatelyBelow(
                 world,
                 state,
@@ -509,12 +594,13 @@ namespace MiniCivilization.World.WaterFlow
                             coordinate.Y + 1,
                             coordinate.Z)))
                 {
-                    desired = CreateDynamicWater(
+                    ConsiderInflow(
+                        aboveCell,
                         above.Amount,
-                        (above.Flow
-                            & FlowDirection.Horizontal)
+                        (above.Flow & FlowDirection.Horizontal)
                         | FlowDirection.Down,
-                        above.Type);
+                        above.Type,
+                        horizontal: false);
                 }
             }
 
@@ -590,23 +676,12 @@ namespace MiniCivilization.World.WaterFlow
                     continue;
                 }
 
-                if (candidateAmount > desired.Amount)
-                {
-                    desired = CreateDynamicWater(
-                        candidateAmount,
-                        outgoingDirection,
-                        donor.Type);
-                    hasHorizontalInflow = true;
-                }
-                else if (candidateAmount == desired.Amount
-                         && candidateAmount > 0)
-                {
-                    desired.Flow |= outgoingDirection;
-                    desired.Type = MergeWaterType(
-                        desired.Type,
-                        donor.Type);
-                    hasHorizontalInflow = true;
-                }
+                ConsiderInflow(
+                    donorCell,
+                    candidateAmount,
+                    outgoingDirection,
+                    donor.Type,
+                    horizontal: true);
             }
 
             if (desired.Amount > 0)
@@ -636,6 +711,52 @@ namespace MiniCivilization.World.WaterFlow
             }
 
             return ApplyDissipation(current, desired, parameters);
+
+            void ConsiderInflow(
+                CellCoordinate donorCoordinate,
+                byte amount,
+                FlowDirection direction,
+                WaterType type,
+                bool horizontal)
+            {
+                if (amount == 0 || type == WaterType.None)
+                {
+                    return;
+                }
+
+                if (amount > desired.Amount)
+                {
+                    desired = CreateDynamicWater(amount, direction, type);
+                    selectedDonor = donorCoordinate;
+                    hasSelectedDonor = true;
+                    currentTypeSupported = type == current.Type;
+                    hasHorizontalInflow = horizontal;
+                    return;
+                }
+
+                if (amount != desired.Amount)
+                {
+                    return;
+                }
+
+                desired.Flow |= direction;
+                hasHorizontalInflow |= horizontal;
+                if (type == current.Type)
+                {
+                    desired.Type = current.Type;
+                    currentTypeSupported = true;
+                    return;
+                }
+
+                if (!currentTypeSupported
+                    && (!hasSelectedDonor
+                        || donorCoordinate.CompareTo(selectedDonor) < 0))
+                {
+                    desired.Type = type;
+                    selectedDonor = donorCoordinate;
+                    hasSelectedDonor = true;
+                }
+            }
         }
 
         private static FlowDirection ResolveSourceOutflowDirections(
@@ -751,34 +872,6 @@ namespace MiniCivilization.World.WaterFlow
             Role = WaterRole.Dynamic,
             Type = type,
             Flow = direction
-        };
-
-        private static WaterType MergeWaterType(
-            WaterType current,
-            WaterType candidate)
-        {
-            if (current == candidate || candidate == WaterType.None)
-            {
-                return current;
-            }
-
-            if (current == WaterType.None)
-            {
-                return candidate;
-            }
-
-            return TypePriority(candidate) > TypePriority(current)
-                ? candidate
-                : current;
-        }
-
-        private static int TypePriority(WaterType type) => type switch
-        {
-            WaterType.River => 4,
-            WaterType.Sea => 3,
-            WaterType.Lake => 2,
-            WaterType.Pond => 1,
-            _ => 0
         };
 
         private static bool CanFlowDown(
@@ -912,7 +1005,7 @@ namespace MiniCivilization.World.WaterFlow
             return value != 0 && (value & (value - 1)) == 0;
         }
 
-        private void BuildApplySet(
+        private IEnumerable<int> BuildApplySet(
             WorldData world,
             WaterFlowState state)
         {
@@ -921,16 +1014,18 @@ namespace MiniCivilization.World.WaterFlow
             foreach (var pair in state.EnumerateStagedCells())
             {
                 AddCellAndNeighbors(world, applyCells, pair.Key);
+                yield return 0;
             }
 
             foreach (var cell in applyCells)
             {
                 previousVisualStates[cell] =
                     WaterVisualState.Resolve(world, cell);
+                yield return 0;
             }
         }
 
-        private void ApplyStagedState(
+        private IEnumerable<int> ApplyStagedState(
             WorldData world,
             WaterFlowState state)
         {
@@ -951,6 +1046,8 @@ namespace MiniCivilization.World.WaterFlow
                     continue;
                 }
 
+                if (!previousWater.Amount.Equals(pair.Value.Amount))
+                    result.PreviousWater[coordinate] = previousWater;
                 cell.Water = pair.Value;
                 cell.Normalize();
                 world.SetCellForEdit(
@@ -966,6 +1063,11 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     result.TopologyChangedCells.Add(pair.Key);
                 }
+                if (previousWater.Type != cell.Water.Type)
+                {
+                    result.WaterTypeChangedCells.Add(pair.Key);
+                }
+                yield return 0;
             }
 
             foreach (var cell in applyCells)
@@ -978,59 +1080,39 @@ namespace MiniCivilization.World.WaterFlow
                 {
                     result.RenderChangedCells.Add(cell);
                 }
+                yield return 0;
             }
 
             state.CancelResolutionPass();
         }
 
-        private void BuildNextWave(WorldData world)
+        private IEnumerable<int> BuildNextWave(WorldData world)
         {
             nextWave.Clear();
             foreach (var cell in result.LogicalChangedCells)
             {
                 AddCellAndNeighbors(world, nextWave, cell);
+                yield return 0;
             }
+            foreach (var cell in nextWave) { AddFrontier(cell); yield return 0; }
         }
 
-        private void BuildActiveWave()
+        private IEnumerable<int> PrepareWave()
         {
-            ClearActiveWave();
-            emptyChunks.Clear();
+            ClearActiveWave(); orderedWave.Clear();
             foreach (var pair in chunkStates)
+                foreach (var cell in pair.Value.Frontier)
+                { if (CanProcess(cell)) orderedWave.Add(cell); yield return 0; }
+            foreach (var cell in orderedWave)
             {
-                var chunkState = pair.Value;
-                selectedCells.Clear();
-                foreach (var cell in chunkState.Frontier)
-                {
-                    if (CanProcess(cell))
-                    {
-                        selectedCells.Add(cell);
-                    }
-                }
-
-                for (var index = 0; index < selectedCells.Count; index++)
-                {
-                    var cell = selectedCells[index];
-                    chunkState.Frontier.Remove(cell);
-                    activeWave.Add(cell);
-                    dirtyFrontierChunks.Add(pair.Key);
-                    if (!activeByChunk.TryGetValue(pair.Key, out var active)) activeByChunk.Add(pair.Key, active = new List<CellCoordinate>());
-                    active.Add(cell);
-                }
-
-                if (chunkState.Frontier.Count == 0)
-                {
-                    emptyChunks.Add(pair.Key);
-                }
+                var chunk = ToChunk(cell);
+                chunkStates[chunk].Frontier.Remove(cell);
+                if (chunkStates[chunk].Frontier.Count == 0) chunkStates.Remove(chunk);
+                activeWave.Add(cell); dirtyFrontierChunks.Add(chunk);
+                if (!activeByChunk.TryGetValue(chunk, out var active)) activeByChunk.Add(chunk, active = new List<CellCoordinate>());
+                active.Add(cell); yield return 0;
             }
-
-            for (var index = 0; index < emptyChunks.Count; index++)
-            {
-                chunkStates.Remove(emptyChunks[index]);
-            }
-
-            activeWave.Sort();
-            cursor = 0;
+            orderedWave.Clear(); cursor = 0;
             RefreshRunnableFrontier();
         }
 
@@ -1038,6 +1120,11 @@ namespace MiniCivilization.World.WaterFlow
             WaterFlowState state,
             bool requeue)
         {
+
+            waveWork?.Dispose(); waveWork = null;
+            waveDependencies.Clear(); wavePrepared = false;
+            preparedWorld = null; publishedChunks.Clear(); orderedWave.Clear();
+            snapshotSections.Clear();
             state.CancelResolutionPass();
             if (requeue)
             {
@@ -1094,6 +1181,7 @@ namespace MiniCivilization.World.WaterFlow
         }
         private void RefreshRunnableFrontier()
         {
+
             if (streamingChanges) return;
             hasRunnableFrontier = false;
             foreach (var state in chunkStates.Values)

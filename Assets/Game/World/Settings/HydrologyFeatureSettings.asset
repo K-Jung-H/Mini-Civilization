@@ -13,42 +13,6 @@ MonoBehaviour:
   m_Name: HydrologyFeatureSettings
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Generation.Patterns.HydrologyFeatureSettings
   sea:
-    domainWarp:
-      field:
-        mode: 1
-        scale: 0.0045
-        layers: 3
-        frequencySpacing: 2
-        persistence: 0.45
-        octaveSeedStride: 1013
-      strengthCells: 18
-    basinField:
-      mode: 0
-      scale: 0.005
-      layers: 4
-      frequencySpacing: 2
-      persistence: 0.48
-      octaveSeedStride: 1013
-    basinVariation: 0.15
-    depthByInterior:
-      atZero: 0
-      atQuarter: 0.05
-      atHalf: 0.5
-      atThreeQuarters: 0.95
-      atOne: 1
-    maximumDepthCells:
-      minimum: 10
-      maximum: 10
-    seabedField:
-      mode: 1
-      scale: 0.035
-      layers: 4
-      frequencySpacing: 2
-      persistence: 0.42
-      octaveSeedStride: 1013
-    seabedAmplitudeCells:
-      minimum: 0.25
-      maximum: 0.8
     surfaceCell: 12
     surfaceStep: 0
   basins:

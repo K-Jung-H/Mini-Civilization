@@ -8,9 +8,6 @@ namespace MiniCivilization.World.Meshing
 {
     internal static class TerrainChunkMeshBuilder
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Mesh.Terrain");
-#endif
 
         private const float Shoulder = 0.2f;
         private const float CoreMin = Shoulder;
@@ -27,9 +24,6 @@ namespace MiniCivilization.World.Meshing
             MeshBuffers buffers,
             List<ExposedCell> cells, bool collectCandidates = true)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             buffers.Clear();
             var startX = patchX * patchSize;
             var startZ = patchZ * patchSize;

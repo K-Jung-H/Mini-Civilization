@@ -10,7 +10,7 @@ namespace MiniCivilization.World.WaterFlow
         public int SurfaceCellCount { get; internal set; }
         public bool TouchesWorldEdge { get; internal set; }
         public IReadOnlyList<CellCoordinate> Cells => composedCells ?? cells;
-        private readonly IReadOnlyList<CellCoordinate> composedCells;
+        private IReadOnlyList<CellCoordinate> composedCells;
 
         private readonly List<CellCoordinate> cells = new();
 
@@ -20,6 +20,16 @@ namespace MiniCivilization.World.WaterFlow
         }
 
         internal void Add(CellCoordinate coordinate) => cells.Add(coordinate);
+
+        // Used only while assembling an unpublished graph result.
+        internal void AddPart(WaterBody part)
+        {
+            if (composedCells == null) composedCells = new SegmentedCells();
+            ((SegmentedCells)composedCells).Append(part);
+            VolumeUnits += part.VolumeUnits;
+            SurfaceCellCount += part.SurfaceCellCount;
+            TouchesWorldEdge |= part.TouchesWorldEdge;
+        }
 
         internal WaterBody(int id, IReadOnlyList<WaterBody> parts) : this(id)
         {
@@ -34,21 +44,26 @@ namespace MiniCivilization.World.WaterFlow
 
         private sealed class SegmentedCells : IReadOnlyList<CellCoordinate>
         {
-            private readonly IReadOnlyList<WaterBody> parts;
-            private readonly int[] ends;
-            public int Count { get; }
+            private readonly List<WaterBody> parts = new();
+            private readonly List<int> ends = new();
+            public int Count { get; private set; }
+            internal SegmentedCells() { }
+            internal void Append(WaterBody part)
+            {
+                parts.Add(part);
+                Count += part.Cells.Count;
+                ends.Add(Count);
+            }
             internal SegmentedCells(IReadOnlyList<WaterBody> parts)
             {
-                this.parts = parts;
-                ends = new int[parts.Count];
-                for (var i = 0; i < parts.Count; i++) ends[i] = Count += parts[i].Cells.Count;
+                foreach (var part in parts) Append(part);
             }
             public CellCoordinate this[int index]
             {
                 get
                 {
                     if ((uint)index >= Count) throw new System.ArgumentOutOfRangeException(nameof(index));
-                    var part = System.Array.BinarySearch(ends, index + 1);
+                    var part = ends.BinarySearch(index + 1);
                     if (part < 0) part = ~part;
                     return parts[part].Cells[index - (part == 0 ? 0 : ends[part - 1])];
                 }

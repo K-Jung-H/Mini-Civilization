@@ -175,11 +175,15 @@ namespace MiniCivilization.World.Runtime
                     horizontalCellCount * worldHeight)];
                 WaterDistances = new ushort[horizontalCellCount];
                 WetColumns = new bool[horizontalCellCount];
+                InputGround = new bool[horizontalCellCount];
+                InputWet = new bool[horizontalCellCount];
             }
 
             public ushort[] OpenHeights { get; }
-            public ushort[] WaterDistances { get; }
-            public bool[] WetColumns { get; }
+            public ushort[] WaterDistances { get; set; }
+            public bool[] WetColumns { get; set; }
+            public bool[] InputGround { get; }
+            public bool[] InputWet { get; }
         }
 
         private readonly WorldData world;
@@ -243,13 +247,58 @@ namespace MiniCivilization.World.Runtime
                     column,
                     changed.X,
                     changed.Z);
+                if (RefreshDistanceInput(coordinate, column, changed.X, changed.Z))
+                    RebuildWaterDistances();
             }
         }
 
+        private IEnumerator<int> distanceWork;
+        private Dictionary<ChunkCoordinate, ChunkCacheData> distanceWorking;
+        private bool distancesRequested;
         public void RebuildWaterDistances()
         {
-            waterQueue.Clear();
+            distanceWork?.Dispose(); distanceWork = null;
+            distanceWorking = null;
+            distancesRequested = true;
+        }
+        internal void AdvanceWaterDistances(int budget = 2048)
+        {
+
+            if (!distancesRequested) return;
+            if (distanceWork == null)
+            { distanceWork = BuildWaterDistances().GetEnumerator(); }
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (var i = 0; i < budget; i++)
+            {
+                if (!distanceWork.MoveNext())
+                {
+                    distanceWork.Dispose(); distanceWork = null;
+                    distanceWorking = null; distancesRequested = false; return;
+                }
+                if ((System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d /
+                    System.Diagnostics.Stopwatch.Frequency >= 2d) return;
+            }
+        }
+        private bool TryGetDistanceWorking(int x, int z, out ChunkCoordinate coordinate, out ChunkCacheData column)
+        {
+            coordinate = WorldCoordinateUtility.ToChunk(x, z, world.ChunkSizeX);
+            return distanceWorking.TryGetValue(coordinate, out column);
+        }
+        private bool HasWorkingDryNeighbor(int x, int z)
+        {
+            foreach (var direction in Directions)
+                if (TryGetDistanceWorking(x + direction.x, z + direction.z, out var coordinate, out var column) &&
+                    !column.WetColumns[ToLocalColumnIndex(coordinate, x + direction.x, z + direction.z)] &&
+                    column.InputGround[ToLocalColumnIndex(coordinate, x + direction.x, z + direction.z)]) return true;
+            return false;
+        }
+        private IEnumerable<int> BuildWaterDistances()
+        {
+            distanceWorking = new Dictionary<ChunkCoordinate, ChunkCacheData>();
             foreach (var pair in chunks)
+            { distanceWorking.Add(pair.Key, new ChunkCacheData(HorizontalCellCount, 0)); yield return 0; }
+            waterQueue.Clear();
+            foreach (var pair in distanceWorking)
             {
                 var coordinate = pair.Key;
                 var column = pair.Value;
@@ -261,17 +310,18 @@ namespace MiniCivilization.World.Runtime
                 for (var x = startX; x < endX; x++)
                 {
                     var localIndex = ToLocalColumnIndex(coordinate, x, z);
-                    var height = surface.GetSurfaceHeight(x, z);
-                    var wet = height.HasGround
-                        && height.WaterHeight > height.GroundHeight;
+                    var input = chunks[coordinate];
+                    var wet = input.InputWet[localIndex];
+                    column.InputGround[localIndex] = input.InputGround[localIndex];
                     column.WetColumns[localIndex] = wet;
                     column.WaterDistances[localIndex] = wet
                         ? ushort.MaxValue
                         : (ushort)0;
+                    yield return 0;
                 }
             }
 
-            foreach (var pair in chunks)
+            foreach (var pair in distanceWorking)
             {
                 var coordinate = pair.Key;
                 var column = pair.Value;
@@ -282,9 +332,10 @@ namespace MiniCivilization.World.Runtime
                 for (var z = startZ; z < endZ; z++)
                 for (var x = startX; x < endX; x++)
                 {
+                    yield return 0;
                     var localIndex = ToLocalColumnIndex(coordinate, x, z);
                     if (!column.WetColumns[localIndex]
-                        || !HasPreparedDryNeighbor(x, z))
+                        || !HasWorkingDryNeighbor(x, z))
                     {
                         continue;
                     }
@@ -296,8 +347,9 @@ namespace MiniCivilization.World.Runtime
 
             while (waterQueue.Count > 0)
             {
+                yield return 0;
                 var current = waterQueue.Dequeue();
-                if (!TryGetChunkCacheData(
+                if (!TryGetDistanceWorking(
                         current.X,
                         current.Z,
                         out var currentCoordinate,
@@ -323,7 +375,7 @@ namespace MiniCivilization.World.Runtime
                     var direction = Directions[directionIndex];
                     var nextX = current.X + direction.x;
                     var nextZ = current.Z + direction.z;
-                    if (!TryGetChunkCacheData(
+                    if (!TryGetDistanceWorking(
                             nextX,
                             nextZ,
                             out var nextCoordinate,
@@ -346,6 +398,12 @@ namespace MiniCivilization.World.Runtime
                     waterQueue.Enqueue(new CellColumnCoordinate(nextX, nextZ));
                 }
             }
+            // No yields during publication: readers see only the previous or completed field.
+            foreach (var pair in distanceWorking)
+            {
+                chunks[pair.Key].WaterDistances = pair.Value.WaterDistances;
+                chunks[pair.Key].WetColumns = pair.Value.WetColumns;
+            }
         }
 
         public void RebuildWaterDistances(
@@ -359,18 +417,16 @@ namespace MiniCivilization.World.Runtime
             for (var index = 0; index < changedColumns.Count; index++)
             {
                 var changed = changedColumns[index];
-                if (IsPreparedCellColumn(changed.X, changed.Z)
-                    || HasPreparedNeighbor(changed.X, changed.Z))
+                if (TryGetChunkCacheData(changed.X, changed.Z, out var coordinate, out var column)
+                    && RefreshDistanceInput(coordinate, column, changed.X, changed.Z))
                 {
                     RebuildWaterDistances();
-                    return;
                 }
             }
         }
 
         internal bool PrepareChunk(
-            ChunkCoordinate coordinate,
-            bool rebuildWaterDistances)
+            ChunkCoordinate coordinate)
         {
             ValidateChunk(coordinate);
             if (chunks.ContainsKey(coordinate))
@@ -388,30 +444,37 @@ namespace MiniCivilization.World.Runtime
             for (var x = startX; x < endX; x++)
             {
                 RebuildOpenHeightColumn(coordinate, column, x, z);
+                RefreshDistanceInput(coordinate, column, x, z);
             }
 
-            if (rebuildWaterDistances)
-            {
-                RebuildWaterDistances();
-            }
+            // Prepared membership is itself an input to the distance field.
+            RebuildWaterDistances();
 
             return true;
         }
 
         internal bool ReleaseChunk(
-            ChunkCoordinate coordinate,
-            bool rebuildWaterDistances)
+            ChunkCoordinate coordinate)
         {
             if (!chunks.Remove(coordinate))
             {
                 return false;
             }
 
-            if (rebuildWaterDistances)
-            {
-                RebuildWaterDistances();
-            }
+            // Prepared membership is itself an input to the distance field.
+            RebuildWaterDistances();
 
+            return true;
+        }
+
+        private bool RefreshDistanceInput(ChunkCoordinate coordinate, ChunkCacheData column, int x, int z)
+        {
+            var index = ToLocalColumnIndex(coordinate, x, z);
+            var height = surface.GetSurfaceHeight(x, z);
+            var wet = height.HasGround && height.WaterHeight > height.GroundHeight;
+            if (column.InputGround[index] == height.HasGround && column.InputWet[index] == wet) return false;
+            column.InputGround[index] = height.HasGround;
+            column.InputWet[index] = wet;
             return true;
         }
 
@@ -448,63 +511,6 @@ namespace MiniCivilization.World.Runtime
                 ceiling = y * WorldGrid.HeightStepsPerCell;
             }
         }
-
-        private bool HasPreparedDryNeighbor(int x, int z)
-        {
-            for (var directionIndex = 0;
-                 directionIndex < Directions.Length;
-                 directionIndex++)
-            {
-                var direction = Directions[directionIndex];
-                var nextX = x + direction.x;
-                var nextZ = z + direction.z;
-                if (!TryGetChunkCacheData(
-                        nextX,
-                        nextZ,
-                        out var coordinate,
-                        out var column))
-                {
-                    continue;
-                }
-
-                var index = ToLocalColumnIndex(
-                    coordinate,
-                    nextX,
-                    nextZ);
-                if (!column.WetColumns[index]
-                    && surface.GetSurfaceHeight(nextX, nextZ).HasGround)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool HasPreparedNeighbor(int x, int z)
-        {
-            for (var directionIndex = 0;
-                 directionIndex < Directions.Length;
-                 directionIndex++)
-            {
-                var direction = Directions[directionIndex];
-                if (IsPreparedCellColumn(
-                    x + direction.x,
-                    z + direction.z))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private bool IsPreparedCellColumn(int x, int z) =>
-            world.IsColumnLoaded(x, z)
-            && chunks.ContainsKey(WorldCoordinateUtility.ToChunk(
-                x,
-                z,
-                world.ChunkSizeX));
 
         private bool TryGetChunkCacheData(
             int x,

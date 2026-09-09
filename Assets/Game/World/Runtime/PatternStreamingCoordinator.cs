@@ -78,12 +78,6 @@ namespace MiniCivilization.World.Runtime
 
     internal sealed class PatternStreamingCoordinator : IDisposable
     {
-#if ENABLE_PROFILER
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage0 = new("World.Streaming.Update");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage1 = new("World.Streaming.Unload");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage2 = new("World.Streaming.Cells");
-        private static readonly Unity.Profiling.ProfilerMarker ProfileStage3 = new("World.Streaming.Activate");
-#endif
 
         private readonly WorldRuntime runtime;
         private readonly WorldGenerationConfiguration configuration;
@@ -184,9 +178,6 @@ namespace MiniCivilization.World.Runtime
 
         public void Update(ChunkCoordinate nextTarget)
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage0.Auto();
-#endif
             ThrowIfDisposed();
             runtime.BeginStreamingChanges();
             try
@@ -293,9 +284,6 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessUnloads()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage1.Auto();
-#endif
             var count = Math.Min(unloadQueue.Count, configuration.ChunkUnloadPerFrame);
             for (var index = 0; index < count; index++)
             {
@@ -309,9 +297,6 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessPreparations()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage2.Auto();
-#endif
             var completed = 0;
             var probes = 0;
             for (var index = 0; index < prepareQueue.Count
@@ -406,9 +391,6 @@ namespace MiniCivilization.World.Runtime
 
         private void ProcessActivations()
         {
-#if ENABLE_PROFILER
-            using var profilerScope = ProfileStage3.Auto();
-#endif
             var count = Math.Min(activateQueue.Count, configuration.ChunkActivatePerFrame);
             for (var index = 0; index < count; index++)
             {
