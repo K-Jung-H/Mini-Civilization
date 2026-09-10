@@ -13,13 +13,22 @@ namespace MiniCivilization.World.Presentation
     public sealed class WorldEntityRenderer : MonoBehaviour
     {
         [SerializeField] private Transform entityRoot;
+        [SerializeField] private Transform placementPreviewRoot;
+        [SerializeField] private Transform animalRoot;
+        [SerializeField] private Transform natureRoot;
+        [SerializeField] private Transform humanRoot;
+        [SerializeField] private Transform buildingRoot;
 
-        private readonly Dictionary<WorldEntityId, EntityController> viewsByEntityId = new();
-        private readonly Dictionary<RenderGroupKey, EntityController> visibleViewsByGroup = new();
-        private readonly List<Entity> entities = new();
+        private readonly Dictionary<WorldEntityId, EntityView> viewsByEntityId = new();
+        private readonly Dictionary<RenderGroupKey, EntityView> visibleViewsByGroup = new();
+        private readonly List<EntityRuntime> entities = new();
         private readonly HashSet<WorldEntityId> pendingEntityIds = new();
         private readonly HashSet<WorldEntityId> interactionEntityIds = new();
-        private readonly List<EntityController> placementPreviewViews = new();
+        private readonly List<EntityView> placementPreviewViews = new();
+        private readonly Dictionary<EntityView, EntityCategory> categoryByView = new();
+        private readonly Dictionary<EntityCategory, List<EntityView>> viewPools = new();
+        private readonly Dictionary<EntityView, Transform> contentByView = new();
+        private readonly Dictionary<EntityView, EntityView> prefabByView = new();
         private EntityDefinition placementPreviewDefinition;
         private WorldRuntime runtime;
         private EntityCatalog catalog;
@@ -30,7 +39,7 @@ namespace MiniCivilization.World.Presentation
 
         public bool TryGetView(
             WorldEntityId id,
-            out EntityController view) =>
+            out EntityView view) =>
             viewsByEntityId.TryGetValue(id, out view);
 
         public bool IsWaterSurface(CellCoordinate coordinate)
@@ -61,9 +70,9 @@ namespace MiniCivilization.World.Presentation
             foreach (var view in viewsByEntityId.Values)
             {
                 if (view != null
-                    && view.BoundEntity is DynamicEntity { IsMoving: true } moving)
+                    && view.BoundEntity.FSM is DynamicEntityFSM { IsMoving: true } moving)
                 {
-                    ApplyRenderPose(moving, view);
+                    ApplyRenderPose(view.BoundEntity, view);
                 }
             }
         }
@@ -89,10 +98,12 @@ namespace MiniCivilization.World.Presentation
 
             Unbind();
             entityCatalog.ValidateCatalog();
+            EnsureCategoryRoots();
             runtime = worldRuntime;
             catalog = entityCatalog;
             runtime.Entities.Changed += OnEntitiesChanged;
             runtime.Entities.PresentationChanged += OnPresentationChanged;
+            runtime.Entities.EntityReleasing += OnEntityReleasing;
             runtime.EntityRenderStateChanged += OnEntityRenderStateChanged;
 
             foreach (var pair in runtime.ChunkRuntimes)
@@ -113,6 +124,7 @@ namespace MiniCivilization.World.Presentation
             {
                 runtime.Entities.Changed -= OnEntitiesChanged;
                 runtime.Entities.PresentationChanged -= OnPresentationChanged;
+                runtime.Entities.EntityReleasing -= OnEntityReleasing;
                 runtime.EntityRenderStateChanged -= OnEntityRenderStateChanged;
                 runtime = null;
             }
@@ -126,15 +138,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                view.Unbind();
-                if (Application.isPlaying)
-                {
-                    Destroy(view.gameObject);
-                }
-                else
-                {
-                    DestroyImmediate(view.gameObject);
-                }
+                ReturnView(view);
             }
 
             viewsByEntityId.Clear();
@@ -142,6 +146,7 @@ namespace MiniCivilization.World.Presentation
             entities.Clear();
             pendingEntityIds.Clear();
             interactionEntityIds.Clear();
+            ClearViewPools();
         }
 
         public void ShowPlacementPreview(
@@ -190,25 +195,25 @@ namespace MiniCivilization.World.Presentation
 
         public void HidePlacementPreview()
         {
-            for (var index = 0; index < placementPreviewViews.Count; index++)
-            {
-                if (placementPreviewViews[index] != null)
-                {
-                    placementPreviewViews[index].gameObject.SetActive(false);
-                }
-            }
+            ClearPlacementPreviewViews();
         }
 
         private void EnsurePlacementPreviewCount(
             EntityDefinition definition,
             int count)
         {
-            var parent = entityRoot != null ? entityRoot : transform;
             while (placementPreviewViews.Count < count)
             {
-                var view = Instantiate(definition.Prefab, parent, false);
+                var view = RentView(definition, GetPlacementPreviewRoot());
                 view.name = $"{definition.DisplayName} [Placement Preview]";
                 placementPreviewViews.Add(view);
+            }
+
+            while (placementPreviewViews.Count > count)
+            {
+                var last = placementPreviewViews.Count - 1;
+                ReturnView(placementPreviewViews[last]);
+                placementPreviewViews.RemoveAt(last);
             }
         }
 
@@ -222,14 +227,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (Application.isPlaying)
-                {
-                    Destroy(view.gameObject);
-                }
-                else
-                {
-                    DestroyImmediate(view.gameObject);
-                }
+                ReturnView(view);
             }
 
             placementPreviewViews.Clear();
@@ -254,6 +252,14 @@ namespace MiniCivilization.World.Presentation
             }
 
             RefreshVisualGroups();
+        }
+
+        private void OnEntityReleasing(EntityRuntime entity)
+        {
+            if (entity != null && entity.IsBound)
+            {
+                RemoveView(entity.Id);
+            }
         }
 
         private void OnEntityRenderStateChanged(ChunkRuntime chunkRuntime)
@@ -353,7 +359,7 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private void SynchronizeEntity(Entity entity)
+        private void SynchronizeEntity(EntityRuntime entity)
         {
             if (viewsByEntityId.TryGetValue(entity.Id, out var existing))
             {
@@ -363,10 +369,7 @@ namespace MiniCivilization.World.Presentation
             }
 
             var definition = catalog.GetDefinition(entity.TypeKey);
-            var prefab = definition.Prefab;
-
-            var parent = entityRoot != null ? entityRoot : transform;
-            var view = Instantiate(prefab, parent, false);
+            var view = RentView(definition, GetCategoryRoot(entity.TypeKey.Category));
             try
             {
                 view.name = $"{definition.DisplayName} [{entity.Id}]";
@@ -376,22 +379,15 @@ namespace MiniCivilization.World.Presentation
             }
             catch
             {
-                if (Application.isPlaying)
-                {
-                    Destroy(view.gameObject);
-                }
-                else
-                {
-                    DestroyImmediate(view.gameObject);
-                }
+                ReturnView(view);
 
                 throw;
             }
         }
 
         private void ApplyRenderPose(
-            Entity entity,
-            EntityController view)
+            EntityRuntime entity,
+            EntityView view)
         {
             var heightBasis = view.RenderHeightBasis;
             var position = ResolveCellPosition(
@@ -406,7 +402,7 @@ namespace MiniCivilization.World.Presentation
                 position = buildingPosition;
             }
 
-            if (entity is DynamicEntity { IsMoving: true } moving)
+            if (entity.FSM is DynamicEntityFSM { IsMoving: true } moving)
             {
                 if (runtime.Entities.TryGetActiveWayMove(
                         entity.Id,
@@ -571,6 +567,8 @@ namespace MiniCivilization.World.Presentation
             CellCoordinate coordinate,
             EntityVisualMotionProfile.RenderHeightBasis heightBasis)
         {
+            if (!runtime.Data.Contains(coordinate.X, coordinate.Y, coordinate.Z))
+                throw new InvalidOperationException($"Entity render Cell {coordinate} is outside the world.");
             if (!runtime.Data.TryGetCell(
                     coordinate.X,
                     coordinate.Y,
@@ -578,7 +576,7 @@ namespace MiniCivilization.World.Presentation
                     out var cell))
             {
                 throw new InvalidOperationException(
-                    $"Entity render Cell {coordinate} is outside the world.");
+                    $"Entity render Cell {coordinate} belongs to an unloaded Chunk.");
             }
 
             var heightUnits = EntityGroundSupport.TryResolve(
@@ -663,7 +661,7 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                if (entity is DynamicEntity { IsMoving: true }
+                if (entity.FSM is DynamicEntityFSM { IsMoving: true }
                     || interactionEntityIds.Contains(entity.Id))
                 {
                     view.SetVisualVisible(true);
@@ -699,6 +697,205 @@ namespace MiniCivilization.World.Presentation
             }
 
             view.Unbind();
+            ReturnView(view);
+        }
+
+        private EntityView RentView(EntityDefinition definition, Transform parent)
+        {
+            var category = definition.TypeKey.Category;
+            EntityView view = null;
+            if (viewPools.TryGetValue(category, out var pool))
+            {
+                pool.RemoveAll(candidate => candidate == null);
+                var selected = -1;
+                for (var index = pool.Count - 1; index >= 0; index--)
+                {
+                    var candidate = pool[index];
+                    selected = index;
+                    if (prefabByView.TryGetValue(candidate, out var prefab)
+                        && prefab == definition.Prefab) break;
+                }
+                if (selected >= 0)
+                {
+                    view = pool[selected];
+                    pool.RemoveAt(selected);
+                }
+            }
+
+            if (view == null)
+            {
+                view = CreateCategoryView(category, parent);
+                categoryByView.Add(view, category);
+            }
+            else
+            {
+                if (view.transform.parent != parent) view.transform.SetParent(parent, false);
+            }
+
+            try
+            {
+                AttachContent(view, definition.Prefab);
+                view.gameObject.SetActive(true);
+                if (view is AnimatedEntityView animated) animated.ResetAnimator();
+                return view;
+            }
+            catch
+            {
+                DetachContent(view);
+                categoryByView.Remove(view);
+                DestroyView(view);
+                throw;
+            }
+        }
+
+        private void ReturnView(EntityView view)
+        {
+            if (view == null)
+            {
+                return;
+            }
+
+            view.Unbind();
+            if (!categoryByView.TryGetValue(view, out var category))
+            {
+                DestroyView(view);
+                return;
+            }
+
+            view.gameObject.SetActive(false);
+            var parent = GetCategoryRoot(category);
+            if (view.transform.parent != parent) view.transform.SetParent(parent, false);
+            view.name = $"{category} View [Pooled]";
+            if (!viewPools.TryGetValue(category, out var pool))
+            {
+                pool = new List<EntityView>();
+                viewPools.Add(category, pool);
+            }
+
+            pool.Add(view);
+        }
+
+        private void ClearViewPools()
+        {
+            foreach (var pair in viewPools)
+            {
+                foreach (var view in pair.Value) DestroyView(view);
+            }
+
+            viewPools.Clear();
+            categoryByView.Clear();
+            prefabByView.Clear();
+            contentByView.Clear();
+        }
+
+        private void EnsureCategoryRoots()
+        {
+            GetCategoryRoot(EntityCategory.Human);
+            GetCategoryRoot(EntityCategory.Animal);
+            GetCategoryRoot(EntityCategory.Nature);
+            GetCategoryRoot(EntityCategory.Building);
+            GetPlacementPreviewRoot();
+        }
+
+        private EntityView CreateCategoryView(
+            EntityCategory category,
+            Transform parent)
+        {
+            var root = new GameObject($"{category} View");
+            root.SetActive(false);
+            root.transform.SetParent(parent, false);
+            var scaleRoot = new GameObject("CellScaleRoot").transform;
+            scaleRoot.SetParent(root.transform, false);
+            EntityView view = category switch
+            {
+                EntityCategory.Animal => root.AddComponent<AnimalEntityView>(),
+                EntityCategory.Nature => root.AddComponent<NatureEntityView>(),
+                EntityCategory.Human => root.AddComponent<HumanEntityView>(),
+                EntityCategory.Building => root.AddComponent<BuildingEntityView>(),
+                _ => throw new ArgumentOutOfRangeException(nameof(category))
+            };
+            view.ConfigureRuntimeStructure(scaleRoot, null, null, null);
+            return view;
+        }
+
+        private void AttachContent(EntityView view, EntityView prefab)
+        {
+            if (prefabByView.TryGetValue(view, out var currentPrefab)
+                && currentPrefab == prefab && contentByView[view] != null) return;
+
+            if (!prefab.HasValidVisualRoot
+                || prefab.CellScaleRoot.GetComponentInChildren<EntityView>(true) != null
+                || (prefab.LocalMotionRoot != null
+                    && !prefab.LocalMotionRoot.IsChildOf(prefab.CellScaleRoot)))
+                throw new InvalidOperationException($"Invalid model structure on '{prefab.name}'.");
+
+            var content = Instantiate(prefab.CellScaleRoot, view.CellScaleRoot, false);
+            content.name = $"{prefab.name} Model";
+            var motionRoot = ResolveClonedTransform(
+                prefab.CellScaleRoot, content, prefab.LocalMotionRoot);
+            DetachContent(view);
+            contentByView.Add(view, content);
+            prefabByView.Add(view, prefab);
+            view.ConfigureRuntimeStructure(
+                view.CellScaleRoot, motionRoot, content, prefab.VisualMotionProfile);
+            if (view is AnimatedEntityView animated)
+                animated.ConfigureAnimator(content.GetComponentInChildren<Animator>(true));
+        }
+
+        private static Transform ResolveClonedTransform(
+            Transform sourceRoot, Transform cloneRoot, Transform source)
+        {
+            if (source == null) return null;
+            if (source == sourceRoot) return cloneRoot;
+            return ResolveClonedTransform(sourceRoot, cloneRoot, source.parent)
+                .GetChild(source.GetSiblingIndex());
+        }
+
+        private void DetachContent(EntityView view)
+        {
+            if (!contentByView.Remove(view, out var content)) return;
+            prefabByView.Remove(view);
+            if (view is AnimatedEntityView animated) animated.ConfigureAnimator(null);
+            view.ConfigureRuntimeStructure(view.CellScaleRoot, null, null, null);
+            if (content == null) return;
+            content.gameObject.SetActive(false);
+            if (Application.isPlaying) Destroy(content.gameObject);
+            else DestroyImmediate(content.gameObject);
+        }
+
+        private Transform GetCategoryRoot(EntityCategory category)
+        {
+            var root = category switch
+            {
+                EntityCategory.Animal => animalRoot,
+                EntityCategory.Nature => natureRoot,
+                EntityCategory.Human => humanRoot,
+                EntityCategory.Building => buildingRoot,
+                _ => throw new ArgumentOutOfRangeException(nameof(category))
+            };
+            if (entityRoot == null || root == null || root.parent != entityRoot)
+                throw new InvalidOperationException(
+                    $"Assign the scene's {category} Root directly below Entity Root.");
+            return root;
+        }
+
+        private Transform GetPlacementPreviewRoot()
+        {
+            if (placementPreviewRoot == null || entityRoot == null
+                || placementPreviewRoot == entityRoot
+                || placementPreviewRoot.parent != entityRoot.parent)
+                throw new InvalidOperationException(
+                    "Assign Placement Preview Root as a sibling of Entity Root in the scene.");
+            return placementPreviewRoot;
+        }
+
+        private static void DestroyView(EntityView view)
+        {
+            if (view == null)
+            {
+                return;
+            }
+
             if (Application.isPlaying)
             {
                 Destroy(view.gameObject);
@@ -718,7 +915,7 @@ namespace MiniCivilization.World.Presentation
             private readonly EntityActivityPhase activityPhase;
             private readonly WorldEntityId interactionTargetId;
 
-            public RenderGroupKey(Entity entity)
+            public RenderGroupKey(EntityRuntime entity)
             {
                 cell = entity.AnchorCell;
                 typeKey = entity.TypeKey;

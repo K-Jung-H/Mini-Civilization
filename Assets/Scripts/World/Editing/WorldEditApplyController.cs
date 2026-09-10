@@ -185,12 +185,21 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            var applied = tool.IsEntityTool
-                ? entityEditController != null
+            bool applied;
+            if (tool.IsEntityTool)
+            {
+                // Release the preview Hosts before EntitySystem publishes the
+                // newly placed entities, so their real Views can rent them.
+                ClearPreview();
+                applied = entityEditController != null
                     && entityEditController.Apply(
                         tool.EntityDefinition,
-                        selection)
-                : ApplyAction(selection, tool.Action);
+                        selection);
+            }
+            else
+            {
+                applied = ApplyAction(selection, tool.Action);
+            }
             if (!applied)
             {
                 var executable = RefreshPreview(selection, tool);

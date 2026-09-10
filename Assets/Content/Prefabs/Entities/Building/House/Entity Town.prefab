@@ -111,55 +111,12 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 80b0c73121d74341bd9208c5e6ab58d0, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.BuildingEntityController
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.BuildingEntityView
   visualRoot: {fileID: 623875359093560210}
   cellScaleRoot: {fileID: 910000000000000022}
   localMotionRoot: {fileID: 0}
   visualMotionProfile: {fileID: 0}
   animator: {fileID: 0}
-  entityType: 1
-  localBuildingCellOffsets:
-  - {x: 0, y: 0, z: -1}
-  - {x: 0, y: 0, z: 0}
-  buildingCellTerrain:
-  - TerrainHeight: 3
-    MaxTerrainHeightAdjustmentSteps: 5
-  - TerrainHeight: 0
-    MaxTerrainHeightAdjustmentSteps: 0
-  terrainAnchors:
-  - LocalOffset: {x: 0, y: -1, z: -1}
-    MaxTerrainHeightAdjustmentSteps: 5
-  - LocalOffset: {x: 0, y: -1, z: 0}
-    MaxTerrainHeightAdjustmentSteps: 5
-  localWayPoints:
-  - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0.25, y: 0, z: 0.5}
-    ExternalDirection: 1
-  - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0.5, y: 0, z: 0.25}
-    ExternalDirection: 2
-  - LocalCellOffset: {x: 0, y: 0, z: -1}
-    LocalPosition: {x: 0, y: 0, z: -0.5}
-    ExternalDirection: 3
-  - LocalCellOffset: {x: 0, y: 0, z: -1}
-    LocalPosition: {x: -0.5, y: 0, z: 0.5}
-    ExternalDirection: 4
-  - LocalCellOffset: {x: 0, y: 0, z: 0}
-    LocalPosition: {x: 0, y: 0, z: 0}
-    ExternalDirection: 0
-  localWays:
-  - PointA: 0
-    PointB: 4
-    OneWay: 0
-  - PointA: 1
-    PointB: 4
-    OneWay: 0
-  - PointA: 2
-    PointB: 4
-    OneWay: 0
-  - PointA: 3
-    PointB: 4
-    OneWay: 0
 --- !u!1001 &2406229398729578690
 PrefabInstance:
   m_ObjectHideFlags: 0

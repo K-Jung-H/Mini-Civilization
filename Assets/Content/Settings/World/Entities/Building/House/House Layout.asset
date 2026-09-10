@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7f4b4f7f35324fc4a8f3f35bc866753a, type: 3}
+  m_Name: House Layout
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.BuildingLayoutDefinition
+  localBuildingCellOffsets:
+  - {x: 0, y: 0, z: -1}
+  - {x: 0, y: 0, z: 0}
+  buildingCellTerrain:
+  - TerrainHeight: 3
+    MaxTerrainHeightAdjustmentSteps: 5
+  - TerrainHeight: 0
+    MaxTerrainHeightAdjustmentSteps: 0
+  terrainAnchors:
+  - LocalOffset: {x: 0, y: -1, z: -1}
+    MaxTerrainHeightAdjustmentSteps: 5
+  - LocalOffset: {x: 0, y: -1, z: 0}
+    MaxTerrainHeightAdjustmentSteps: 5
+  localWayPoints:
+  - LocalCellOffset: {x: 0, y: 0, z: 0}
+    LocalPosition: {x: 0.25, y: 0, z: 0.5}
+    ExternalDirection: 1
+  - LocalCellOffset: {x: 0, y: 0, z: 0}
+    LocalPosition: {x: 0.5, y: 0, z: 0.25}
+    ExternalDirection: 2
+  - LocalCellOffset: {x: 0, y: 0, z: -1}
+    LocalPosition: {x: 0, y: 0, z: -0.5}
+    ExternalDirection: 3
+  - LocalCellOffset: {x: 0, y: 0, z: -1}
+    LocalPosition: {x: -0.5, y: 0, z: 0.5}
+    ExternalDirection: 4
+  - LocalCellOffset: {x: 0, y: 0, z: 0}
+    LocalPosition: {x: 0, y: 0, z: 0}
+    ExternalDirection: 0
+  localWays:
+  - PointA: 0
+    PointB: 4
+    OneWay: 0
+  - PointA: 1
+    PointB: 4
+    OneWay: 0
+  - PointA: 2
+    PointB: 4
+    OneWay: 0
+  - PointA: 3
+    PointB: 4
+    OneWay: 0

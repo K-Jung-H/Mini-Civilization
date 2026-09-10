@@ -56,9 +56,9 @@ namespace MiniCivilization.World.Entities
             EntityActivityId right) => !left.Equals(right);
     }
 
-    public abstract class Entity
+    public abstract class EntityFSM
     {
-        protected Entity(EntityData data)
+        protected EntityFSM(EntityData data)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
         }
@@ -75,8 +75,12 @@ namespace MiniCivilization.World.Entities
         internal abstract bool RequiresTick { get; }
 
         internal abstract void Tick(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime);
+
+        internal void Release() => OnRelease();
+
+        protected virtual void OnRelease() { }
 
         internal byte[] CapturePersistentPayload()
         {
@@ -127,14 +131,14 @@ namespace MiniCivilization.World.Entities
         }
     }
 
-    public abstract class FixedEntity : Entity
+    public abstract class FixedEntityFSM : EntityFSM
     {
-        protected FixedEntity(EntityData data) : base(data)
+        protected FixedEntityFSM(EntityData data) : base(data)
         {
         }
     }
 
-    public abstract class DynamicEntity : Entity
+    public abstract class DynamicEntityFSM : EntityFSM
     {
         public bool IsMoving { get; private set; }
         public CellCoordinate MoveFrom { get; private set; }
@@ -142,7 +146,7 @@ namespace MiniCivilization.World.Entities
         public float MoveProgress { get; private set; }
         public EntityMoveType MoveType { get; private set; }
 
-        protected DynamicEntity(EntityData data) : base(data)
+        protected DynamicEntityFSM(EntityData data) : base(data)
         {
         }
 
@@ -154,7 +158,7 @@ namespace MiniCivilization.World.Entities
             CellCoordinate nextCell);
 
         protected bool TryBeginMove(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             CellCoordinate destination)
         {
             if (runtime == null)
@@ -169,7 +173,7 @@ namespace MiniCivilization.World.Entities
         }
 
         protected virtual EntityMoveType ResolveMoveType(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             CellCoordinate current,
             CellCoordinate next)
         {
@@ -236,7 +240,7 @@ namespace MiniCivilization.World.Entities
         }
 
         protected bool AdvanceMove(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float progressDelta)
         {
             if (runtime == null)
@@ -380,12 +384,12 @@ namespace MiniCivilization.World.Entities
             new(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
     }
 
-    public abstract class AnimalEntity : DynamicEntity
+    public abstract class AnimalEntityFSM : DynamicEntityFSM
     {
         private uint randomState;
         private readonly EntityCellMovementRules movementRules;
 
-        protected AnimalEntity(
+        protected AnimalEntityFSM(
             EntityData data,
             EntityCellMovementRules movementRules) : base(data)
         {
@@ -402,7 +406,7 @@ namespace MiniCivilization.World.Entities
         }
 
         internal sealed override void Tick(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime)
         {
             UpdateState(runtime, deltaTime);
@@ -459,7 +463,7 @@ namespace MiniCivilization.World.Entities
         }
 
         protected abstract void UpdateState(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime);
 
         protected EntityCellMovementRules MovementRules => movementRules;
@@ -470,7 +474,7 @@ namespace MiniCivilization.World.Entities
             CellCoordinate nextCell) => true;
 
         protected virtual bool TrySelectMoveDestination(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             out CellCoordinate destination)
         {
             if (runtime == null)
@@ -613,23 +617,23 @@ namespace MiniCivilization.World.Entities
         }
     }
 
-    public abstract class HumanEntity : DynamicEntity
+    public abstract class HumanEntityFSM : DynamicEntityFSM
     {
-        protected HumanEntity(EntityData data) : base(data)
+        protected HumanEntityFSM(EntityData data) : base(data)
         {
         }
     }
 
-    public abstract class NatureEntity : FixedEntity
+    public abstract class NatureEntityFSM : FixedEntityFSM
     {
-        protected NatureEntity(EntityData data) : base(data)
+        protected NatureEntityFSM(EntityData data) : base(data)
         {
         }
     }
 
-    public abstract class BuildingEntity : FixedEntity
+    public abstract class BuildingEntityFSM : FixedEntityFSM
     {
-        protected BuildingEntity(EntityData data) : base(data)
+        protected BuildingEntityFSM(EntityData data) : base(data)
         {
         }
 
@@ -639,62 +643,4 @@ namespace MiniCivilization.World.Entities
             in BuildingPlacementContext context);
     }
 
-    public sealed class EntityTypeRegistry
-    {
-        private readonly Dictionary<EntityTypeKey, Func<EntityData, Entity>>
-            factories = new();
-
-        public static EntityTypeRegistry Shared { get; } = new();
-
-        public void Clear()
-        {
-            factories.Clear();
-        }
-
-        public void Register(
-            EntityTypeKey typeKey,
-            Func<EntityData, Entity> factory)
-        {
-            if (!typeKey.IsValid)
-            {
-                throw new ArgumentOutOfRangeException(nameof(typeKey));
-            }
-
-            if (factory == null)
-            {
-                throw new ArgumentNullException(nameof(factory));
-            }
-
-            if (!factories.TryAdd(typeKey, factory))
-            {
-                throw new InvalidOperationException(
-                    $"Entity type key {typeKey} is already registered.");
-            }
-        }
-
-        public Entity Create(EntityData data)
-        {
-            if (data == null)
-            {
-                throw new ArgumentNullException(nameof(data));
-            }
-
-            if (!factories.TryGetValue(data.TypeKey, out var factory))
-            {
-                throw new InvalidOperationException(
-                    $"Entity type key {data.TypeKey} is not registered.");
-            }
-
-            var entity = factory(data);
-            if (entity == null
-                || !ReferenceEquals(entity.Data, data)
-                || entity.TypeKey != data.TypeKey)
-            {
-                throw new InvalidOperationException(
-                    $"Entity factory for type key {data.TypeKey} returned an invalid entity.");
-            }
-
-            return entity;
-        }
-    }
 }

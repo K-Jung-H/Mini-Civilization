@@ -467,13 +467,13 @@ namespace MiniCivilization.World.Entities
     public readonly struct BuildingPlacementContext
     {
         private readonly WorldData world;
-        private readonly EntityRuntime entities;
-        private readonly BuildingEntity building;
+        private readonly EntitySystem entities;
+        private readonly BuildingEntityFSM building;
 
         internal BuildingPlacementContext(
             WorldData world,
-            EntityRuntime entities,
-            BuildingEntity building)
+            EntitySystem entities,
+            BuildingEntityFSM building)
         {
             this.world = world ?? throw new ArgumentNullException(nameof(world));
             this.entities = entities

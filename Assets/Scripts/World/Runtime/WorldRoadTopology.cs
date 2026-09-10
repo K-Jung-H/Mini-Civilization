@@ -120,7 +120,7 @@ namespace MiniCivilization.World.Runtime
 
         internal static WorldRoadTopology Build(
             WorldRuntime runtime,
-            EntityRuntime entities)
+            EntitySystem entities)
         {
             if (runtime == null)
             {
@@ -188,14 +188,14 @@ namespace MiniCivilization.World.Runtime
 
         private static List<BuildingRoadPort> CollectBuildingPorts(
             WorldRuntime runtime,
-            EntityRuntime entities)
+            EntitySystem entities)
         {
-            var entityBuffer = new List<Entity>();
+            var entityBuffer = new List<EntityRuntime>();
             entities.CopyEntitiesInPreparedChunksTo(entityBuffer);
             var ports = new List<BuildingRoadPort>();
             for (var entityIndex = 0; entityIndex < entityBuffer.Count; entityIndex++)
             {
-                if (entityBuffer[entityIndex] is not BuildingEntity building)
+                if (entityBuffer[entityIndex].FSM is not BuildingEntityFSM building)
                 {
                     continue;
                 }

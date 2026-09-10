@@ -1,31 +1,22 @@
 using System;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
-using MiniCivilization.World.Entities.Building;
 using UnityEngine;
 
-namespace MiniCivilization.World.Presentation
+namespace MiniCivilization.World.Definitions
 {
-    public enum BuildingEntityType : ushort
-    {
-        None = 0,
-        House = 1
-    }
-
     [Serializable]
     public struct BuildingCellBakeData
     {
         public Vector3Int LocalOffset;
-        [Range(0, WorldGrid.HeightStepsPerCell)]
-        public int TerrainHeight;
+        [Range(0, WorldGrid.HeightStepsPerCell)] public int TerrainHeight;
         [Min(0)] public int MaxTerrainHeightAdjustmentSteps;
     }
 
     [Serializable]
     public struct BuildingCellTerrainBakeData
     {
-        [Range(0, WorldGrid.HeightStepsPerCell)]
-        public int TerrainHeight;
+        [Range(0, WorldGrid.HeightStepsPerCell)] public int TerrainHeight;
         [Min(0)] public int MaxTerrainHeightAdjustmentSteps;
     }
 
@@ -52,11 +43,13 @@ namespace MiniCivilization.World.Presentation
         public bool OneWay;
     }
 
-    public sealed class BuildingEntityController : AnimatedEntityController
+    [CreateAssetMenu(
+        fileName = "BuildingLayout",
+        menuName = "Mini Civilization/Entities/Building Layout")]
+    public sealed class BuildingLayoutDefinition : ScriptableObject
     {
-        [SerializeField] private BuildingEntityType entityType;
-        [SerializeField]
-        private Vector3Int[] localBuildingCellOffsets = Array.Empty<Vector3Int>();
+        [SerializeField] private Vector3Int[] localBuildingCellOffsets =
+            Array.Empty<Vector3Int>();
         [SerializeField] private BuildingCellTerrainBakeData[]
             buildingCellTerrain = Array.Empty<BuildingCellTerrainBakeData>();
         [SerializeField] private TerrainAnchorBakeData[] terrainAnchors =
@@ -68,25 +61,7 @@ namespace MiniCivilization.World.Presentation
 
         private BuildingLayout cachedLayout;
 
-        public override EntityTypeKey TypeKey => new(
-            EntityCategory.Building,
-            (ushort)entityType);
-        public override string EntityTypeName => entityType.ToString();
-        public override bool HasValidEntityType =>
-            entityType is BuildingEntityType.House;
-
-        public override Entity CreateStateMachine(EntityData data)
-        {
-            var layout = GetLayout();
-            return entityType switch
-            {
-                BuildingEntityType.House => new HouseEntity(data, layout),
-                _ => throw new InvalidOperationException(
-                    $"Unsupported Building Entity type: {entityType}.")
-            };
-        }
-
-        internal void SetBakedLayout(
+        public void SetBakedLayout(
             BuildingCellBakeData[] cells,
             TerrainAnchorBakeData[] anchors,
             BuildingWayPointBakeData[] points,
@@ -117,7 +92,7 @@ namespace MiniCivilization.World.Presentation
             cachedLayout = null;
         }
 
-        private BuildingLayout GetLayout()
+        public BuildingLayout GetLayout()
         {
             if (cachedLayout != null)
             {
@@ -133,15 +108,11 @@ namespace MiniCivilization.World.Presentation
                     : default;
                 cells[index] = new BuildingCell(
                     ToOffset(localBuildingCellOffsets[index]),
-                    Mathf.Clamp(
-                        terrain.TerrainHeight,
-                        0,
-                        WorldGrid.HeightStepsPerCell),
+                    Mathf.Clamp(terrain.TerrainHeight, 0, WorldGrid.HeightStepsPerCell),
                     Mathf.Max(0, terrain.MaxTerrainHeightAdjustmentSteps));
             }
 
-            var anchors = new TerrainAnchorCell[
-                terrainAnchors?.Length ?? 0];
+            var anchors = new TerrainAnchorCell[terrainAnchors?.Length ?? 0];
             for (var index = 0; index < anchors.Length; index++)
             {
                 var anchor = terrainAnchors[index];
@@ -164,25 +135,16 @@ namespace MiniCivilization.World.Presentation
             for (var index = 0; index < ways.Length; index++)
             {
                 var way = localWays[index];
-                ways[index] = new BuildingWay(
-                    way.PointA,
-                    way.PointB,
-                    way.OneWay);
+                ways[index] = new BuildingWay(way.PointA, way.PointB, way.OneWay);
             }
 
-            cachedLayout = new BuildingLayout(
-                cells,
-                anchors,
-                points,
-                ways);
+            cachedLayout = new BuildingLayout(cells, anchors, points, ways);
             return cachedLayout;
         }
 
         private void OnValidate()
         {
-            for (var index = 0;
-                 index < buildingCellTerrain?.Length;
-                 index++)
+            for (var index = 0; index < buildingCellTerrain?.Length; index++)
             {
                 var terrain = buildingCellTerrain[index];
                 terrain.TerrainHeight = Mathf.Clamp(
@@ -195,12 +157,10 @@ namespace MiniCivilization.World.Presentation
                 buildingCellTerrain[index] = terrain;
             }
 
-            for (var index = 0;
-                 index < terrainAnchors?.Length;
-                 index++)
+            for (var index = 0; index < terrainAnchors?.Length; index++)
             {
                 var anchor = terrainAnchors[index];
-                anchor.MaxTerrainHeightAdjustmentSteps = Math.Max(
+                anchor.MaxTerrainHeightAdjustmentSteps = Mathf.Max(
                     0,
                     anchor.MaxTerrainHeightAdjustmentSteps);
                 terrainAnchors[index] = anchor;

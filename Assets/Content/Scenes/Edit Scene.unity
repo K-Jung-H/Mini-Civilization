@@ -672,6 +672,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Authoring.BuildingWayAuthoring
   authoringSystem: {fileID: 2034307140}
   markerContainer: {fileID: 1958006581}
+  layoutDefinition: {fileID: 11400000, guid: 38fc99fdad954b55b05a28b840a579b8, type: 2}
 --- !u!4 &949497048
 Transform:
   m_ObjectHideFlags: 0

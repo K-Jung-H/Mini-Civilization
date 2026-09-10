@@ -3,13 +3,13 @@ using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Entities.Building
 {
-    public sealed class HouseEntity : global::MiniCivilization.World.Entities.BuildingEntity
+    public sealed class HouseEntityFSM : global::MiniCivilization.World.Entities.BuildingEntityFSM
     {
         private static readonly EntityActivityId IdleActivity = new("Idle");
 
         private readonly BuildingLayout layout;
 
-        public HouseEntity(EntityData data, BuildingLayout layout) : base(data)
+        public HouseEntityFSM(EntityData data, BuildingLayout layout) : base(data)
         {
             this.layout = layout
                 ?? throw new System.ArgumentNullException(nameof(layout));
@@ -20,7 +20,7 @@ namespace MiniCivilization.World.Entities.Building
         internal override bool RequiresTick => false;
 
         internal override void Tick(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime)
         {
         }

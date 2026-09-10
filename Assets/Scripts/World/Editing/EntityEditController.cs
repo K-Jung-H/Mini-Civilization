@@ -166,7 +166,7 @@ namespace MiniCivilization.World.Editing
         private EntityPlacementPreview EvaluateBuilding(
             EntityTypeKey typeKey,
             CellCoordinate centerCell,
-            EntityRuntime entities)
+            EntitySystem entities)
         {
             var data = new EntityData(
                 PreviewEntityId,
@@ -204,7 +204,7 @@ namespace MiniCivilization.World.Editing
         private bool TryGetTypeKey(
             EntityDefinition definition,
             WorldRuntime runtime,
-            EntityRuntime entities,
+            EntitySystem entities,
             IWorldCellSelection selection,
             out EntityTypeKey typeKey)
         {
@@ -229,7 +229,7 @@ namespace MiniCivilization.World.Editing
         }
 
         private bool TryPlaceBuilding(
-            EntityRuntime entities,
+            EntitySystem entities,
             EntityTypeKey typeKey,
             CellCoordinate centerCell)
         {

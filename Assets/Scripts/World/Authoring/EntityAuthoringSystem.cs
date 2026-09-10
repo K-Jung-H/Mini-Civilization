@@ -14,7 +14,7 @@ namespace MiniCivilization.World.Authoring
         private float cellSize = 1f;
 
         [SerializeField]
-        private EntityController entityPrefab;
+        private EntityView entityPrefab;
 
         [SerializeField]
         private Vector3Int gridSize = Vector3Int.one;
@@ -29,7 +29,7 @@ namespace MiniCivilization.World.Authoring
 
         [SerializeField]
         [HideInInspector]
-        private EntityController previewPrefab;
+        private EntityView previewPrefab;
 
         [SerializeField]
         [HideInInspector]
@@ -37,10 +37,10 @@ namespace MiniCivilization.World.Authoring
 
         [SerializeField]
         [HideInInspector]
-        private EntityController previewInstance;
+        private EntityView previewInstance;
 
         public EntityAuthoringCellBox CellBoxPrefab => cellBoxPrefab;
-        public EntityController EntityPrefab => entityPrefab;
+        public EntityView EntityPrefab => entityPrefab;
         public float CellSize => cellSize;
         public Vector3Int GridSize => gridSize;
 
@@ -52,7 +52,7 @@ namespace MiniCivilization.World.Authoring
 
         internal List<EntityAuthoringCellBox> PooledCells => pooledCells;
 
-        internal EntityController PreviewPrefab
+        internal EntityView PreviewPrefab
         {
             get => previewPrefab;
             set => previewPrefab = value;
@@ -64,7 +64,7 @@ namespace MiniCivilization.World.Authoring
             set => previewScaleRoot = value;
         }
 
-        internal EntityController PreviewInstance
+        internal EntityView PreviewInstance
         {
             get => previewInstance;
             set => previewInstance = value;

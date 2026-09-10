@@ -99,15 +99,12 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c1e205713df34f14bd28c0d374efcf3e, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.AnimalEntityController
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.AnimalEntityView
   visualRoot: {fileID: 1910971368532991576}
   cellScaleRoot: {fileID: 910000000000000002}
   localMotionRoot: {fileID: 6378310637875573759}
   visualMotionProfile: {fileID: 11400000, guid: 18b97392190a43a5bce17e963254f3d1, type: 2}
   animator: {fileID: 1088571969833422951}
-  entityType: 1
-  cellMovementProfile: {fileID: 11400000, guid: 9d4bf488f4d84fa8b1360a0c097f6c31, type: 2}
-  decisionProfile: {fileID: 11400000, guid: a1e60e5027cc44548d4e59a89f4ed921, type: 2}
 --- !u!1 &6480652229646340679
 GameObject:
   m_ObjectHideFlags: 0

@@ -19,10 +19,10 @@ namespace MiniCivilization.World.Editor
             }
 
             var authoring = (BuildingWayAuthoring)target;
-            if (authoring.TargetController != null)
+            if (authoring.LayoutDefinition != null)
             {
                 Undo.RecordObject(
-                    authoring.TargetController,
+                    authoring.LayoutDefinition,
                     "Bake Building Way");
             }
 
@@ -32,13 +32,8 @@ namespace MiniCivilization.World.Editor
                 return;
             }
 
-            EditorUtility.SetDirty(authoring.TargetController);
-            if (PrefabUtility.IsPartOfPrefabAsset(
-                    authoring.TargetController))
-            {
-                PrefabUtility.SavePrefabAsset(
-                    authoring.TargetController.gameObject);
-            }
+            EditorUtility.SetDirty(authoring.LayoutDefinition);
+            AssetDatabase.SaveAssetIfDirty(authoring.LayoutDefinition);
 
             EntityAuthoringSystemEditor.RebuildPreview(
                 authoring.AuthoringSystem);

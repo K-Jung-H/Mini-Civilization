@@ -71,6 +71,7 @@ namespace MiniCivilization.World.Persistence
         private const uint ChunkMagic = 0x57434438;
         private const int MaximumCollectionCount = 16_777_216;
         private const int MaximumEntityProgressPayloadLength = 65_536;
+        private const int MaximumEntityTraitCount = 1_024;
         private const int MaximumStringByteLength = 4_096;
 
         public static WorldChunkSnapshot CaptureChunk(
@@ -871,6 +872,7 @@ namespace MiniCivilization.World.Persistence
             writer.Write(state.TypeKey.Value);
             WriteCellCoordinate(writer, state.AnchorCell);
             writer.Write((byte)state.Direction);
+            WriteEntityAttributes(writer, state.Attributes);
             WriteEntityProgressPayload(writer, state.ProgressPayload);
             var flags = (byte)0;
             if (state.HasBuildingWayLocation) flags |= 1;
@@ -885,12 +887,13 @@ namespace MiniCivilization.World.Persistence
             if (state.ActiveWayMove != null)
             {
                 var plan = state.ActiveWayMove;
-                WriteCollectionCount(writer, plan.GraphPositions.Length);
-                for (var index = 0; index < plan.GraphPositions.Length; index++)
+                var positions = plan.GraphPositions;
+                WriteCollectionCount(writer, positions.Length);
+                for (var index = 0; index < positions.Length; index++)
                 {
-                    writer.Write(plan.GraphPositions[index].x);
-                    writer.Write(plan.GraphPositions[index].y);
-                    writer.Write(plan.GraphPositions[index].z);
+                    writer.Write(positions[index].x);
+                    writer.Write(positions[index].y);
+                    writer.Write(positions[index].z);
                 }
 
                 writer.Write(plan.StartsAtCellCenter);
@@ -915,6 +918,7 @@ namespace MiniCivilization.World.Persistence
                     "Saved Entity has an invalid identity.");
             }
 
+            var attributes = ReadEntityAttributes(reader);
             var progressPayload = ReadEntityProgressPayload(reader);
             var flags = reader.ReadByte();
             if ((flags & ~3) != 0)
@@ -952,10 +956,66 @@ namespace MiniCivilization.World.Persistence
                 typeKey,
                 anchor,
                 direction,
+                attributes,
                 progressPayload,
                 hasBuildingWayLocation,
                 buildingWayLocation,
                 activeWayMove);
+        }
+
+        private static void WriteEntityAttributes(
+            BinaryWriter writer,
+            EntityAttributes attributes)
+        {
+            attributes ??= EntityAttributes.Empty;
+            WriteEntityAttributeName(writer, attributes.Name);
+            writer.Write(attributes.Age);
+            var traits = attributes.Traits;
+            if (traits.Count > MaximumEntityTraitCount)
+            {
+                throw new InvalidOperationException(
+                    "Entity trait count exceeds the format limit.");
+            }
+
+            writer.Write(traits.Count);
+            for (var index = 0; index < traits.Count; index++)
+            {
+                WriteString(writer, traits[index].Id);
+                writer.Write(traits[index].Value);
+            }
+        }
+
+        private static EntityAttributes ReadEntityAttributes(
+            BinaryReader reader)
+        {
+            var name = ReadEntityAttributeName(reader);
+            var age = reader.ReadInt32();
+            var traitCount = reader.ReadInt32();
+            if (age < 0 || traitCount < 0
+                || traitCount > MaximumEntityTraitCount)
+            {
+                throw new InvalidDataException(
+                    "Saved Entity has invalid attributes.");
+            }
+
+            var traits = new EntityTrait[traitCount];
+            try
+            {
+                for (var index = 0; index < traits.Length; index++)
+                {
+                    traits[index] = new EntityTrait(
+                        ReadString(reader),
+                        ReadFiniteSingle(reader));
+                }
+
+                return new EntityAttributes(name, age, traits);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException(
+                    "Saved Entity has invalid or duplicated traits.",
+                    exception);
+            }
         }
 
         private static void WriteEntityProgressPayload(
@@ -971,6 +1031,34 @@ namespace MiniCivilization.World.Persistence
 
             writer.Write(payload.Length);
             writer.Write(payload);
+        }
+
+        private static void WriteEntityAttributeName(
+            BinaryWriter writer,
+            string value)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty);
+            if (bytes.Length > MaximumStringByteLength)
+            {
+                throw new InvalidOperationException(
+                    "Entity attribute name exceeds the format limit.");
+            }
+
+            writer.Write(bytes.Length);
+            writer.Write(bytes);
+        }
+
+        private static string ReadEntityAttributeName(BinaryReader reader)
+        {
+            var length = reader.ReadInt32();
+            if (length < 0 || length > MaximumStringByteLength)
+            {
+                throw new InvalidDataException(
+                    "Saved Entity has an invalid attribute name.");
+            }
+
+            return System.Text.Encoding.UTF8.GetString(
+                ReadExactBytes(reader, length));
         }
 
         private static byte[] ReadEntityProgressPayload(BinaryReader reader)

@@ -12,6 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d976e2f7caa4b8d9586c7da2550d6c9, type: 3}
   m_Name: Definition Tree
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.EntityDefinition
+  category: 0
+  typeId: 1
   prefab: {fileID: 115609182653714027, guid: 616bfb3df79aa204d91afbf7fbbeca33, type: 3}
+  fsmDefinition: {fileID: 11400000, guid: 230f647592fe4879b745137f94c4b071, type: 2}
   thumbnail: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
   displayName: Tree

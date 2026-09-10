@@ -14,12 +14,12 @@ namespace MiniCivilization.World.Runtime
         [SerializeField] private WorldEntityRenderer entityRenderer;
 
         private WorldRuntime runtime;
-        private EntityRuntime entities;
+        private EntitySystem entities;
 
         public EntityCatalog Catalog => entityCatalog;
         public WorldEntityRenderer Renderer => entityRenderer;
         public WorldRuntime Runtime => runtime;
-        public EntityRuntime Entities => entities;
+        public EntitySystem Entities => entities;
 
         public event Action<EntityChangeSet> Changed;
 

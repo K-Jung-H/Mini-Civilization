@@ -12,6 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d976e2f7caa4b8d9586c7da2550d6c9, type: 3}
   m_Name: Definition House
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.EntityDefinition
+  category: 3
+  typeId: 1
   prefab: {fileID: 65519540242368161, guid: b4567de11103a544a8d625cc7a6e2e1d, type: 3}
+  fsmDefinition: {fileID: 11400000, guid: b1a75a3415e14b1eb920c6f87e36390a, type: 2}
   thumbnail: {fileID: 0}
   displayName: House

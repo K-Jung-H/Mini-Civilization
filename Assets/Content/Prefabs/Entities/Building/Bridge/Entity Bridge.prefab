@@ -45,12 +45,11 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 80b0c73121d74341bd9208c5e6ab58d0, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.BuildingEntityController
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.BuildingEntityView
   visualRoot: {fileID: 0}
   localMotionRoot: {fileID: 0}
   visualMotionProfile: {fileID: 0}
   animator: {fileID: 0}
-  entityType: 0
 --- !u!114 &874028893165158562
 MonoBehaviour:
   m_ObjectHideFlags: 0

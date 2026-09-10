@@ -30,7 +30,7 @@ namespace MiniCivilization.World.Runtime
         internal WaterFlowResolver WaterFlowResolver { get; private set; }
         public WorldChangeId CurrentChangeId { get; private set; }
         public RuntimeChangeApplier ChangeApplier { get; internal set; }
-        public EntityRuntime Entities { get; private set; }
+        public EntitySystem Entities { get; private set; }
         internal WorldRoadTopology RoadTopology { get; private set; }
         public WorldWayPointGraph WayPointGraph { get; private set; }
         public IReadOnlyDictionary<ChunkCoordinate, ChunkRuntime>
@@ -99,7 +99,7 @@ namespace MiniCivilization.World.Runtime
                 runtime.WaterFlowState,
                 data.WaterFlowSchedule.FrontierCells);
             runtime.ChangeApplier = new RuntimeChangeApplier(runtime);
-            runtime.Entities = new EntityRuntime(
+            runtime.Entities = new EntitySystem(
                 runtime,
                 EntityTypeRegistry.Shared);
             runtime.RebuildWayPointGraph();

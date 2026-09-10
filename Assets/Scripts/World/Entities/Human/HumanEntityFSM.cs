@@ -3,18 +3,18 @@ using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Entities.Human
 {
-    public sealed class HumanEntity : global::MiniCivilization.World.Entities.HumanEntity
+    public sealed class HumanEntityFSM : global::MiniCivilization.World.Entities.HumanEntityFSM
     {
         private static readonly EntityActivityId IdleActivity = new("Idle");
 
-        public HumanEntity(EntityData data) : base(data)
+        public HumanEntityFSM(EntityData data) : base(data)
         {
         }
 
         public override EntityActivityId Activity => IdleActivity;
 
         internal override void Tick(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime)
         {
         }

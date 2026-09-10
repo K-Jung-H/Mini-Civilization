@@ -1,0 +1,16 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c365326a7fd34aa7ad793d75898f678c, type: 3}
+  m_Name: Deer FSM
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.AnimalRoamingFSMDefinition
+  cellMovementProfile: {fileID: 11400000, guid: 9d4bf488f4d84fa8b1360a0c097f6c31, type: 2}
+  decisionProfile: {fileID: 11400000, guid: a1e60e5027cc44548d4e59a89f4ed921, type: 2}

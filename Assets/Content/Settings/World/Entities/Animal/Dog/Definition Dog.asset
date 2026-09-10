@@ -12,6 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4d976e2f7caa4b8d9586c7da2550d6c9, type: 3}
   m_Name: Definition Dog
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.EntityDefinition
+  category: 1
+  typeId: 1
   prefab: {fileID: 1816018510979368106, guid: 24cbfe30dffe79d4d8a89583fec67d92, type: 3}
+  fsmDefinition: {fileID: 11400000, guid: ce85ae19f3574162919795c474493c47, type: 2}
   thumbnail: {fileID: 0}
   displayName: Dog

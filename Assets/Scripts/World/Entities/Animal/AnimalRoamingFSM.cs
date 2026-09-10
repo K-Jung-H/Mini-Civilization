@@ -4,7 +4,7 @@ using MiniCivilization.World.Runtime;
 
 namespace MiniCivilization.World.Entities.Animal
 {
-    public sealed class DogEntity : global::MiniCivilization.World.Entities.AnimalEntity
+    public sealed class AnimalRoamingFSM : global::MiniCivilization.World.Entities.AnimalEntityFSM
     {
         private enum BehaviorState : byte
         {
@@ -19,7 +19,7 @@ namespace MiniCivilization.World.Entities.Animal
         private BehaviorState currentState = BehaviorState.Idle;
         private float decisionElapsed;
 
-        public DogEntity(
+        public AnimalRoamingFSM(
             EntityData data,
             EntityCellMovementRules movementRules,
             AnimalDecisionRules decisionRules) : base(data, movementRules)
@@ -37,7 +37,7 @@ namespace MiniCivilization.World.Entities.Animal
         };
 
         protected override void UpdateState(
-            EntityRuntime runtime,
+            EntitySystem runtime,
             float deltaTime)
         {
             if (currentState == BehaviorState.Move)
@@ -110,7 +110,7 @@ namespace MiniCivilization.World.Entities.Animal
                 || savedDecisionElapsed < 0f)
             {
                 throw new System.InvalidOperationException(
-                    $"Dog Entity {Id} has an invalid saved behavior state.");
+                    $"Animal Entity {Id} has an invalid saved roaming state.");
             }
 
             currentState = (BehaviorState)behaviorState;

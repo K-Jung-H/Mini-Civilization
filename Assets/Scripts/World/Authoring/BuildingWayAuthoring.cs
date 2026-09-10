@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
+using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Entities;
-using MiniCivilization.World.Presentation;
 using UnityEngine;
 
 namespace MiniCivilization.World.Authoring
@@ -13,13 +13,11 @@ namespace MiniCivilization.World.Authoring
     {
         [SerializeField] private EntityAuthoringSystem authoringSystem;
         [SerializeField] private Transform markerContainer;
+        [SerializeField] private BuildingLayoutDefinition layoutDefinition;
 
         public EntityAuthoringSystem AuthoringSystem => authoringSystem;
         public Transform MarkerContainer => markerContainer;
-        public BuildingEntityController TargetController =>
-            authoringSystem != null
-                ? authoringSystem.EntityPrefab as BuildingEntityController
-                : null;
+        public BuildingLayoutDefinition LayoutDefinition => layoutDefinition;
 
         internal bool TryBake(out string error)
         {
@@ -35,10 +33,9 @@ namespace MiniCivilization.World.Authoring
                 return false;
             }
 
-            var targetController = TargetController;
-            if (targetController == null)
+            if (layoutDefinition == null)
             {
-                error = "Entity Authoring System requires a Building Entity Prefab.";
+                error = "Building Layout Definition is not assigned.";
                 return false;
             }
 
@@ -145,7 +142,7 @@ namespace MiniCivilization.World.Authoring
                 }
             }
 
-            targetController.SetBakedLayout(
+            layoutDefinition.SetBakedLayout(
                 buildingCells,
                 terrainAnchors,
                 points,

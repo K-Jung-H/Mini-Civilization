@@ -62,7 +62,7 @@ namespace MiniCivilization.World.Runtime
 
         internal static WorldWayPointGraph Build(
             WorldRuntime runtime,
-            EntityRuntime entities,
+            EntitySystem entities,
             WorldRoadTopology roadTopology)
         {
             if (runtime == null)
@@ -324,7 +324,7 @@ namespace MiniCivilization.World.Runtime
                 this.roadTopology = roadTopology;
             }
 
-            public List<Entity> EntityBuffer { get; } = new();
+            public List<EntityRuntime> EntityBuffer { get; } = new();
 
             public void AddBuildings()
             {
@@ -332,8 +332,8 @@ namespace MiniCivilization.World.Runtime
                      entityIndex < EntityBuffer.Count;
                      entityIndex++)
                 {
-                    if (EntityBuffer[entityIndex]
-                        is not BuildingEntity building)
+                    if (EntityBuffer[entityIndex].FSM
+                        is not BuildingEntityFSM building)
                     {
                         continue;
                     }

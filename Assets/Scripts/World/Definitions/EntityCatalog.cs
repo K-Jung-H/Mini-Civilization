@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 
 namespace MiniCivilization.World.Definitions
@@ -110,7 +111,7 @@ namespace MiniCivilization.World.Definitions
             {
                 registry.Register(
                     pair.Key,
-                    pair.Value.Prefab.CreateStateMachine);
+                    pair.Value);
             }
         }
 
@@ -136,7 +137,7 @@ namespace MiniCivilization.World.Definitions
                 {
                     var definition = container.Definitions[index];
                     ValidateDefinition(category, definition);
-                    var typeKey = definition.Prefab.TypeKey;
+                    var typeKey = definition.TypeKey;
                     if (!typeKeysByDefinition.TryAdd(definition, typeKey))
                     {
                         throw new InvalidOperationException(
@@ -171,17 +172,18 @@ namespace MiniCivilization.World.Definitions
                     $"Entity definition '{definition.name}' has no Prefab.");
             }
 
-            if (prefab.Category != category
-                || !prefab.TypeKey.IsValid
-                || !prefab.HasValidEntityType
+            if (!definition.TypeKey.IsValid
+                || definition.TypeKey.Category != category
                 || !prefab.HasValidVisualRoot
                 || !prefab.HasValidCellScaleRoot
-                || prefab.TypeKey.Category != category)
+                )
             {
                 throw new InvalidOperationException(
                     $"Entity definition '{definition.name}' does not match its "
-                    + $"{category} Controller Prefab or Visual Root.");
+                    + $"{category} FSM Definition or View Prefab.");
             }
+
+            definition.ValidateInitialization();
         }
 
         private EntityDefinitionContainer GetContainer(EntityCategory category)

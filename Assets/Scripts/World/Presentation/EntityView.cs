@@ -1,13 +1,14 @@
 using System;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Entities;
+using MiniCivilization.World.Runtime;
 using UnityEngine;
 using WorldEntityId = MiniCivilization.World.Domain.EntityId;
 
 namespace MiniCivilization.World.Presentation
 {
     [DisallowMultipleComponent]
-    public abstract class EntityController : MonoBehaviour
+    public abstract class EntityView : MonoBehaviour
     {
         private const float TargetThreshold = 0.01f;
         private const float RotationSpeed = 360f;
@@ -33,14 +34,14 @@ namespace MiniCivilization.World.Presentation
         private uint randomState;
         private float worldCellScale = 1f;
 
-        public abstract EntityTypeKey TypeKey { get; }
-        public abstract string EntityTypeName { get; }
-        public abstract bool HasValidEntityType { get; }
-        public EntityCategory Category => TypeKey.Category;
-        public Entity BoundEntity { get; private set; }
+        public EntityRuntime BoundEntity { get; private set; }
         public WorldEntityId BoundEntityId =>
             BoundEntity?.Id ?? WorldEntityId.None;
         public Transform VisualRoot => visualRoot;
+        internal Transform CellScaleRoot => cellScaleRoot;
+        internal Transform LocalMotionRoot => localMotionRoot;
+        internal EntityVisualMotionProfile VisualMotionProfile =>
+            visualMotionProfile;
         public EntityVisualMotionProfile.RenderHeightBasis RenderHeightBasis =>
             currentVisualMotion.HeightBasis;
         public float JumpHeight => currentVisualMotion.JumpHeight
@@ -73,7 +74,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         public void Bind(
-            Entity entity,
+            EntityRuntime entity,
             WorldEntityRenderer renderer)
         {
             if (entity == null)
@@ -86,17 +87,10 @@ namespace MiniCivilization.World.Presentation
                 throw new ArgumentNullException(nameof(renderer));
             }
 
-            if (!HasValidEntityType || entity.TypeKey != TypeKey)
-            {
-                throw new InvalidOperationException(
-                    $"Entity Controller '{name}' cannot bind entity type key "
-                    + $"{entity.TypeKey}.");
-            }
-
             if (!HasValidVisualRoot)
             {
                 throw new InvalidOperationException(
-                    $"Entity Controller '{name}' requires a CellScaleRoot with VisualRoot below it.");
+                    $"Entity View '{name}' requires a CellScaleRoot with VisualRoot below it.");
             }
 
             if (BoundEntity != null)
@@ -117,11 +111,6 @@ namespace MiniCivilization.World.Presentation
         public void Unbind()
         {
             var entity = BoundEntity;
-            if (entity == null)
-            {
-                return;
-            }
-
             BoundEntity = null;
             rendererContext = null;
             worldCellScale = 1f;
@@ -129,7 +118,7 @@ namespace MiniCivilization.World.Presentation
             {
                 cellScaleRoot.localScale = Vector3.one;
             }
-            OnUnbound(entity);
+            if (entity != null) OnUnbound();
             ResetVisualMotion();
             SetVisualVisible(true);
         }
@@ -155,7 +144,7 @@ namespace MiniCivilization.World.Presentation
             if (!HasValidVisualRoot)
             {
                 throw new InvalidOperationException(
-                    $"Entity Controller '{name}' requires a CellScaleRoot with VisualRoot below it.");
+                    $"Entity View '{name}' requires a CellScaleRoot with VisualRoot below it.");
             }
 
             cellScaleRoot.localScale = Vector3.one * cellScale;
@@ -212,23 +201,34 @@ namespace MiniCivilization.World.Presentation
             return visualRoot != null ? visualRoot.position : transform.position;
         }
 
-        public abstract Entity CreateStateMachine(EntityData data);
-
-        protected virtual void OnBound(Entity entity)
+        protected virtual void OnBound(EntityRuntime entity)
         {
         }
 
-        protected virtual void OnUnbound(Entity entity)
+        protected virtual void OnUnbound()
         {
         }
 
-        protected virtual void OnRefreshed(Entity entity)
+        protected virtual void OnRefreshed(EntityRuntime entity)
         {
         }
 
-        private void RefreshVisualMotion(Entity entity)
+        internal void ConfigureRuntimeStructure(
+            Transform scaleRoot,
+            Transform motionRoot,
+            Transform contentRoot,
+            EntityVisualMotionProfile motionProfile)
         {
-            var moving = entity as DynamicEntity;
+            cellScaleRoot = scaleRoot;
+            localMotionRoot = motionRoot;
+            visualRoot = contentRoot;
+            visualMotionProfile = motionProfile;
+            ResetVisualMotion();
+        }
+
+        private void RefreshVisualMotion(EntityRuntime entity)
+        {
+            var moving = entity.FSM as DynamicEntityFSM;
             var usesMoveVisual = moving is { IsMoving: true };
             var moveType = usesMoveVisual ? moving.MoveType : default;
             if (!usesMoveVisual
@@ -267,7 +267,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         private EntityVisualMotionProfile.VisualMotionSettings ResolveVisualMotion(
-            Entity entity,
+            EntityRuntime entity,
             bool usesMoveVisual,
             EntityMoveType moveType)
         {
@@ -499,7 +499,7 @@ namespace MiniCivilization.World.Presentation
             }
         }
 
-        private bool TryGetInteractionTarget(out EntityController target)
+        private bool TryGetInteractionTarget(out EntityView target)
         {
             target = null;
             var entity = BoundEntity;
@@ -570,7 +570,7 @@ namespace MiniCivilization.World.Presentation
                 RotationSpeed * deltaTime);
         }
 
-        private void InitializeRandom(Entity entity)
+        private void InitializeRandom(EntityRuntime entity)
         {
             var seed = entity.Id.Value
                 ^ ((ulong)entity.TypeKey.Value << 32);
@@ -596,6 +596,7 @@ namespace MiniCivilization.World.Presentation
 
         private void ResetVisualMotion()
         {
+            wayConstrained = false;
             visualMotionActivity = EntityActivityId.None;
             visualMotionPhase = default;
             visualMotionInteractionTarget = WorldEntityId.None;

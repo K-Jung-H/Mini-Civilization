@@ -155,7 +155,7 @@ namespace MiniCivilization.World.Editor
                         }
 
                         throw new InvalidOperationException(
-                            "Entity Prefab root requires an EntityController.");
+                            "Entity Prefab root requires an EntityView.");
                     }
                 }
 
@@ -212,14 +212,14 @@ namespace MiniCivilization.World.Editor
             MarkChanged(system);
         }
 
-        private static EntityController FindExistingPreview(
+        private static EntityView FindExistingPreview(
             EntityAuthoringSystem system)
         {
             var searchRoot = system.transform.parent != null
                 ? system.transform.parent
                 : system.transform;
             var candidates = searchRoot.GetComponentsInChildren<
-                EntityController>(true);
+                EntityView>(true);
             for (var index = 0; index < candidates.Length; index++)
             {
                 var candidate = candidates[index];

@@ -134,13 +134,12 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6f10c21f576b457d875998708870a0c2, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityController
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.NatureEntityView
   visualRoot: {fileID: 1252491562607919201}
   cellScaleRoot: {fileID: 910000000000000012}
   localMotionRoot: {fileID: 0}
   visualMotionProfile: {fileID: 0}
   animator: {fileID: 0}
-  entityType: 1
 --- !u!1 &910000000000000011
 GameObject:
   m_ObjectHideFlags: 0

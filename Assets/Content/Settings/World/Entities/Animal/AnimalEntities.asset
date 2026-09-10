@@ -14,3 +14,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Definitions.AnimalEntityContainer
   definitions:
   - {fileID: 11400000, guid: 9c5ee13c248fb3244bde79773b2c785b, type: 2}
+  - {fileID: 11400000, guid: 13ad753a29fc42ccba479eea6b6194c7, type: 2}

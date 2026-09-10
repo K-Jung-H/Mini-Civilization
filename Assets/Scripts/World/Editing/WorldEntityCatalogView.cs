@@ -357,9 +357,10 @@ namespace MiniCivilization.World.Editing
 
             if (detailsType != null)
             {
-                var controller = definition?.Prefab;
-                detailsType.text = controller?.EntityTypeName ?? string.Empty;
-                detailsType.gameObject.SetActive(controller != null);
+                detailsType.text = definition != null
+                    ? definition.TypeKey.ToString()
+                    : string.Empty;
+                detailsType.gameObject.SetActive(definition != null);
             }
 
             if (detailsEmptyText != null)

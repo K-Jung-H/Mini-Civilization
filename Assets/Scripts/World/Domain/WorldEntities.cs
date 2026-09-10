@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 
 namespace MiniCivilization.World.Domain
 {
@@ -106,12 +108,14 @@ namespace MiniCivilization.World.Domain
         public EntityTypeKey TypeKey { get; }
         public CellCoordinate AnchorCell { get; private set; }
         public EntityDirection Direction { get; private set; }
+        public EntityAttributes Attributes { get; }
 
         public EntityData(
             EntityId id,
             EntityTypeKey typeKey,
             CellCoordinate anchorCell,
-            EntityDirection direction = EntityDirection.North)
+            EntityDirection direction = EntityDirection.North,
+            EntityAttributes attributes = null)
         {
             if (!id.IsValid)
             {
@@ -132,6 +136,7 @@ namespace MiniCivilization.World.Domain
             TypeKey = typeKey;
             AnchorCell = anchorCell;
             Direction = direction;
+            Attributes = attributes ?? EntityAttributes.Empty;
         }
 
         internal void MoveTo(CellCoordinate anchorCell) => AnchorCell = anchorCell;
@@ -144,6 +149,88 @@ namespace MiniCivilization.World.Domain
             }
 
             Direction = direction;
+        }
+    }
+
+    public readonly struct EntityTrait
+    {
+        public string Id { get; }
+        public float Value { get; }
+
+        public EntityTrait(string id, float value)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw new ArgumentException(
+                    "Entity trait ID cannot be empty.",
+                    nameof(id));
+            }
+
+            if (!float.IsFinite(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value));
+            }
+
+            Id = id;
+            Value = value;
+        }
+    }
+
+    public sealed class EntityAttributes
+    {
+        private static readonly EntityTrait[] NoTraits =
+            Array.Empty<EntityTrait>();
+        private readonly EntityTrait[] traits;
+        private readonly ReadOnlyCollection<EntityTrait> readOnlyTraits;
+        private readonly Dictionary<string, float> traitsById;
+
+        public static EntityAttributes Empty { get; } =
+            new(string.Empty, 0, NoTraits);
+
+        public string Name { get; }
+        public int Age { get; }
+        public IReadOnlyList<EntityTrait> Traits => readOnlyTraits;
+
+        public EntityAttributes(
+            string name,
+            int age,
+            IReadOnlyList<EntityTrait> traits)
+        {
+            if (age < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(age));
+            }
+
+            Name = name ?? string.Empty;
+            Age = age;
+            this.traits = new EntityTrait[traits?.Count ?? 0];
+            readOnlyTraits = Array.AsReadOnly(this.traits);
+            traitsById = new Dictionary<string, float>(
+                this.traits.Length,
+                StringComparer.Ordinal);
+            for (var index = 0; index < this.traits.Length; index++)
+            {
+                var trait = traits[index];
+                if (!traitsById.TryAdd(trait.Id, trait.Value))
+                {
+                    throw new ArgumentException(
+                        $"Entity trait ID '{trait.Id}' is duplicated.",
+                        nameof(traits));
+                }
+
+                this.traits[index] = trait;
+            }
+        }
+
+        public bool TryGetTrait(string id, out float value)
+        {
+            if (id == null)
+            {
+                value = default;
+                return false;
+            }
+
+            return traitsById.TryGetValue(id, out value);
         }
     }
 }

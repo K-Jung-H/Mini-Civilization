@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace MiniCivilization.World.Presentation
 {
-    public abstract class AnimatedEntityController : EntityController
+    public abstract class AnimatedEntityView : EntityView
     {
         private static readonly int ModeParameter =
             Animator.StringToHash("Mode");
@@ -14,6 +14,15 @@ namespace MiniCivilization.World.Presentation
         private const float BlendDampTime = 0.15f;
 
         [SerializeField] private Animator animator;
+
+        internal void ConfigureAnimator(Animator value) => animator = value;
+
+        internal void ResetAnimator()
+        {
+            if (animator == null || animator.runtimeAnimatorController == null) return;
+            animator.Rebind();
+            animator.Update(0f);
+        }
 
         protected override void Update()
         {
@@ -34,7 +43,7 @@ namespace MiniCivilization.World.Presentation
                 PresentationAnimatorBlendValue,
                 BlendDampTime,
                 Time.deltaTime);
-            var moveProgress = BoundEntity is DynamicEntity moving
+            var moveProgress = BoundEntity.FSM is DynamicEntityFSM moving
                 && moving.IsMoving
                 && moving.MoveType == EntityMoveType.HeightTransition
                     ? moving.MoveProgress
