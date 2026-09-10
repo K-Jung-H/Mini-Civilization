@@ -71,8 +71,52 @@
 
 ## 예정
 
-- 보완 로드맵 완료 후 속성 변경·행동 가중치 연결 범위를 논의한다.
-- 이후 Entity 조작 UI 추가 범위를 논의하고 구현한 뒤 초기 5·6단계 및 두 번째 Animal 통합 검증을 수행한다.
+### Main Scene UI 재설계
+
+- **상태:** Canvas 직속 TMP Box와 고정 컨트롤을 씬에 배치하고 기존 World Edit UI·Toolbar 상태 의존성을 제거했다. 사용자 실행·해상도별 배치 확인 대기이며 런타임 검증 완료로 판정하지 않는다.
+- **설계 기준:** DEC-009. 현재 구현 구조는 PROJECT.md를 따른다.
+- **대상:** `Assets/Content/Scenes/Main Scene.unity`와 연결된 UI·Interaction 코드 및 UI 항목 Prefab.
+- **목표:** 중앙 World View를 유지하면서 단일 Entity / World Workspace, 도구별 Options, 독립적인 Simulation·Inspector Box를 제공한다.
+- **우선 범위:** 기존 기능의 UI 재구성, 미지원 항목 표시, Cell 기반 Entity Inspector 선택 연결. 미구현 World 도구·Simulation 제어는 아래 후속 작업으로 분리한다.
+- **기존 로드맵과의 관계:** Entity 생명주기 보완·Deer Animator 연결·사용자 통합 검증의 미완료 상태를 유지한다. 이번 Inspector는 관찰 수단을 제공하며 속성 편집·행동 가중치 조작까지 완료한 것으로 보지 않는다.
+
+| 순서 | 사용자 기능 단계 | 완료 기준 | 상태 |
+|---|---|---|---|
+| UI-1 | 표시와 도구·선택 상태 분리 | Workspace 표시 여부로 Mode·Cell 선택 가능 여부를 결정하지 않는다. X·Launcher가 Active Tool·선택·Pending을 해제하지 않는다. 명시적 도구 해제와 실제 도구 변경의 취소 경로는 유지한다. | Active Tool 계약 수정 완료, 사용자 확인 대기 |
+| UI-2 | 고정 Workspace와 독립 Box | 좌측 Workspace, 우측 Simulation·Inspector와 각각의 Launcher를 배치한다. 세 Box의 8가지 확장 조합을 지원하고 World View·Camera·좌표계는 유지한다. 기존 확인·진행·Undo/Redo UI와 직렬화 참조를 보존한다. | Launcher·History·내부 스크롤 수정 완료, 사용자 확인 대기 |
+| UI-3 | Context Palette와 Tool Options | Entity / World Tab이 같은 Palette를 사용한다. 승인된 Category와 Road를 표시하고 기존 도구를 연결한다. Category 탐색 시 도구·Options 해제, 항목 선택 시 필요한 Options만 활성화한다. 미지원 기능은 실행할 수 없다. Area는 기존 3D Box로 유지한다. | 도구 연결·복귀·선택 표시 구현 완료, 사용자 확인 대기 |
+| UI-4 | Cell Inspector | 기존 Cell 정보 조회·표시를 재사용한다. Inspector 축소가 선택을 해제하지 않고 재확장 시 최신 정보를 표시한다. 월드 교체·대상 무효화와 정보 갱신을 처리한다. | Context 상태 및 월드 없음 표시 수정 완료, 사용자 확인 대기 |
+| UI-5 | Cell 기반 Entity Inspector | 선택 Cell에 Entity가 0개면 Cell 정보, 1개면 Entity 정보, 여러 개면 정렬된 선택 목록을 표시한다. Cell 정보·목록으로 복귀할 수 있고 Entity ID로 개체 정체성을 유지한다. | Context·정렬 목록·Entity 변경 추적 구현 완료, 사용자 확인 대기 |
+| UI-6 | 사용자 통합 확인 | 아래 재현 항목을 사용자가 확인하고 결과에 따른 결함을 정리한다. 구현 완료와 사용자 검증 완료를 구분하여 기록한다. | 컴파일 확인 후 사용자 실행 확인 대기 |
+
+진행 순서는 UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6이다. 상태 분리를 먼저 수행하여 새 Box의 표시 제어가 기존 편집·선택 취소 경로를 다시 호출하지 않게 한다. 단계별 실제 구현 후에만 PROJECT.md를 갱신한다.
+
+현재 구현 경계는 MainSceneUIView의 씬 참조·Context 표시, WorkspaceItemView/Workspace Item.prefab의 데이터 행 표시, WorldEditToolState의 도구 상태, WorldEditApplyController의 실행·History 연결이다. 기존 Toolbar·Catalog View는 Main Scene에서 사용하지 않는다. Cell 조회·월드 Pointer 차단과 확인·진행 UI는 기존 시스템을 유지한다.
+
+추가 사용자 확인: Play 전 Canvas 직속 Box가 보이는지, Tool Options 전환 시 Tab/History 크기가 고정되는지, 모드·Brush Size를 반복 변경할 수 있는지, Back 버튼과 스크롤이 동작하는지 확인한다. Entity·Road의 Thumbnail이 없는 데이터와 Terraform은 문자 기호를 표시하며 전용 아트 연결은 별도 콘텐츠 작업이다.
+### UI 후속 기능
+
+| 작업 | 범위·선행 조건 | 상태 |
+|---|---|---|
+| 미구현 World 도구 | Biome, Water, Terrain 재질 등 미지원 항목의 실제 동작을 별도 설계·구현한다. UI-3의 도구 연결 경계를 사용하며 도구별 옵션·변경 전파·저장 영향을 먼저 확정한다. 기존 Terraform·Road를 중복 구현하지 않는다. | 후속 예정, 세부 동작 미확정 |
+| Simulation 제어 | 시간 표시·Pause/Play·Speed의 범위와 Entity·물 처리에 적용할 시간 계약을 먼저 정한다. UI-2의 Box에 연결하되 표시 여부는 실행 상태에 영향을 주지 않는다. 기존 공통 제어 API가 없으므로 UI 재배치에 시간 제어를 임의 포함하지 않는다. | 후속 예정, 제어 계약 미확정 |
+| Rectangle | 2D Surface Rectangle 선택을 도구별 지원 범위에 맞게 추가한다. 기존 Area의 3D Box 의미는 변경하지 않는다. | 후속 예정 |
+| Area Inspector | 선택 영역의 관찰 Context와 표시할 정보를 별도로 정의한다. 편집 Pending 영역과의 관계를 먼저 정한다. | 향후 확장 |
+| Road 그룹 재구성 | 콘텐츠 확장 시 Category 배치를 재검토한다. 그전에는 독립 Road Category를 사용한다. | 향후 확장 |
+
+후속 기능은 UI 기반 이후 별도 작업으로 수행한다. 기능별 상세 우선순위·지원 옵션·시간 제어 방식은 아직 확정하지 않는다. 속성 변경·행동 가중치 연결은 기존 Entity 보완 로드맵 이후 논의하며, Inspector만으로 충족되지 않는 초기 5·6단계 및 두 번째 Animal 검증은 필요한 조작 수단 마련 후 재개한다.
+
+### UI 사용자 확인 절차
+
+agent는 코드 변경 단계에서 컴파일 오류 확인까지만 수행한다. 다음 런타임 확인은 사용자가 수행하며 결과를 전달한 뒤 완료 상태를 갱신한다.
+
+- 각 Box를 X로 접고 Launcher로 펼쳐 8가지 조합을 확인한다. 다른 Box 상태, Active Tool, 선택 Context, Pending 편집과 Simulation 진행이 유지되어야 한다.
+- Tab·Category로 돌아가면 도구가 해제되고 Options가 숨겨져야 한다. Deer 또는 지원되는 World 항목 선택 시에만 필요한 Options가 표시되고 Building은 Single만 허용되어야 한다. 미지원 항목은 실행되지 않아야 한다.
+- UI 위 클릭·Drag 및 Pending 중 X·Launcher 클릭을 수행한다. 월드에 적용되지 않고 표시 전용 클릭이 Pending을 취소하지 않아야 한다. 기존 UI 진입 시 Drag 차단·명시적 취소 규칙은 유지되어야 한다.
+- Single·Brush·3D Area로 기존 편집과 실행·취소·Undo/Redo를 확인한다. UI 이동 전과 같은 월드 변경 결과를 유지해야 한다.
+- Entity가 0개·1개·여러 개인 Cell을 각각 선택한다. Cell 정보·Entity 자동 선택·정렬 목록이 대응하고 Cell 정보·목록으로 돌아갈 수 있어야 한다.
+- Inspector를 접은 동안 대상 상태를 변경한 뒤 펼친다. 최신 정보가 표시되어야 하며 삭제·언로드·월드 교체 후 다른 개체를 이전 선택으로 표시하지 않아야 한다.
+- Box 확장·축소 전후 같은 화면 지점의 Cell Picking과 Camera viewport를 확인한다. UI가 가리지 않는 World View의 좌표와 월드 논리 크기가 바뀌지 않아야 한다.
 
 ## 보류
 
@@ -81,3 +125,4 @@
 ## 취소
 
 - 없음.
+

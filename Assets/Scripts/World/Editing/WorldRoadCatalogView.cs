@@ -42,7 +42,7 @@ namespace MiniCivilization.World.Editing
 
         public bool TryGetSelectedAction(out WorldEditAction action)
         {
-            if (!isActiveAndEnabled || !hasSelectedAction)
+            if (!hasSelectedAction)
             {
                 action = default;
                 return false;
@@ -62,6 +62,13 @@ namespace MiniCivilization.World.Editing
             {
                 ActionSelectionChanged?.Invoke(default, false);
             }
+        }
+
+        public void SelectAction(WorldEditAction action)
+        {
+            selectedAction = action;
+            hasSelectedAction = action.PropertyGroup == WorldEditPropertyGroup.Road;
+            ActionSelectionChanged?.Invoke(selectedAction, hasSelectedAction);
         }
 
         private void RebuildItems()

@@ -1,5 +1,47 @@
 # 중요 설계 결정
 
+## DEC-009 — Main Scene의 Context Workspace와 독립적인 Box 표시
+
+- **상태:** Active — 승인된 목표 설계. 구현 완료를 뜻하지 않으며 진행 상태는 ROADMAP.md를 따른다.
+- **결정:** 중앙 World View를 주 작업 공간으로 유지하고, 좌측은 적용할 대상·도구, 우측은 Simulation 제어·선택 대상 관찰을 담당한다. 기능 추가에 따라 패널을 옆이나 아래로 확장하지 않고 고정 Box 내부의 Context를 전환한다.
+- **영향 시스템:** Main Scene, UI Presentation, Editing Interaction, Cell·Entity 선택
+- **관련 결정:** DEC-002, DEC-003, DEC-006, DEC-007, DEC-008
+
+### Workspace와 Tool Options
+
+- 좌측 상단의 단일 Workspace에 Entity / World 최상위 Tab을 둔다. 두 Tab은 같은 Palette 영역을 공유하며 Category와 항목을 그 영역 안에서 전환한다.
+- Entity Category는 Animal / Nature / Human / Building, World Category는 Biome / Water / Terrain / Terraform / Road다. Road는 우선 독립 Category로 사용하고 추후 그룹 재구성 대상으로 둔다. 이 UI 분류를 이유로 기존 데이터 타입·식별자·Catalog를 개명하거나 리팩터링하지 않는다.
+- 기존 Raise / Lower / Add / Remove는 Terraform에 배치한다. 기존 Entity·Road Catalog 데이터는 재사용한다. 지원하지 않는 항목은 미지원 상태로 표시하며 실행 가능한 도구로 활성화하지 않는다.
+- Tool Options는 Workspace 하단에 둔다. Category 탐색 중에는 숨김 또는 비활성 상태이고, 실제 월드 상호작용 항목을 선택하여 Active Tool이 생겼을 때만 활성화한다. Terrain Category 진입과 Terrain > Grass 선택, Animal Category 진입과 Animal > Deer 선택은 각각 탐색과 도구 활성화로 구분한다. 예시 항목이 현재 구현되어 있음을 뜻하지 않는다.
+- Tab·Category 탐색으로 돌아가면 Active Tool을 해제하고 Options를 숨긴다. 명시적인 도구 해제 조작도 제공한다. Box 축소는 도구 해제가 아니다.
+- Tool Options는 해당 도구에 실제 필요한 Interaction Mode, Brush Size, Strength, 적용 Mode만 표시한다. 모든 도구에 모든 옵션을 강제하지 않는다. 기존 Building 도구의 Single 제한을 보존한다.
+- Single / Brush / Area의 기존 기능을 재사용한다. Area는 기존 3D Box 선택을 유지한다. Rectangle은 후속 작업에서 2D Surface Rectangle으로 추가하며 구현 전에는 활성화하지 않는다.
+
+### 독립적인 확장·축소와 상태 경계
+
+- Workspace, Simulation, Inspector는 각각 우측 상단 X로 축소한다. Workspace Launcher는 좌측 상단, Simulation·Inspector의 개별 Launcher는 우측 상단에 남긴다.
+- 세 Box는 독립적으로 확장·축소하며 총 8가지 조합을 지원한다. 우측 두 Box와 Launcher는 서로 가리지 않도록 배치한다.
+- X·Launcher는 표시만 변경한다. Active Tool·옵션·선택 대상·Pending 편집·Simulation 상태를 변경하거나 해제하지 않는다. UI Content 비활성화가 상태 소유 컴포넌트의 수명 종료로 이어져서도 안 된다.
+- Tab·Category·스크롤·확장 상태는 UI 상태, Active Tool은 Editing 상태, 선택 Cell 좌표·Entity ID는 Interaction 상태로 구분한다. Cell·Entity 사실과 Simulation 실행 상태는 기존 소유 시스템에 유지한다.
+- 확장·축소 상태를 저장 파일이나 PlayerPrefs에 영구 저장하지 않는다.
+
+### Inspector와 Cell 기반 Entity 선택
+
+- Inspector는 선택한 Cell·Entity 및 향후 Area의 Context View다. Active Tool 설정은 좌측 Tool Options에서만 담당한다. 배치할 EntityDefinition 정보와 월드 개체의 EntityData 정보를 구분한다.
+- 기존 Cell Picking으로 Cell을 선택한 뒤 기존 Entity 조회 경로를 사용한다. Entity가 없으면 Cell 정보, 하나면 해당 Entity 선택 상태로 바로 연결한다. 여러 개면 Inspector에 정렬된 목록을 표시하고 항목 선택을 제공한다. 구체 정렬 기준은 구현 시 정하며 도메인 모델에 추가하지 않는다.
+- 선택 Cell Context를 유지하여 Entity 정보에서 Cell 정보·목록으로 돌아갈 수 있게 한다. Entity는 풀링되는 View·Runtime 참조 대신 ID를 기준으로 조회한다.
+- X는 선택을 해제하지 않는다. 재확장 시 최신 데이터를 표시하며 개체 삭제·언로드·월드 교체로 유효하지 않은 대상은 안전하게 처리한다. Area Inspector는 후속 확장 대상이며 편집용 영역 선택을 자동으로 Inspector 선택으로 취급하지 않는다.
+
+### Simulation·Input·재사용 경계
+
+- Simulation은 우측 상단 독립 Box다. 기존 시간·Pause/Play·Speed 기능이 있으면 재사용하며 UI 재배치를 이유로 Simulation 로직을 재설계하지 않는다. 현재 미구현인 제어는 UI 재구성과 분리된 후속 작업에 포함한다.
+- 기존 uGUI와 EventSystem을 유지한다. Box는 World View 위에 배치하며 월드 논리 크기, Cell 좌표계, Camera viewport·시스템을 변경하지 않는다.
+- UI 위 Pointer가 월드 선택·편집으로 전달되지 않는 기존 차단 규칙을 보존한다. 표시 전용 X·Launcher 클릭이 Pending을 취소하는 연결은 분리한다. 도구 변경·명시적 취소에 따른 정리는 유지한다.
+- 기존 WorldUIManager, Catalog 데이터, Cell 조회, Undo/Redo, 편집 확인·진행 UI를 재사용한다. 숨겨진 Toolbar·Catalog View를 상태 Adapter로 유지하는 방식은 폐기한다. WorldEditToolState가 편집 상태를 직접 소유하고 UI는 선택 명령과 표시를 담당한다. 불필요한 Manager·Service·전역 singleton·Event System은 만들지 않는다.
+- 고정 UI는 TMP 기반 uGUI로 씬에 미리 배치한다. Canvas 아래에 Workspace·Simulation·Inspector와 각 Launcher를 직접 두며 `World Edit UI` 및 `Main Scene UI` 중간 루트는 제거한다. 런타임 구조 생성은 사용하지 않고 가변 데이터 목록만 직렬화된 항목 Prefab으로 표시한다.
+- Workspace 하단 SelectMode Palette의 공간은 고정한다. 내부 Tool Options 활성 여부가 Tab·Undo/Redo 크기에 영향을 주지 않는다. Category 복귀는 Palette 제목 우측 정사각 Back 버튼의 활성·비활성으로 표현한다.
+- Scene·Prefab·Serialized Reference와 .meta의 참조 무결성을 보존한다. UI 재구성에서 월드 생성·Chunk·Cell 데이터·Entity simulation·저장 형식은 변경하지 않는다. 미구현 World 도구와 Simulation 제어는 별도 범위·영향 분석 후 구현한다.
+
 ## DEC-001 — 절대 좌표 기반 결정론적 Pattern Tile 생성
 
 - **상태:** Active
@@ -186,3 +228,4 @@ Runtime 생명주기 정리와 계열 View 재구성은 같은 연결·해제 �
 - **Scene 계약:** EntityRoot·계열 Root·PlacementPreviewRoot를 사전 배치하고 직렬화 참조로 연결한다. 활성·비활성 Host는 같은 계열 Root에 둔다. Active/Pooled Views/Pooled Models 폴더와 별도 모델 풀은 사용하지 않는다. Preview는 사용 중에만 PreviewRoot에 두고 종료 시 모델을 유지한 채 계열 풀로 반환한다.
 - **표현 계약:** 모델에는 중복 EntityView를 생성하지 않는다. 기존 Prefab의 표현 하위 구조와 배율은 보존한다. 재사용 시 이전 개체의 상태를 초기화하며 다른 모델로 교체할 때 표현 참조를 교체한다.
 - **변경하지 않는 범위:** Runtime·Data·FSM 소유권, 개체 ID, 저장 형식과 청크 비활성화 시 영속 상태 보존. 별도 모델 풀은 실제 필요가 확인될 때 재검토한다.
+

@@ -42,6 +42,20 @@ Terrain, Climate, Hydrology는 Pattern Tile로 생성된다. 생성·수문 세�
 - **Entities**: `EntityCatalog → EntityDefinition → EntitySystem → EntityRuntime → WorldEntityRenderer` 구조다. `EntitySystem`은 월드 단위 등록·인덱스·활성 Chunk tick을 관리하고, 개체별 `EntityRuntime`은 `EntityData`와 `EntityFSM`을 묶는다. 논리·저장 사실은 `EntityData`, 행동과 진행 상태는 계열·종류별 FSM, Animator와 시각 이동은 `EntityView` 및 Render Profile이 담당한다.
 - **Persistence**: `SaveLoadManager`와 `WorldPersistenceService`가 월드 메타데이터 및 region 기반 Chunk 저장을 관리한다. 새 영속 상태가 추가되면 Save/Load도 같은 변경 범위에서 확장한다.
 
+## Main Scene UI의 현재 구조
+
+`Assets/Content/Scenes/Main Scene.unity`의 `World System/World UI/Canvas`에 좌측 Workspace, 우측 Simulation·Inspector Box와 각각의 Launcher를 uGUI Hierarchy로 직렬화해 배치한다. `MainSceneUIView`는 이 Scene 참조를 사용해 표시 상태와 데이터 기반 목록만 갱신하며 실행 시 고정 UI 구조를 생성하지 않는다. Workspace·Simulation·Inspector와 Launcher는 Canvas의 직접 자식이다. `World Edit UI`와 `Main Scene UI` 중간 루트는 제거했다. Box는 표시만 제어하며 상태 소유 컴포넌트는 Box 외부에 유지한다. 텍스트는 프로젝트 TMP 폰트를 사용한다. 고정 컨트롤은 씬에 저장하고 데이터 목록만 `Workspace Item.prefab` 인스턴스로 표시한다.
+
+Workspace는 Entity / World Tab이 하나의 Palette를 공유한다. Entity는 Animal / Nature / Human / Building Catalog를 기존 EntityDefinition으로 구성한다. World는 Biome / Water / Terrain / Terraform / Road를 표시하며 현재 지원되는 Terraform과 Road만 기존 WorldEditAction으로 연결한다. 미지원 Category와 Rectangle은 비활성 상태로 표시한다. Tool Options는 Active Tool이 있을 때만 Single / Brush / 기존 3D Area와 필요한 Brush Size를 표시하며 Building의 Single 제한을 유지한다. 현재 Tab·Palette 항목·Interaction Mode·Brush Size는 선택 색상으로 구분한다. Tab·Category로 돌아가거나 Clear Tool을 누르면 도구가 해제된다.
+
+WorldEditToolState가 Active Tool·Mode·Brush Size를 직접 소유한다. MainSceneUIView는 Toolbar Toggle을 경유하지 않고 명시적인 도구 선택 명령을 호출하며 Undo/Redo는 WorldEditApplyController에 연결한다. Workspace 하단 SelectMode Palette는 고정 공간을 차지하고 내부 Tool Options만 활성화한다. Palette 제목 우측의 정사각 Back 버튼은 Category 안에서만 활성화한다. Palette와 Inspector는 세로 ScrollRect와 자동 숨김 Scrollbar를 사용한다. Entity·Road는 기존 Thumbnail을 연결하며 이미지가 없는 항목은 문자 기호를 표시한다. WorldInteractionController와 WorldEditInputController는 기존 EventSystem의 UI Pointer 차단, DDA Cell Picking, 편집 Preview·확인 경로를 유지한다.
+
+Inspector는 선택 Cell을 WorldCellInfoProvider로 조회하고 주기적으로 최신 값을 표시한다. Cell의 Entity ID를 기존 EntitySystem 조회 경로에서 정렬하며, 0개면 Cell, 1개면 해당 Entity, 여러 개면 선택 목록을 표시한다. Entity Context는 Entity ID로 유지하고 EntityData의 이름·나이·Trait 및 Runtime의 방향·Activity를 읽는다. Inspector 표시를 접어도 선택은 유지되며 대상 삭제·언로드 후에는 유효성을 다시 확인한다.
+
+기존 `WorldTileInfoPresenter`와 `WorldTileInfoPanel`은 Main Scene 연결에서 제거되었으며 Cell 선택 Context는 MainSceneUIView의 Inspector 한 곳에서 표시한다. 기존 Toolbar·Entity Catalog·Road Catalog View는 Main Scene과 초기화 경로에서 제거했다. EntityCatalog·RoadVisualCatalog 데이터와 편집 확인 UI·Streaming 진행 UI의 기존 참조는 유지한다.
+
+Simulation Box는 현재 기능 미지원 상태를 표시한다. EntityManager와 WorldWaterFlowController는 각각 기존 업데이트 경로에서 계속 시뮬레이션을 처리한다. 공통 시간·Pause/Play·Speed 제어는 아직 구현되어 있지 않다.
+
 ## 변경 전파
 
 `WorldManager`는 런타임을 생성하고 Editing, WaterFlow, Renderer, EntityManager, Persistence를 연결한다. 월드 편집과 물 계산 결과는 ChangeSet으로 전달되어 렌더링, 저장 dirty 처리, 필요한 내비게이션·Waypoint 갱신을 유도한다.
@@ -79,3 +93,4 @@ EntitySystem.Tick
 `Placement Preview Root`는 EntityRoot의 형제다. 사용 중 Preview Host만 이 Root로 이동하며 영역 축소·선택 종료·도구 변경 시 모델을 붙인 채 해당 계열 Root의 풀로 반환한다. Preview 소유 목록은 즉시 비워진다. View Host 풀과 Runtime 슬롯 풀은 독립적이며 FSM 객체 자체는 풀링하지 않는다. 표시 해제는 개체 삭제가 아니며 영속 데이터와 저장 계약을 변경하지 않는다.
 
 이동 중인 Dynamic Entity의 청크 참조는 Anchor뿐 아니라 MoveFrom·MoveTo와 Way 경로가 통과하는 청크를 포함한다. 이동 시작 시 참조를 확장하고 완료 후 도착 위치 기준으로 축소한다. 이동 시작은 모든 필요 청크가 로드된 경우에만 허용된다. 저장 복원도 FSM payload를 먼저 임시 복원해 같은 참조 집합을 계산하고, 모든 청크가 준비된 뒤 실제 Runtime을 등록한다. 저장된 좌표나 Way 경로가 월드 범위를 벗어나면 미로드 상태로 취급하지 않고 손상된 상태로 거부한다.
+

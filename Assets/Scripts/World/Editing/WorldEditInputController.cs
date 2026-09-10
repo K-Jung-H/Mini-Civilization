@@ -55,7 +55,6 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private WorldEditToolState toolState;
         [SerializeField] private WorldTileSelectionState selectionState;
         [SerializeField] private WorldEditConfirmationView confirmationView;
-        [SerializeField] private WorldEditToolbarView toolbarView;
 
         private bool isDragging;
         private bool isPending;
@@ -97,7 +96,6 @@ namespace MiniCivilization.World.Editing
                 toolState.StateChanged += OnToolStateChanged;
             }
 
-            BindToolbarView();
             BindConfirmationView();
         }
 
@@ -108,7 +106,6 @@ namespace MiniCivilization.World.Editing
                 toolState.StateChanged -= OnToolStateChanged;
             }
 
-            UnbindToolbarView();
             UnbindConfirmationView();
             CancelPending();
             CancelDrag();
@@ -144,6 +141,8 @@ namespace MiniCivilization.World.Editing
             if (isPending)
             {
                 if (mouse.leftButton.wasPressedThisFrame
+                    && (EventSystem.current == null
+                        || !EventSystem.current.IsPointerOverGameObject())
                     && (confirmationView == null
                         || !confirmationView.ContainsScreenPoint(
                             mouse.position.ReadValue())))
@@ -210,15 +209,13 @@ namespace MiniCivilization.World.Editing
             WorldManager manager,
             WorldEditToolState state,
             WorldTileSelectionState selection,
-            WorldEditConfirmationView confirmation = null,
-            WorldEditToolbarView toolbar = null)
+            WorldEditConfirmationView confirmation = null)
         {
             if (isActiveAndEnabled && toolState != null)
             {
                 toolState.StateChanged -= OnToolStateChanged;
             }
 
-            UnbindToolbarView();
             UnbindConfirmationView();
             CancelPending();
             CancelDrag();
@@ -226,14 +223,12 @@ namespace MiniCivilization.World.Editing
             toolState = state;
             selectionState = selection;
             confirmationView = confirmation;
-            toolbarView = toolbar;
 
             if (isActiveAndEnabled && toolState != null)
             {
                 toolState.StateChanged += OnToolStateChanged;
             }
 
-            BindToolbarView();
             BindConfirmationView();
         }
 
@@ -649,31 +644,6 @@ namespace MiniCivilization.World.Editing
             confirmationView.ExecuteRequested -= RequestExecution;
         }
 
-        private void BindToolbarView()
-        {
-            if (toolbarView == null)
-            {
-                return;
-            }
-
-            toolbarView.StructureChanged -= OnToolbarStructureChanged;
-            toolbarView.StructureChanged += OnToolbarStructureChanged;
-        }
-
-        private void UnbindToolbarView()
-        {
-            if (toolbarView != null)
-            {
-                toolbarView.StructureChanged -= OnToolbarStructureChanged;
-            }
-        }
-
-        private void OnToolbarStructureChanged()
-        {
-            CancelPending();
-            CancelDrag();
-        }
-
         private void RequestExecution()
         {
             if (!isPending
@@ -689,3 +659,4 @@ namespace MiniCivilization.World.Editing
         }
     }
 }
+

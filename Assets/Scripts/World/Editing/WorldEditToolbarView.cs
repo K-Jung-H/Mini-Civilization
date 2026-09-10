@@ -91,10 +91,11 @@ namespace MiniCivilization.World.Editing
         public event Action PropertyCategorySelected;
         public event Action UndoRequested;
         public event Action RedoRequested;
+        public event Action<bool, bool> HistoryAvailabilityChanged;
 
         public bool IsExpanded => isExpanded;
         public bool IsEntityGroupExpanded =>
-            isExpanded && entityGroup != null && entityGroup.IsExpanded;
+            entityGroup != null && entityGroup.IsExpanded;
         public int LayoutVersion => layoutVersion;
         public TMP_FontAsset LabelFont => labelFont;
         public RectTransform ToolbarPanel => toolbarPanel;
@@ -113,6 +114,8 @@ namespace MiniCivilization.World.Editing
         public ToggleGroup PropertyToggleGroup => propertyToggleGroup;
         public IReadOnlyList<WorldEditPropertySection> PropertySections =>
             propertySections;
+        public bool CanUndo => undoButton != null && undoButton.interactable;
+        public bool CanRedo => redoButton != null && redoButton.interactable;
 
         private void OnEnable()
         {
@@ -142,7 +145,13 @@ namespace MiniCivilization.World.Editing
             {
                 redoButton.interactable = canRedo;
             }
+
+            HistoryAvailabilityChanged?.Invoke(canUndo, canRedo);
         }
+
+        public void RequestUndoAction() => RequestUndo();
+
+        public void RequestRedoAction() => RequestRedo();
 
         public void SetExpanded(bool expanded)
         {
@@ -171,7 +180,7 @@ namespace MiniCivilization.World.Editing
 
         public int GetSelectedModeIndex()
         {
-            if (!isExpanded || selectModeGroup == null)
+            if (selectModeGroup == null)
             {
                 return 0;
             }
@@ -215,8 +224,7 @@ namespace MiniCivilization.World.Editing
         {
             sectionIndex = -1;
             detailIndex = -1;
-            if (!isExpanded
-                || propertySections == null)
+            if (propertySections == null)
             {
                 return false;
             }
@@ -225,8 +233,7 @@ namespace MiniCivilization.World.Editing
             {
                 var propertySection = propertySections[section];
                 if (propertySection?.CategoryToggle == null
-                    || !propertySection.CategoryToggle.isOn
-                    || !IsSectionGroupExpanded(section))
+                    || !propertySection.CategoryToggle.isOn)
                 {
                     continue;
                 }
@@ -270,16 +277,28 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            var toggle = propertySections[sectionIndex]
-                .DetailToggles[detailIndex];
-            if (toggle == null || toggle.isOn)
+            var section = propertySections[sectionIndex];
+            var toggle = section.DetailToggles[detailIndex];
+            if (toggle == null)
             {
                 return;
             }
 
-            toggle.SetIsOnWithoutNotify(true);
-            ToggleGroupVisualStyle.RefreshFor(toggle);
-            SelectionChanged?.Invoke();
+            if (section.CategoryToggle != null
+                && !section.CategoryToggle.isOn)
+            {
+                section.CategoryToggle.isOn = true;
+            }
+
+            if (!toggle.isOn)
+            {
+                toggle.isOn = true;
+            }
+            else
+            {
+                SelectionChanged?.Invoke();
+                EditActionSelected?.Invoke(action);
+            }
         }
 
         public void ClearActiveEditAction()
@@ -311,6 +330,36 @@ namespace MiniCivilization.World.Editing
             if (changed)
             {
                 SelectionChanged?.Invoke();
+            }
+        }
+
+        public void SelectMode(WorldEditMode mode)
+        {
+            var target = mode switch
+            {
+                WorldEditMode.Single => singleSelectionToggle,
+                WorldEditMode.Area => areaSelectionToggle,
+                WorldEditMode.Brush => brushToggle,
+                _ => null
+            };
+            if (target == null || !target.interactable)
+            {
+                return;
+            }
+
+            target.isOn = true;
+        }
+
+        public void SelectBrushSize(int size)
+        {
+            var index = Mathf.Clamp(size, 1, brushSizeToggles?.Length ?? 1) - 1;
+            var target = brushSizeToggles != null
+                && (uint)index < brushSizeToggles.Length
+                    ? brushSizeToggles[index]
+                    : null;
+            if (target != null && target.interactable)
+            {
+                target.isOn = true;
             }
         }
 

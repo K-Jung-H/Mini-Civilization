@@ -18,16 +18,12 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private WorldCellInfoProvider infoProvider;
 
         [Header("World UI")]
-        [SerializeField] private WorldEditToolbarView toolbarView;
-        [SerializeField] private WorldEntityCatalogView entityCatalogView;
-        [SerializeField] private WorldRoadCatalogView roadCatalogView;
         [SerializeField] private RoadVisualCatalog roadVisualCatalog;
         [SerializeField] private WorldEditConfirmationView editConfirmationView;
-        [SerializeField] private WorldTileInfoPresenter tileInfoPresenter;
-        [SerializeField] private WorldTileInfoPanel tileInfoPanel;
         [SerializeField] private WorldStreamingProgressView streamingProgressView;
 
         private WorldManager worldManager;
+        private MainSceneUIView mainSceneView;
 
         public void Configure(
             WorldEditToolState toolState,
@@ -52,48 +48,27 @@ namespace MiniCivilization.World.Presentation
 
             worldManager = manager;
             streamingProgressView?.SetWorldManager(manager);
-            if (entityCatalogView != null)
+            entityEditController?.Configure(manager.EntityManager, manager.EditController);
+            editInputController?.Configure(manager, editToolState, selectionState, editConfirmationView);
+            editApplyController?.Configure(manager.EditController, selectionState, editToolState,
+                editInputController, entityEditController, manager.EntityManager);
+            mainSceneView = GetComponent<MainSceneUIView>();
+            if (mainSceneView == null)
             {
-                entityCatalogView.Initialize(
-                    manager.EntityManager?.Catalog,
-                    toolbarView);
-                entityEditController?.Configure(
-                    manager.EntityManager,
-                    manager.EditController);
+                Debug.LogError(
+                    $"{nameof(WorldUIManager)} requires a serialized {nameof(MainSceneUIView)}.",
+                    this);
+                return;
             }
-
-            if (toolbarView != null)
-            {
-                roadCatalogView?.Initialize(roadVisualCatalog);
-                editToolState?.Configure(
-                    toolbarView,
-                    entityCatalogView,
-                    roadCatalogView);
-                editInputController?.Configure(
-                    manager,
-                    editToolState,
-                    selectionState,
-                    editConfirmationView,
-                    toolbarView);
-                editApplyController?.Configure(
-                    manager.EditController,
-                    selectionState,
-                    toolbarView,
-                    editToolState,
-                    editInputController,
-                    entityEditController,
-                    manager.EntityManager);
-            }
-
-            if (tileInfoPresenter != null && tileInfoPanel != null)
-            {
-                tileInfoPresenter.Configure(
-                    manager,
-                    selectionState,
-                    infoProvider,
-                    tileInfoPanel);
-            }
+            mainSceneView.Configure(
+                manager,
+                editToolState,
+                editApplyController,
+                roadVisualCatalog,
+                selectionState,
+                infoProvider);
         }
 
     }
 }
+

@@ -44,12 +44,7 @@ namespace MiniCivilization.World.Editing
 
         public EntityCatalog Catalog => entityCatalog;
         public EntityCategory? SelectedCategory => selectedCategory;
-        public EntityCategory? ActiveCategory =>
-            toolbarView == null
-            || (toolbarView.IsExpanded
-                && toolbarView.IsEntityGroupExpanded)
-                ? selectedCategory
-                : null;
+        public EntityCategory? ActiveCategory => selectedCategory;
         public EntityDefinition SelectedDefinition => selectedDefinition;
 
         public event Action<EntityCategory?> ActiveCategoryChanged;
@@ -307,6 +302,34 @@ namespace MiniCivilization.World.Editing
             }
         }
 
+        public void SelectCategory(EntityCategory? category)
+        {
+            SetCategoryToggle(natureToggle, category == EntityCategory.Nature);
+            SetCategoryToggle(animalToggle, category == EntityCategory.Animal);
+            SetCategoryToggle(humanToggle, category == EntityCategory.Human);
+            SetCategoryToggle(buildingToggle, category == EntityCategory.Building);
+            OnCategoryChanged();
+        }
+
+        public void SelectDefinition(EntityDefinition definition)
+        {
+            if (definition != null && selectedCategory != definition.TypeKey.Category)
+            {
+                SelectCategory(definition.TypeKey.Category);
+            }
+
+            SetSelectedDefinition(definition);
+        }
+
+        private static void SetCategoryToggle(Toggle toggle, bool selected)
+        {
+            if (toggle != null)
+            {
+                toggle.SetIsOnWithoutNotify(selected);
+                ToggleGroupVisualStyle.RefreshFor(toggle);
+            }
+        }
+
         private void SetSelectedDefinition(EntityDefinition definition)
         {
             if (ReferenceEquals(selectedDefinition, definition))
@@ -377,8 +400,7 @@ namespace MiniCivilization.World.Editing
         private void RefreshVisibility()
         {
             var visible = toolbarView == null
-                || (toolbarView.IsExpanded
-                    && toolbarView.IsEntityGroupExpanded);
+                || toolbarView.IsEntityGroupExpanded;
             if (definitionScroll != null)
             {
                 definitionScroll.gameObject.SetActive(

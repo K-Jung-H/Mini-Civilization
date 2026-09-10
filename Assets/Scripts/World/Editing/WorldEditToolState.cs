@@ -95,11 +95,11 @@ namespace MiniCivilization.World.Editing
             IsEntityTool
                 ? WorldEditCellSelectionPolicy.EntityPlacementCell
                 : WorldEditCellSelectionPolicy.SurfaceCell;
-        public bool CapturesPointer => Mode != WorldEditMode.None;
         public bool IsEntityTool => EntityDefinition != null;
+        public bool HasActiveTool => Action.IsSupported || IsEntityTool;
         public bool IsReady =>
-            CapturesPointer
-            && (Action.IsSupported || EntityDefinition != null);
+            HasActiveTool && Mode != WorldEditMode.None;
+        public bool CapturesPointer => IsReady;
 
         public WorldEditToolSnapshot(
             WorldEditMode mode,
@@ -135,13 +135,7 @@ namespace MiniCivilization.World.Editing
     [DisallowMultipleComponent]
     public sealed class WorldEditToolState : MonoBehaviour
     {
-        private WorldEditToolbarView toolbarView;
-        private WorldEntityCatalogView catalogView;
-        private WorldRoadCatalogView roadCatalogView;
-        private WorldEditToolSnapshot current;
-        private bool isSubscribed;
-        private bool isSynchronizingSelection;
-
+        private WorldEditToolSnapshot current = new(WorldEditMode.Area, default, null, 1);
         public WorldEditToolSnapshot Current => current;
         public WorldEditMode Mode => current.Mode;
         public WorldEditAction Action => current.Action;
@@ -149,263 +143,35 @@ namespace MiniCivilization.World.Editing
         public int BrushSize => current.BrushSize;
         public bool CapturesPointer => current.CapturesPointer;
         public bool IsToolReady => current.IsReady;
-        public bool BlocksCellSelection =>
-            toolbarView != null && toolbarView.IsExpanded;
-
+        public bool BlocksCellSelection => current.IsReady;
         public event Action<WorldEditToolSnapshot> StateChanged;
 
-        private void OnEnable()
-        {
-            Subscribe();
-            SynchronizeEntityToolAvailability();
-            Refresh();
-        }
+        public void SelectAction(WorldEditAction action) =>
+            Set(new WorldEditToolSnapshot(current.Mode, action, null, current.BrushSize));
 
-        private void OnDisable()
-        {
-            Unsubscribe();
-        }
+        public void SelectEntity(EntityDefinition definition) =>
+            Set(new WorldEditToolSnapshot(current.Mode, default, definition, current.BrushSize));
 
-        public void Configure(
-            WorldEditToolbarView toolbar,
-            WorldEntityCatalogView catalog = null,
-            WorldRoadCatalogView roadCatalog = null)
-        {
-            Unsubscribe();
-            toolbarView = toolbar;
-            catalogView = catalog;
-            roadCatalogView = roadCatalog;
-            Subscribe();
-            SynchronizeEntityToolAvailability();
-            Refresh();
-        }
+        public void ClearActiveTool() =>
+            Set(new WorldEditToolSnapshot(current.Mode, default, null, current.BrushSize));
 
-        private void Subscribe()
+        public void SelectMode(WorldEditMode mode)
         {
-            if (isSubscribed || toolbarView == null)
-            {
+            if (mode != WorldEditMode.Single && mode != WorldEditMode.Area && mode != WorldEditMode.Brush)
                 return;
-            }
-
-            toolbarView.SelectionChanged += Refresh;
-            toolbarView.EditActionSelected += OnEditActionSelected;
-            toolbarView.PropertyCategorySelected += OnPropertyCategorySelected;
-            if (catalogView != null)
-            {
-                catalogView.ActiveCategoryChanged += OnActiveCategoryChanged;
-                catalogView.DefinitionSelected += OnDefinitionSelected;
-            }
-
-            if (roadCatalogView != null)
-            {
-                roadCatalogView.ActionSelectionChanged +=
-                    OnRoadActionSelectionChanged;
-            }
-
-            isSubscribed = true;
+            Set(new WorldEditToolSnapshot(mode, current.Action, current.EntityDefinition, current.BrushSize));
         }
 
-        private void Unsubscribe()
+        public void SelectBrushSize(int size) =>
+            Set(new WorldEditToolSnapshot(current.Mode, current.Action, current.EntityDefinition, size));
+
+        private void Set(WorldEditToolSnapshot next)
         {
-            if (!isSubscribed)
-            {
-                return;
-            }
-
-            if (toolbarView != null)
-            {
-                toolbarView.SelectionChanged -= Refresh;
-                toolbarView.EditActionSelected -= OnEditActionSelected;
-                toolbarView.PropertyCategorySelected -=
-                    OnPropertyCategorySelected;
-            }
-
-            if (catalogView != null)
-            {
-                catalogView.ActiveCategoryChanged -= OnActiveCategoryChanged;
-                catalogView.DefinitionSelected -= OnDefinitionSelected;
-            }
-
-            if (roadCatalogView != null)
-            {
-                roadCatalogView.ActionSelectionChanged -=
-                    OnRoadActionSelectionChanged;
-            }
-
-            isSubscribed = false;
-        }
-
-        private void OnEditActionSelected(WorldEditAction _)
-        {
-            RunSynchronizing(() =>
-            {
-                roadCatalogView?.ClearSelection();
-                ClearEntitySelection();
-            });
-            toolbarView?.EnsureSelectModeGroupExpanded();
-            Refresh();
-        }
-
-        private void OnPropertyCategorySelected()
-        {
-            RunSynchronizing(ClearEntitySelection);
-            Refresh();
-        }
-
-        private void OnRoadActionSelectionChanged(
-            WorldEditAction _,
-            bool isSelected)
-        {
-            if (isSynchronizingSelection)
-            {
-                return;
-            }
-
-            if (isSelected)
-            {
-                RunSynchronizing(() =>
-                {
-                    ClearEntitySelection();
-                    toolbarView?.ClearActiveEditAction();
-                });
-                toolbarView?.EnsureSelectModeGroupExpanded();
-            }
-
-            Refresh();
-        }
-
-        private void OnDefinitionSelected(EntityDefinition definition)
-        {
-            if (isSynchronizingSelection)
-            {
-                return;
-            }
-
-            toolbarView?.SetBuildingDefinitionSelected(
-                IsBuildingDefinition(definition));
-            if (definition != null)
-            {
-                RunSynchronizing(() =>
-                {
-                    toolbarView?.ClearActiveEditAction();
-                    roadCatalogView?.ClearSelection();
-                });
-                toolbarView?.EnsureSelectModeGroupExpanded();
-            }
-
-            Refresh();
-        }
-
-        private void OnActiveCategoryChanged(EntityCategory? category)
-        {
-            if (category.HasValue)
-            {
-                RunSynchronizing(() =>
-                {
-                    toolbarView?.ClearActiveEditAction();
-                    roadCatalogView?.ClearSelection();
-                });
-            }
-
-            toolbarView?.SetBuildingDefinitionSelected(
-                IsBuildingDefinition(catalogView?.SelectedDefinition));
-            Refresh();
-        }
-
-        private void ClearEntitySelection()
-        {
-            if (catalogView == null || catalogView.SelectedDefinition == null)
-            {
-                toolbarView?.SetBuildingDefinitionSelected(false);
-                return;
-            }
-
-            catalogView.ClearSelectedDefinition();
-            toolbarView?.SetBuildingDefinitionSelected(false);
-        }
-
-        private void RunSynchronizing(Action action)
-        {
-            var wasSynchronizing = isSynchronizingSelection;
-            isSynchronizingSelection = true;
-            try
-            {
-                action?.Invoke();
-            }
-            finally
-            {
-                isSynchronizingSelection = wasSynchronizing;
-            }
-        }
-
-        private void SynchronizeEntityToolAvailability()
-        {
-            toolbarView?.SetBuildingDefinitionSelected(
-                IsBuildingDefinition(catalogView?.SelectedDefinition));
-        }
-
-        private bool IsBuildingDefinition(EntityDefinition definition) =>
-            definition != null
-            && catalogView?.Catalog != null
-            && catalogView.Catalog.TryGetTypeKey(
-                definition,
-                out var typeKey)
-            && typeKey.Category == EntityCategory.Building;
-
-        private void Refresh()
-        {
-            var next = ReadToolbarState();
-            if (current.Equals(next))
-            {
-                return;
-            }
-
+            if (next.EntityDefinition != null && next.EntityDefinition.TypeKey.Category == EntityCategory.Building)
+                next = new WorldEditToolSnapshot(WorldEditMode.Single, next.Action, next.EntityDefinition, next.BrushSize);
+            if (current.Equals(next)) return;
             current = next;
             StateChanged?.Invoke(current);
-        }
-
-        private WorldEditToolSnapshot ReadToolbarState()
-        {
-            if (toolbarView == null)
-            {
-                return default;
-            }
-
-            var mode = toolbarView.GetSelectedModeIndex() switch
-            {
-                1 => WorldEditMode.Single,
-                2 => WorldEditMode.Area,
-                3 => WorldEditMode.Brush,
-                _ => WorldEditMode.None
-            };
-            var brushSize = toolbarView.GetSelectedBrushSize();
-            if (toolbarView.TryGetSelectedEditAction(out var action))
-            {
-                return new WorldEditToolSnapshot(
-                    mode,
-                    action,
-                    null,
-                    brushSize);
-            }
-
-            if (roadCatalogView != null
-                && roadCatalogView.TryGetSelectedAction(out action))
-            {
-                return new WorldEditToolSnapshot(
-                    mode,
-                    action,
-                    null,
-                    brushSize);
-            }
-
-            var definition = toolbarView.IsEntityGroupExpanded
-                ? catalogView?.SelectedDefinition
-                : null;
-            return new WorldEditToolSnapshot(
-                mode,
-                default,
-                definition,
-                brushSize);
         }
     }
 }

@@ -12,7 +12,9 @@ namespace MiniCivilization.World.Editing
     {
         private WorldEditController editController;
         private WorldTileSelectionState selectionState;
-        private WorldEditToolbarView toolbarView;
+        public bool CanUndo => editController != null && editController.CanUndo;
+        public bool CanRedo => editController != null && editController.CanRedo;
+        public event Action<bool, bool> HistoryAvailabilityChanged;
         private WorldEditToolState toolState;
         private WorldEditInputController inputController;
         private EntityEditController entityEditController;
@@ -41,7 +43,6 @@ namespace MiniCivilization.World.Editing
         public void Configure(
             WorldEditController controller,
             WorldTileSelectionState selections,
-            WorldEditToolbarView toolbar,
             WorldEditToolState tools = null,
             WorldEditInputController input = null,
             EntityEditController entityEditor = null,
@@ -50,7 +51,6 @@ namespace MiniCivilization.World.Editing
             Unsubscribe();
             editController = controller;
             selectionState = selections;
-            toolbarView = toolbar;
             toolState = tools;
             inputController = input;
             entityEditController = entityEditor;
@@ -60,14 +60,11 @@ namespace MiniCivilization.World.Editing
 
         private void Subscribe()
         {
-            if (isSubscribed || toolbarView == null)
+            if (isSubscribed || editController == null)
             {
                 return;
             }
 
-            toolbarView.ExpandedChanged += OnExpandedChanged;
-            toolbarView.UndoRequested += OnUndoRequested;
-            toolbarView.RedoRequested += OnRedoRequested;
             if (editController != null)
             {
                 editController.HistoryChanged += RefreshHistoryButtons;
@@ -97,13 +94,6 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            if (toolbarView != null)
-            {
-                toolbarView.ExpandedChanged -= OnExpandedChanged;
-                toolbarView.UndoRequested -= OnUndoRequested;
-                toolbarView.RedoRequested -= OnRedoRequested;
-            }
-
             if (editController != null)
             {
                 editController.HistoryChanged -= RefreshHistoryButtons;
@@ -125,25 +115,14 @@ namespace MiniCivilization.World.Editing
             isSubscribed = false;
         }
 
-        private void OnExpandedChanged(bool expanded)
-        {
-            if (expanded)
-            {
-                return;
-            }
-
-            inputController?.CancelPending();
-            ClearPreview();
-        }
-
-        private void OnUndoRequested()
+        public void RequestUndo()
         {
             inputController?.CancelPending();
             editController?.Undo();
             RefreshHistoryButtons();
         }
 
-        private void OnRedoRequested()
+        public void RequestRedo()
         {
             inputController?.CancelPending();
             editController?.Redo();
@@ -152,9 +131,7 @@ namespace MiniCivilization.World.Editing
 
         private void RefreshHistoryButtons()
         {
-            toolbarView?.SetHistoryAvailability(
-                editController != null && editController.CanUndo,
-                editController != null && editController.CanRedo);
+            HistoryAvailabilityChanged?.Invoke(CanUndo, CanRedo);
         }
 
         private void OnEditHoverChanged(IWorldCellSelection selection)
@@ -681,3 +658,4 @@ namespace MiniCivilization.World.Editing
         }
     }
 }
+
