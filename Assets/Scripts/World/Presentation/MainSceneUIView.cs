@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using MiniCivilization.World.Entities;
 using MiniCivilization.World.Definitions;
 using MiniCivilization.World.Domain;
 using MiniCivilization.World.Editing;
@@ -37,7 +38,6 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private RectTransform palette;
         [SerializeField] private RectTransform toolOptions;
         [SerializeField] private TMP_Text paletteTitle;
-        [SerializeField] private TMP_Text optionsTitle;
         [SerializeField] private TMP_Text inspectorTitle;
         [SerializeField] private TMP_Text inspectorBody;
         [SerializeField] private RectTransform inspectorActions;
@@ -51,7 +51,11 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Button workspaceCloseButton;
         [SerializeField] private Button workspaceLauncher;
         [SerializeField] private Button simulationCloseButton;
-        [SerializeField] private Button simulationLauncher;
+        [SerializeField] private Button simulationExpandButton;
+        [SerializeField] private TMP_Text simulationStatus;
+        [SerializeField, Min(1f)] private float simulationExpandedHeight = 180f;
+        [SerializeField, Min(1f)] private float simulationCollapsedHeight = 92f;
+        [SerializeField, Min(0f)] private float rightColumnGap = 20f;
         [SerializeField] private Button inspectorCloseButton;
         [SerializeField] private Button inspectorLauncher;
         private WorkspaceTab activeTab = WorkspaceTab.Entity;
@@ -68,13 +72,24 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private Button brushButton;
         [SerializeField] private Button areaButton;
         [SerializeField] private Button rectangleButton;
-        [SerializeField] private Button clearToolButton;
         [SerializeField] private RectTransform brushSizes;
+        [SerializeField, Min(1f)] private float toolOptionsCompactHeight = 168f;
+        [SerializeField, Min(0f)] private float toolOptionsRowGap = 8f;
         [SerializeField] private Button sizeOneButton;
         [SerializeField] private Button sizeTwoButton;
         [SerializeField] private Button sizeThreeButton;
         [SerializeField] private Sprite[] terraformIcons;
         private bool configured;
+        private bool inspectorActionsDirty = true;
+        private bool paletteSelectionDirty;
+        private bool simulationHasWorld;
+        private bool simulationExpanded;
+        private bool entityListDirty = true;
+        private readonly List<WorkspaceItemView> inspectorRows = new();
+        private int usedInspectorRows;
+        private CellData? displayedCellData;
+        private CellCoordinate displayedCell;
+        private (EntityId, EntityAttributes, CellCoordinate, EntityDirection, EntityActivityId, string)? displayedEntity;
         private float nextInspectorRefresh;
 
         public void Configure(
@@ -102,19 +117,38 @@ namespace MiniCivilization.World.Presentation
                     this);
                 return;
             }
+            if (!configured)
+            {
+                CollapseWorkspace();
+                CollapseInspector();
+            }
             configured = true;
+            SetSimulationExpanded(simulationExpanded);
             Subscribe();
             ShowEntityCategories();
             RefreshToolOptions();
             RefreshInspector(true);
         }
 
-        private void OnEnable() { if (configured) Subscribe(); }
+        private void OnEnable()
+        {
+            if (!configured) return;
+            Subscribe();
+            RefreshToolOptions();
+            RefreshPaletteSelection();
+            entityListDirty = true;
+            RefreshInspector(false);
+            RefreshSimulationStatus();
+        }
 
         private void OnDisable() => Unsubscribe();
 
         private void Update()
         {
+            if (!configured) return;
+            if (paletteSelectionDirty) RefreshPaletteSelection();
+            if (simulationHasWorld != (worldManager != null && worldManager.HasWorld))
+                RefreshSimulationStatus();
             if (Time.unscaledTime >= nextInspectorRefresh)
             {
                 nextInspectorRefresh = Time.unscaledTime + 0.2f;
@@ -125,6 +159,7 @@ namespace MiniCivilization.World.Presentation
         private void Subscribe()
         {
             Unsubscribe();
+            if (!isActiveAndEnabled) return;
             if (toolState != null)
             {
                 toolState.StateChanged += OnToolStateChanged;
@@ -141,6 +176,7 @@ namespace MiniCivilization.World.Presentation
             if (worldManager != null)
             {
                 worldManager.EntityChanged += OnEntityChanged;
+                worldManager.WorldChanged += OnWorldChanged;
             }
             BindStaticControls();
         }
@@ -163,6 +199,7 @@ namespace MiniCivilization.World.Presentation
             if (worldManager != null)
             {
                 worldManager.EntityChanged -= OnEntityChanged;
+                worldManager.WorldChanged -= OnWorldChanged;
             }
             UnbindStaticControls();
         }
@@ -170,12 +207,11 @@ namespace MiniCivilization.World.Presentation
         private bool ValidateLayout() =>
             itemPrefab != null && backButton != null && activeToolLabel != null
             && singleButton != null && brushButton != null && areaButton != null
-            && rectangleButton != null && clearToolButton != null && brushSizes != null
+            && rectangleButton != null && brushSizes != null
             && sizeOneButton != null && sizeTwoButton != null && sizeThreeButton != null
             && palette != null
             && toolOptions != null
             && paletteTitle != null
-            && optionsTitle != null
             && inspectorTitle != null
             && inspectorBody != null
             && inspectorActions != null
@@ -185,7 +221,8 @@ namespace MiniCivilization.World.Presentation
             && worldTabButton != null
             && workspaceBox != null && simulationBox != null && inspectorBox != null
             && workspaceCloseButton != null && workspaceLauncher != null
-            && simulationCloseButton != null && simulationLauncher != null
+            && simulationCloseButton != null && simulationExpandButton != null
+            && simulationStatus != null
             && inspectorCloseButton != null && inspectorLauncher != null;
 
         private void SelectTab(WorkspaceTab tab)
@@ -232,7 +269,7 @@ namespace MiniCivilization.World.Presentation
             {
                 var captured = definition;
                 AddPaletteButton(definition.DisplayName,
-                    () => toolState.SelectEntity(captured),
+                    () => ToggleEntityTool(captured),
                     () => ReferenceEquals(
                         toolState?.Current.EntityDefinition,
                         captured), definition.Thumbnail);
@@ -277,7 +314,7 @@ namespace MiniCivilization.World.Presentation
         }
 
         private void AddWorldAction(string label, TerrainEditOperation operation) =>
-            AddPaletteButton(label, () => toolState?.SelectAction(
+            AddPaletteButton(label, () => ToggleActionTool(
                 WorldEditAction.Terrain(operation)),
                 () => toolState != null
                     && toolState.Current.Action.Equals(
@@ -296,17 +333,35 @@ namespace MiniCivilization.World.Presentation
                     }
                     var type = road.Type;
                     AddPaletteButton(road.Name,
-                        () => toolState?.SelectAction(WorldEditAction.SetRoad(type)),
+                        () => ToggleActionTool(WorldEditAction.SetRoad(type)),
                         () => toolState != null
                             && toolState.Current.Action.Equals(
                                 WorldEditAction.SetRoad(type)), road.Thumbnail);
                 }
             }
             AddPaletteButton("Remove Road",
-                () => toolState?.SelectAction(WorldEditAction.SetRoad(RoadType.None)),
+                () => ToggleActionTool(WorldEditAction.SetRoad(RoadType.None)),
                 () => toolState != null
                     && toolState.Current.Action.Equals(
                         WorldEditAction.SetRoad(RoadType.None)));
+        }
+
+        private void ToggleEntityTool(EntityDefinition definition)
+        {
+            if (toolState == null) return;
+            if (ReferenceEquals(toolState.EntityDefinition, definition))
+                toolState.ClearActiveTool();
+            else
+                toolState.SelectEntity(definition);
+        }
+
+        private void ToggleActionTool(WorldEditAction action)
+        {
+            if (toolState == null) return;
+            if (toolState.Action.Equals(action))
+                toolState.ClearActiveTool();
+            else
+                toolState.SelectAction(action);
         }
 
         private void ClearActiveTool()
@@ -353,7 +408,11 @@ namespace MiniCivilization.World.Presentation
             SetButtonSelected(singleButton, tool.Mode == WorldEditMode.Single);
             SetButtonSelected(brushButton, tool.Mode == WorldEditMode.Brush);
             SetButtonSelected(areaButton, tool.Mode == WorldEditMode.Area);
-            brushSizes.gameObject.SetActive(tool.Mode == WorldEditMode.Brush);
+            var showBrushSizes = tool.Mode == WorldEditMode.Brush;
+            brushSizes.gameObject.SetActive(showBrushSizes);
+            toolOptions.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,
+                toolOptionsCompactHeight
+                + (showBrushSizes ? brushSizes.rect.height + toolOptionsRowGap : 0f));
             SetButtonSelected(sizeOneButton, tool.BrushSize == 1);
             SetButtonSelected(sizeTwoButton, tool.BrushSize == 2);
             SetButtonSelected(sizeThreeButton, tool.BrushSize == 3);
@@ -375,6 +434,9 @@ namespace MiniCivilization.World.Presentation
 
         private void OnSelectionChanged(TilePickResult? pick)
         {
+            entityListDirty = true;
+            displayedCellData = null;
+            displayedEntity = null;
             inspectedPick = pick;
             selectedEntityId = EntityId.None;
             inspectorContext = InspectorContext.Automatic;
@@ -396,13 +458,18 @@ namespace MiniCivilization.World.Presentation
                     continue;
                 }
 
-                RefreshInspector(true);
+                // The periodic refresh compares IDs before rebuilding action rows.
+                entityListDirty = true;
                 return;
             }
         }
 
         private void RefreshInspector(bool rebuildActions)
         {
+            inspectorActionsDirty |= rebuildActions;
+            if (inspectorBox == null || !inspectorBox.gameObject.activeInHierarchy) return;
+            rebuildActions = inspectorActionsDirty;
+            inspectorActionsDirty = false;
             if (inspectorBody == null || worldManager == null)
             {
                 return;
@@ -410,6 +477,9 @@ namespace MiniCivilization.World.Presentation
             if (!ReferenceEquals(inspectedWorld, worldManager.CurrentWorldRuntime))
             {
                 inspectedWorld = worldManager.CurrentWorldRuntime;
+                entityListDirty = true;
+                displayedCellData = null;
+                displayedEntity = null;
                 inspectedPick = null;
                 selectedEntityId = EntityId.None;
                 inspectorContext = InspectorContext.Automatic;
@@ -424,7 +494,7 @@ namespace MiniCivilization.World.Presentation
                 inspectorContext = InspectorContext.Automatic;
                 inspectorTitle.text = "INSPECTOR";
                 inspectorBody.text = "No world is loaded.";
-                ClearChildren(inspectorActions);
+                ResetInspectorRows();
                 return;
             }
             var pick = selectionState?.Selected;
@@ -437,11 +507,21 @@ namespace MiniCivilization.World.Presentation
                 inspectorContext = InspectorContext.Automatic;
                 inspectorTitle.text = "INSPECTOR";
                 inspectorBody.text = "Select a Cell.";
-                ClearChildren(inspectorActions);
+                ResetInspectorRows();
+                return;
+            }
+            var world = worldManager.CurrentWorldData;
+            var cell = pick.Value.Cell;
+            if (!world.Contains(cell.X, cell.Y, cell.Z) || !world.IsChunkLoaded(cell.X, cell.Z))
+            {
+                selectionState.SetSelected(null);
                 return;
             }
             if (!inspectedPick.HasValue || !inspectedPick.Value.Equals(pick.Value))
             {
+                entityListDirty = true;
+                displayedCellData = null;
+                displayedEntity = null;
                 inspectedPick = pick;
                 selectedEntityId = EntityId.None;
                 inspectorContext = InspectorContext.Automatic;
@@ -449,32 +529,36 @@ namespace MiniCivilization.World.Presentation
             }
 
             var entities = worldManager.EntityManager?.Entities;
-            refreshedEntityIds.Clear();
-            var ids = entities?.GetEntitiesAt(pick.Value.Cell);
-            if (ids != null)
+            if (entityListDirty || rebuildActions)
             {
-                refreshedEntityIds.AddRange(ids);
-                refreshedEntityIds.Sort();
-            }
-            var entityListChanged = !ListsEqual(
-                entityIds,
-                refreshedEntityIds);
-            if (entityListChanged)
-            {
-                entityIds.Clear();
-                entityIds.AddRange(refreshedEntityIds);
-                rebuildActions = true;
-
-                if (inspectorContext == InspectorContext.EntityList)
+                entityListDirty = false;
+                refreshedEntityIds.Clear();
+                var ids = entities?.GetEntitiesAt(pick.Value.Cell);
+                if (ids != null)
                 {
-                    if (entityIds.Count == 1)
+                    refreshedEntityIds.AddRange(ids);
+                    refreshedEntityIds.Sort();
+                }
+                var entityListChanged = !ListsEqual(
+                    entityIds,
+                    refreshedEntityIds);
+                if (entityListChanged)
+                {
+                    entityIds.Clear();
+                    entityIds.AddRange(refreshedEntityIds);
+                    rebuildActions = true;
+
+                    if (inspectorContext == InspectorContext.EntityList)
                     {
-                        selectedEntityId = entityIds[0];
-                        inspectorContext = InspectorContext.Entity;
-                    }
-                    else if (entityIds.Count == 0)
-                    {
-                        inspectorContext = InspectorContext.Cell;
+                        if (entityIds.Count == 1)
+                        {
+                            selectedEntityId = entityIds[0];
+                            inspectorContext = InspectorContext.Entity;
+                        }
+                        else if (entityIds.Count == 0)
+                        {
+                            inspectorContext = InspectorContext.Cell;
+                        }
                     }
                 }
             }
@@ -518,14 +602,21 @@ namespace MiniCivilization.World.Presentation
             inspectorTitle.text = entityIds.Count > 1
                 ? $"CELL — {entityIds.Count} ENTITIES"
                 : "CELL";
-            inspectorBody.text = infoProvider == null
-                ? pick.Cell.ToString()
-                : FormatCell(infoProvider.Create(worldManager.CurrentWorldRuntime, pick));
+            var data = worldManager.CurrentWorldData.GetCell(pick.Cell.X, pick.Cell.Y, pick.Cell.Z);
+            if (!displayedCellData.HasValue || !displayedCell.Equals(pick.Cell)
+                || !displayedCellData.Value.Equals(data) || displayedEntity.HasValue)
+            {
+                displayedCellData = data;
+                displayedCell = pick.Cell;
+                displayedEntity = null;
+                inspectorBody.text = infoProvider == null ? pick.Cell.ToString()
+                    : FormatCell(infoProvider.Create(worldManager.CurrentWorldRuntime, pick));
+            }
             if (!rebuildActions)
             {
                 return;
             }
-            ClearChildren(inspectorActions);
+            ResetInspectorRows();
             if (entityIds.Count == 0)
             {
                 return;
@@ -540,7 +631,7 @@ namespace MiniCivilization.World.Presentation
                 {
                     label = $"{definition.DisplayName}  #{id}";
                 }
-                CreateButton(label, inspectorActions, () =>
+                BindInspectorRow(label, () =>
                 {
                     selectedEntityId = captured;
                     inspectorContext = InspectorContext.Entity;
@@ -561,28 +652,33 @@ namespace MiniCivilization.World.Presentation
             }
             inspectorTitle.text = $"ENTITY — {definitionName}";
             var attributes = entity.Data.Attributes;
-            var text = new StringBuilder(256)
-                .AppendLine("<b>Identity</b>")
-                .AppendLine($"Name: {attributes.Name}")
-                .AppendLine($"Age: {attributes.Age}")
-                .AppendLine($"Kind: {definitionName}")
-                .AppendLine("\n<b>Current state</b>")
-                .AppendLine($"Cell: {entity.AnchorCell}")
-                .AppendLine($"Direction: {entity.Direction}")
-                .AppendLine($"Activity: {entity.Activity}")
-                .AppendLine("\n<b>Traits</b>");
-            foreach (var trait in attributes.Traits)
+            var display = (entity.Id, attributes, entity.AnchorCell, entity.Direction, entity.Activity, definitionName);
+            if (!displayedEntity.HasValue || !displayedEntity.Value.Equals(display))
             {
-                text.AppendLine($"{trait.Id}: {trait.Value:0.##}");
+                displayedEntity = display;
+                var text = new StringBuilder(256)
+                    .AppendLine("<b>Identity</b>")
+                    .AppendLine($"Name: {attributes.Name}")
+                    .AppendLine($"Age: {attributes.Age}")
+                    .AppendLine($"Kind: {definitionName}")
+                    .AppendLine("\n<b>Current state</b>")
+                    .AppendLine($"Cell: {entity.AnchorCell}")
+                    .AppendLine($"Direction: {entity.Direction}")
+                    .AppendLine($"Activity: {entity.Activity}")
+                    .AppendLine("\n<b>Traits</b>");
+                foreach (var trait in attributes.Traits)
+                {
+                    text.AppendLine($"{trait.Id}: {trait.Value:0.##}");
+                }
+                inspectorBody.text = text.ToString();
             }
-            inspectorBody.text = text.ToString();
             if (!rebuildActions)
             {
                 return;
             }
-            ClearChildren(inspectorActions);
-            CreateButton(entityIds.Count > 1 ? "< Entity List" : "< Cell Info",
-                inspectorActions, () =>
+            ResetInspectorRows();
+            BindInspectorRow(entityIds.Count > 1 ? "< Entity List" : "< Cell Info",
+                () =>
                 {
                     selectedEntityId = EntityId.None;
                     inspectorContext = entityIds.Count > 1
@@ -646,7 +742,7 @@ namespace MiniCivilization.World.Presentation
         {
             paletteButtons.Add(CreateButton(label, palette, action, icon));
             paletteSelectionChecks.Add(isSelected);
-            RefreshPaletteSelection();
+            paletteSelectionDirty = true;
         }
 
         private void AddDisabledPaletteButton(string label)
@@ -669,6 +765,7 @@ namespace MiniCivilization.World.Presentation
 
         private void RefreshPaletteSelection()
         {
+            paletteSelectionDirty = false;
             for (var index = 0; index < paletteButtons.Count; index++)
             {
                 var check = index < paletteSelectionChecks.Count
@@ -697,7 +794,6 @@ namespace MiniCivilization.World.Presentation
             singleButton.onClick.AddListener(SelectSingle);
             brushButton.onClick.AddListener(SelectBrush);
             areaButton.onClick.AddListener(SelectArea);
-            clearToolButton.onClick.AddListener(ClearActiveTool);
             sizeOneButton.onClick.AddListener(SelectSizeOne);
             sizeTwoButton.onClick.AddListener(SelectSizeTwo);
             sizeThreeButton.onClick.AddListener(SelectSizeThree);
@@ -709,7 +805,7 @@ namespace MiniCivilization.World.Presentation
             workspaceCloseButton.onClick.AddListener(CollapseWorkspace);
             workspaceLauncher.onClick.AddListener(ExpandWorkspace);
             simulationCloseButton.onClick.AddListener(CollapseSimulation);
-            simulationLauncher.onClick.AddListener(ExpandSimulation);
+            simulationExpandButton.onClick.AddListener(ExpandSimulation);
             inspectorCloseButton.onClick.AddListener(CollapseInspector);
             inspectorLauncher.onClick.AddListener(ExpandInspector);
         }
@@ -720,7 +816,6 @@ namespace MiniCivilization.World.Presentation
             singleButton?.onClick.RemoveListener(SelectSingle);
             brushButton?.onClick.RemoveListener(SelectBrush);
             areaButton?.onClick.RemoveListener(SelectArea);
-            clearToolButton?.onClick.RemoveListener(ClearActiveTool);
             sizeOneButton?.onClick.RemoveListener(SelectSizeOne);
             sizeTwoButton?.onClick.RemoveListener(SelectSizeTwo);
             sizeThreeButton?.onClick.RemoveListener(SelectSizeThree);
@@ -731,7 +826,7 @@ namespace MiniCivilization.World.Presentation
             workspaceCloseButton?.onClick.RemoveListener(CollapseWorkspace);
             workspaceLauncher?.onClick.RemoveListener(ExpandWorkspace);
             simulationCloseButton?.onClick.RemoveListener(CollapseSimulation);
-            simulationLauncher?.onClick.RemoveListener(ExpandSimulation);
+            simulationExpandButton?.onClick.RemoveListener(ExpandSimulation);
             inspectorCloseButton?.onClick.RemoveListener(CollapseInspector);
             inspectorLauncher?.onClick.RemoveListener(ExpandInspector);
         }
@@ -749,19 +844,76 @@ namespace MiniCivilization.World.Presentation
         private void RequestRedo() => editActions?.RequestRedo();
         private void CollapseWorkspace() => SetPanelExpanded(workspaceBox, workspaceLauncher, false);
         private void ExpandWorkspace() => SetPanelExpanded(workspaceBox, workspaceLauncher, true);
-        private void CollapseSimulation() => SetPanelExpanded(simulationBox, simulationLauncher, false);
-        private void ExpandSimulation() => SetPanelExpanded(simulationBox, simulationLauncher, true);
+        private void CollapseSimulation() => SetSimulationExpanded(false);
+        private void ExpandSimulation() => SetSimulationExpanded(true);
         private void CollapseInspector() => SetPanelExpanded(inspectorBox, inspectorLauncher, false);
-        private void ExpandInspector() => SetPanelExpanded(inspectorBox, inspectorLauncher, true);
+        private void ExpandInspector()
+        {
+            SetPanelExpanded(inspectorBox, inspectorLauncher, true);
+            entityListDirty = true;
+            RefreshInspector(false);
+        }
+
+        private void OnWorldChanged()
+        {
+            inspectorActionsDirty = true;
+            RefreshInspector(true);
+            RefreshSimulationStatus();
+        }
+
+        private void SetSimulationExpanded(bool expanded)
+        {
+            simulationExpanded = expanded;
+            simulationBox.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical,
+                expanded ? simulationExpandedHeight : simulationCollapsedHeight);
+            simulationCloseButton.gameObject.SetActive(expanded);
+            simulationExpandButton.gameObject.SetActive(!expanded);
+
+            // All three RectTransforms use the same Canvas and top anchor.
+            // Update both Inspector representations even when either is hidden.
+            var inspectorTop = simulationBox.anchoredPosition.y
+                - simulationBox.rect.height - rightColumnGap;
+            var inspectorOffset = inspectorBox.offsetMax;
+            inspectorOffset.y = inspectorTop;
+            inspectorBox.offsetMax = inspectorOffset;
+            var launcher = (RectTransform)inspectorLauncher.transform;
+            var launcherPosition = launcher.anchoredPosition;
+            launcherPosition.y = inspectorTop;
+            launcher.anchoredPosition = launcherPosition;
+            RefreshSimulationStatus();
+        }
+
+        private void RefreshSimulationStatus()
+        {
+            if (simulationStatus == null) return;
+            simulationHasWorld = worldManager != null && worldManager.HasWorld;
+            var summary = simulationHasWorld
+                ? "World loaded" : "No world loaded";
+            simulationStatus.text = simulationExpanded
+                ? $"{summary}\n\nSimulation controls are not supported yet."
+                : summary;
+        }
 
         private static void SetPanelExpanded(RectTransform box, Button launcher, bool expanded)
         {
-            SetVisible(box, expanded);
+            box.gameObject.SetActive(expanded);
             launcher.gameObject.SetActive(!expanded);
         }
 
-        private static void SetVisible(RectTransform panel, bool visible) => panel.gameObject.SetActive(visible);
+        private void ResetInspectorRows()
+        {
+            usedInspectorRows = 0;
+            foreach (var row in inspectorRows) row.gameObject.SetActive(false);
+        }
 
+        private void BindInspectorRow(string label, Action action)
+        {
+            if (usedInspectorRows == inspectorRows.Count)
+                inspectorRows.Add(Instantiate(itemPrefab, inspectorActions));
+            var row = inspectorRows[usedInspectorRows++];
+            row.Bind(label, null, action);
+            row.gameObject.SetActive(true);
+        }
         private Button CreateButton(string label, Transform parent, Action action,
             Sprite icon = null)
         {
@@ -781,6 +933,3 @@ namespace MiniCivilization.World.Presentation
         }
     }
 }
-
-
-

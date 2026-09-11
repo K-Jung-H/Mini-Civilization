@@ -22,23 +22,6 @@ namespace MiniCivilization.World.Presentation
         [SerializeField] private WorldEditConfirmationView editConfirmationView;
         [SerializeField] private WorldStreamingProgressView streamingProgressView;
 
-        private WorldManager worldManager;
-        private MainSceneUIView mainSceneView;
-
-        public void Configure(
-            WorldEditToolState toolState,
-            WorldEditApplyController editApply,
-            EntityEditController entityEdit,
-            WorldTileSelectionState selections,
-            WorldCellInfoProvider cellInfoProvider)
-        {
-            editToolState = toolState;
-            editApplyController = editApply;
-            entityEditController = entityEdit;
-            selectionState = selections;
-            infoProvider = cellInfoProvider;
-        }
-
         public void Initialize(WorldManager manager)
         {
             if (manager == null)
@@ -46,13 +29,12 @@ namespace MiniCivilization.World.Presentation
                 return;
             }
 
-            worldManager = manager;
             streamingProgressView?.SetWorldManager(manager);
             entityEditController?.Configure(manager.EntityManager, manager.EditController);
             editInputController?.Configure(manager, editToolState, selectionState, editConfirmationView);
             editApplyController?.Configure(manager.EditController, selectionState, editToolState,
                 editInputController, entityEditController, manager.EntityManager);
-            mainSceneView = GetComponent<MainSceneUIView>();
+            var mainSceneView = GetComponent<MainSceneUIView>();
             if (mainSceneView == null)
             {
                 Debug.LogError(
@@ -71,4 +53,5 @@ namespace MiniCivilization.World.Presentation
 
     }
 }
+
 

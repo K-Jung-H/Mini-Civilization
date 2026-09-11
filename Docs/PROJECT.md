@@ -44,17 +44,17 @@ Terrain, Climate, Hydrology는 Pattern Tile로 생성된다. 생성·수문 세�
 
 ## Main Scene UI의 현재 구조
 
-`Assets/Content/Scenes/Main Scene.unity`의 `World System/World UI/Canvas`에 좌측 Workspace, 우측 Simulation·Inspector Box와 각각의 Launcher를 uGUI Hierarchy로 직렬화해 배치한다. `MainSceneUIView`는 이 Scene 참조를 사용해 표시 상태와 데이터 기반 목록만 갱신하며 실행 시 고정 UI 구조를 생성하지 않는다. Workspace·Simulation·Inspector와 Launcher는 Canvas의 직접 자식이다. `World Edit UI`와 `Main Scene UI` 중간 루트는 제거했다. Box는 표시만 제어하며 상태 소유 컴포넌트는 Box 외부에 유지한다. 텍스트는 프로젝트 TMP 폰트를 사용한다. 고정 컨트롤은 씬에 저장하고 데이터 목록만 `Workspace Item.prefab` 인스턴스로 표시한다.
+`Assets/Content/Scenes/Main Scene.unity`의 `World System/World UI/Canvas`에 좌측 Workspace·SelectMode Palette, 우측 Simulation·Inspector Box 및 Workspace·Inspector Launcher를 uGUI Hierarchy로 직렬화해 배치한다. `MainSceneUIView`는 이 Scene 참조를 사용해 표시 상태와 데이터 기반 목록만 갱신하며 실행 시 고정 UI 구조를 생성하지 않는다. Workspace·SelectMode Palette·Simulation·Inspector와 Workspace·Inspector Launcher는 Canvas의 직접 자식이다. Simulation 확대 버튼은 Box 내부 X와 같은 위치에 있다. Box는 표시만 제어하며 상태 소유 컴포넌트는 Box 외부에 유지한다. 텍스트는 프로젝트 TMP 폰트를 사용한다. 고정 컨트롤은 씬에 저장하고 데이터 목록만 `Workspace Item.prefab` 인스턴스로 표시한다.
 
-Workspace는 Entity / World Tab이 하나의 Palette를 공유한다. Entity는 Animal / Nature / Human / Building Catalog를 기존 EntityDefinition으로 구성한다. World는 Biome / Water / Terrain / Terraform / Road를 표시하며 현재 지원되는 Terraform과 Road만 기존 WorldEditAction으로 연결한다. 미지원 Category와 Rectangle은 비활성 상태로 표시한다. Tool Options는 Active Tool이 있을 때만 Single / Brush / 기존 3D Area와 필요한 Brush Size를 표시하며 Building의 Single 제한을 유지한다. 현재 Tab·Palette 항목·Interaction Mode·Brush Size는 선택 색상으로 구분한다. Tab·Category로 돌아가거나 Clear Tool을 누르면 도구가 해제된다.
+Workspace는 Entity / World Tab이 하나의 Palette를 공유한다. Entity는 Animal / Nature / Human / Building Catalog를 기존 EntityDefinition으로 구성한다. World는 Biome / Water / Terrain / Terraform / Road를 표시하며 현재 지원되는 Terraform과 Road만 기존 WorldEditAction으로 연결한다. 미지원 Category와 Rectangle은 비활성 상태로 표시한다. Tool Options는 Active Tool이 있을 때만 Single / Brush / 기존 3D Area와 필요한 Brush Size를 표시하며 Building의 Single 제한을 유지한다. 현재 Tab·Palette 항목·Interaction Mode·Brush Size는 선택 색상으로 구분한다. Tab·Category로 돌아가거나 이미 활성화된 Palette 항목을 다시 선택하면 도구가 해제된다. 항목 재선택은 현재 Category를 유지한다.
 
-WorldEditToolState가 Active Tool·Mode·Brush Size를 직접 소유한다. MainSceneUIView는 Toolbar Toggle을 경유하지 않고 명시적인 도구 선택 명령을 호출하며 Undo/Redo는 WorldEditApplyController에 연결한다. Workspace 하단 SelectMode Palette는 고정 공간을 차지하고 내부 Tool Options만 활성화한다. Palette 제목 우측의 정사각 Back 버튼은 Category 안에서만 활성화한다. Palette와 Inspector는 세로 ScrollRect와 자동 숨김 Scrollbar를 사용한다. Entity·Road는 기존 Thumbnail을 연결하며 이미지가 없는 항목은 문자 기호를 표시한다. WorldInteractionController와 WorldEditInputController는 기존 EventSystem의 UI Pointer 차단, DDA Cell Picking, 편집 Preview·확인 경로를 유지한다.
+WorldEditToolState가 Active Tool·Mode·Brush Size를 직접 소유한다. MainSceneUIView는 명시적인 도구 선택 명령을 호출하며 Undo/Redo는 WorldEditApplyController에 연결한다. SelectMode Palette는 Workspace 밖의 독립 Box로 배치되어 Active Tool이 있을 때만 전체가 표시된다. Workspace를 접어도 도구가 활성화되어 있으면 유지되며 도구 활성 여부가 Workspace 크기를 바꾸지 않는다. Brush에서는 Brush Size 행과 간격만큼 SelectMode 높이를 늘리고 Single·Area에서는 줄인다. 상단·폭은 유지하며 확인 버튼은 하단을 따른다. Palette 제목 우측의 정사각 Back 버튼은 Category 안에서만 활성화한다. Palette와 Inspector는 세로 ScrollRect와 자동 숨김 Scrollbar를 사용한다. Entity·Road는 기존 Thumbnail을 연결하며 이미지가 없는 항목은 문자 기호를 표시한다. WorldInteractionController와 WorldEditInputController는 기존 EventSystem의 UI Pointer 차단, DDA Cell Picking, 편집 Preview·확인 경로를 유지한다.
 
-Inspector는 선택 Cell을 WorldCellInfoProvider로 조회하고 주기적으로 최신 값을 표시한다. Cell의 Entity ID를 기존 EntitySystem 조회 경로에서 정렬하며, 0개면 Cell, 1개면 해당 Entity, 여러 개면 선택 목록을 표시한다. Entity Context는 Entity ID로 유지하고 EntityData의 이름·나이·Trait 및 Runtime의 방향·Activity를 읽는다. Inspector 표시를 접어도 선택은 유지되며 대상 삭제·언로드 후에는 유효성을 다시 확인한다.
+Inspector는 펼쳐진 동안 0.2초 간격으로 선택 대상의 값을 확인하고 표시 데이터가 달라졌을 때 본문을 갱신한다. 선택·월드·관련 Entity 변경 및 재확장 시 Cell의 Entity ID 목록을 기존 EntitySystem 조회 경로에서 다시 확인하고 정렬한다. 0개면 Cell, 1개면 해당 Entity, 여러 개면 선택 목록을 표시하며 목록 행은 기존 항목 Prefab 인스턴스를 재사용한다. Entity Context는 Entity ID로 유지하고 EntityData의 이름·나이·Trait 및 Runtime의 방향·Activity를 읽는다. Inspector 표시를 접어도 선택은 유지되며 대상 삭제·언로드 후에는 유효성을 다시 확인한다.
 
-기존 `WorldTileInfoPresenter`와 `WorldTileInfoPanel`은 Main Scene 연결에서 제거되었으며 Cell 선택 Context는 MainSceneUIView의 Inspector 한 곳에서 표시한다. 기존 Toolbar·Entity Catalog·Road Catalog View는 Main Scene과 초기화 경로에서 제거했다. EntityCatalog·RoadVisualCatalog 데이터와 편집 확인 UI·Streaming 진행 UI의 기존 참조는 유지한다.
+Cell 선택 Context는 MainSceneUIView의 Inspector 한 곳에서 표시한다. EntityCatalog·RoadVisualCatalog 데이터와 Streaming 진행 UI의 기존 참조는 유지한다. Edit Selection Confirmation은 SelectMode 하단에 취소 / 적용 버튼을 가로로 배치한다. WorldEditConfirmationView는 Pending 여부와 실행 가능 상태만 버튼에 표시하며 위치 이동·Panel 표시 제어를 하지 않는다. 취소·적용 처리는 기존 WorldEditInputController와 WorldEditApplyController를 사용한다.
 
-Simulation Box는 현재 기능 미지원 상태를 표시한다. EntityManager와 WorldWaterFlowController는 각각 기존 업데이트 경로에서 계속 시뮬레이션을 처리한다. 공통 시간·Pause/Play·Speed 제어는 아직 구현되어 있지 않다.
+Workspace·Simulation·Inspector는 씬 배치와 최초 초기화에서 모두 축소 상태로 시작한다. 이후 컴포넌트 재활성화는 사용자가 선택한 확장 상태를 초기화하지 않는다. 이 상태는 영구 저장하지 않는다. Simulation Box는 확장 시 월드 로드 여부와 제어 미지원 안내를, 축소 시 월드 로드 여부만 표시한다. 상단과 폭은 고정하고 높이만 줄이며 X와 같은 위치·규격의 확대 버튼으로 복귀한다. Inspector 영역과 Launcher는 Simulation의 현재 높이 아래에 같은 간격으로 따라 이동한다. Inspector의 표시 여부와 선택 Context는 이 이동과 독립적이다. EntityManager와 WorldWaterFlowController는 각각 기존 업데이트 경로에서 계속 시뮬레이션을 처리한다. 공통 시간·Pause/Play·Speed 제어는 아직 구현되어 있지 않다.
 
 ## 변경 전파
 
@@ -93,4 +93,7 @@ EntitySystem.Tick
 `Placement Preview Root`는 EntityRoot의 형제다. 사용 중 Preview Host만 이 Root로 이동하며 영역 축소·선택 종료·도구 변경 시 모델을 붙인 채 해당 계열 Root의 풀로 반환한다. Preview 소유 목록은 즉시 비워진다. View Host 풀과 Runtime 슬롯 풀은 독립적이며 FSM 객체 자체는 풀링하지 않는다. 표시 해제는 개체 삭제가 아니며 영속 데이터와 저장 계약을 변경하지 않는다.
 
 이동 중인 Dynamic Entity의 청크 참조는 Anchor뿐 아니라 MoveFrom·MoveTo와 Way 경로가 통과하는 청크를 포함한다. 이동 시작 시 참조를 확장하고 완료 후 도착 위치 기준으로 축소한다. 이동 시작은 모든 필요 청크가 로드된 경우에만 허용된다. 저장 복원도 FSM payload를 먼저 임시 복원해 같은 참조 집합을 계산하고, 모든 청크가 준비된 뒤 실제 Runtime을 등록한다. 저장된 좌표나 Way 경로가 월드 범위를 벗어나면 미로드 상태로 취급하지 않고 손상된 상태로 거부한다.
+
+
+
 

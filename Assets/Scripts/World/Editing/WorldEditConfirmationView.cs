@@ -11,7 +11,7 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private Button cancelButton;
         [SerializeField] private Button executeButton;
 
-        private RectTransform canvasRect;
+        private bool isPending;
         private Canvas canvas;
 
         public event Action CancelRequested;
@@ -19,13 +19,9 @@ namespace MiniCivilization.World.Editing
 
         private void Awake()
         {
-            canvas = GetComponentInParent<Canvas>();
-            canvasRect = canvas != null
-                ? canvas.transform as RectTransform
-                : null;
-            Hide();
+            canvas = panel != null ? panel.GetComponentInParent<Canvas>() : null;
+            SetPending(false);
         }
-
         private void OnEnable()
         {
             cancelButton?.onClick.AddListener(RequestCancel);
@@ -38,34 +34,18 @@ namespace MiniCivilization.World.Editing
             executeButton?.onClick.RemoveListener(RequestExecute);
         }
 
-        public void Show(Vector2 screenPosition, bool executable)
+        public void SetPending(bool pending, bool executable = false)
         {
-            if (panel == null)
-            {
-                return;
-            }
-
-            panel.gameObject.SetActive(true);
+            isPending = pending;
+            if (cancelButton != null) cancelButton.interactable = pending;
             SetExecutable(executable);
-            PositionAt(screenPosition);
-        }
-
-        public void Hide()
-        {
-            if (panel != null)
-            {
-                panel.gameObject.SetActive(false);
-            }
         }
 
         public void SetExecutable(bool executable)
         {
             if (executeButton != null)
-            {
-                executeButton.interactable = executable;
-            }
+                executeButton.interactable = isPending && executable;
         }
-
         public bool ContainsScreenPoint(Vector2 screenPosition)
         {
             if (panel == null || !panel.gameObject.activeInHierarchy)
@@ -83,41 +63,9 @@ namespace MiniCivilization.World.Editing
                 camera);
         }
 
-        private void PositionAt(Vector2 screenPosition)
-        {
-            if (panel == null || canvasRect == null)
-            {
-                return;
-            }
-
-            var camera = canvas != null
-                && canvas.renderMode != RenderMode.ScreenSpaceOverlay
-                ? canvas.worldCamera
-                : null;
-            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                    canvasRect,
-                    screenPosition,
-                    camera,
-                    out var localPoint))
-            {
-                return;
-            }
-
-            var canvasBounds = canvasRect.rect;
-            var halfSize = panel.rect.size * 0.5f;
-            localPoint.x = Mathf.Clamp(
-                localPoint.x,
-                canvasBounds.xMin + halfSize.x,
-                canvasBounds.xMax - halfSize.x);
-            localPoint.y = Mathf.Clamp(
-                localPoint.y,
-                canvasBounds.yMin + halfSize.y,
-                canvasBounds.yMax - halfSize.y);
-            panel.anchoredPosition = localPoint;
-        }
-
         private void RequestCancel() => CancelRequested?.Invoke();
 
         private void RequestExecute() => ExecuteRequested?.Invoke();
     }
 }
+

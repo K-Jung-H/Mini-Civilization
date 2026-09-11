@@ -1,8 +1,27 @@
 # 중요 설계 결정
 
+## DEC-011 — Tool 재선택 해제와 SelectMode의 편집 확인 행
+
+- **상태:** Active
+- **결정:** Palette에서 이미 활성화된 Entity·Terraform·Road 항목을 다시 선택하면 Active Tool을 해제한다. 현재 Category는 유지하고 일반 Cell 선택으로 돌아간다. 도구 변경·해제에 따른 Pending 취소는 기존 Input 경로를 사용한다.
+- **편집 확인:** Clear Tool 버튼을 제거하고 같은 여백·행 높이에 취소 / 적용 버튼을 가로로 배치한다. 기존 WorldEditConfirmationView와 실행·취소 경로를 재사용하며 화면 위치를 따라다니는 확인 Panel은 사용하지 않는다. 대기 상태가 아니면 두 버튼을 비활성화하고, 취소는 Pending만 해제하여 Active Tool을 유지한다. 적용은 유효한 Pending에만 허용한다.
+- **모드별 크기:** Brush Size는 Brush에서만 표시하며 해당 행과 간격만큼 SelectMode Palette 높이를 확장한다. Single·Area에서는 행을 숨기고 빈 공간을 줄인다. Palette 상단·폭과 Workspace 크기는 유지하고 확인 버튼 행은 Palette 하단을 따른다.
+- **대체 범위:** DEC-010의 SelectMode 고정 높이 해석을 대체한다. 독립 Box, Simulation·Inspector 배치 및 도메인 상태 분리 결정은 유지한다.
+
+## DEC-010 — 독립 SelectMode Palette와 우측 Box의 연동 배치
+
+- **상태:** Active
+- **후속 변경:** SelectMode의 모드별 높이와 편집 확인 행은 DEC-011을 따른다. 아래 고정 크기 문구는 해당 부분에 한해 Superseded이다.
+- **대체 범위:** DEC-009 중 Workspace 내부 SelectMode 공간, Simulation의 별도 Launcher, 우측 Box의 고정 위치 결정을 대체한다. 나머지 Context·상태 소유권·입력 규칙은 유지한다.
+- **결정:** SelectMode Palette는 Canvas 직속의 독립 Box로 Workspace 아래에 배치한다. Active Tool이 있을 때만 Box 전체를 표시하며 빈 안내 영역을 남기지 않는다. Workspace 축소로 Active Tool이나 SelectMode Palette를 해제하지 않는다. 두 Box의 크기는 도구 활성 여부에 따라 재조정하지 않는다.
+- **Simulation:** 축소 시 폭과 상단 위치를 유지하고 높이만 줄인다. X와 동일한 위치·크기의 확대 버튼을 표시하며 간결한 필수 정보는 유지한다. 표시 변화가 Simulation 실행 상태를 변경하지 않는다.
+- **시작 상태:** 확장·축소 가능한 Workspace·Simulation·Inspector는 모두 축소 상태로 시작한다. 이후 사용자의 표시 상태는 재활성화 시 유지하며 영구 저장하지 않는다. SelectMode Palette는 기존 Active Tool 유무에 따른 표시 규칙을 유지한다.
+- **Inspector:** 확장 영역과 축소 시 확대 버튼 모두 Simulation 아래에 동일한 간격으로 배치한다. Simulation 높이가 변하면 함께 이동하며 Inspector 자체의 확장·축소 상태와 선택 Context는 유지한다.
+- **영향 시스템:** Main Scene의 직렬화 UI 배치, MainSceneUIView의 표시 제어. World·Simulation 도메인과 저장 형식은 변경하지 않는다.
+
 ## DEC-009 — Main Scene의 Context Workspace와 독립적인 Box 표시
 
-- **상태:** Active — 승인된 목표 설계. 구현 완료를 뜻하지 않으며 진행 상태는 ROADMAP.md를 따른다.
+- **상태:** Active / Partially Superseded by DEC-010 — 아래 SelectMode 공간·Simulation Launcher·우측 고정 위치는 이전 결정 이력이며 DEC-010을 우선한다. 나머지 규칙은 유지하고 구현 상태는 ROADMAP.md를 따른다.
 - **결정:** 중앙 World View를 주 작업 공간으로 유지하고, 좌측은 적용할 대상·도구, 우측은 Simulation 제어·선택 대상 관찰을 담당한다. 기능 추가에 따라 패널을 옆이나 아래로 확장하지 않고 고정 Box 내부의 Context를 전환한다.
 - **영향 시스템:** Main Scene, UI Presentation, Editing Interaction, Cell·Entity 선택
 - **관련 결정:** DEC-002, DEC-003, DEC-006, DEC-007, DEC-008
@@ -228,4 +247,6 @@ Runtime 생명주기 정리와 계열 View 재구성은 같은 연결·해제 �
 - **Scene 계약:** EntityRoot·계열 Root·PlacementPreviewRoot를 사전 배치하고 직렬화 참조로 연결한다. 활성·비활성 Host는 같은 계열 Root에 둔다. Active/Pooled Views/Pooled Models 폴더와 별도 모델 풀은 사용하지 않는다. Preview는 사용 중에만 PreviewRoot에 두고 종료 시 모델을 유지한 채 계열 풀로 반환한다.
 - **표현 계약:** 모델에는 중복 EntityView를 생성하지 않는다. 기존 Prefab의 표현 하위 구조와 배율은 보존한다. 재사용 시 이전 개체의 상태를 초기화하며 다른 모델로 교체할 때 표현 참조를 교체한다.
 - **변경하지 않는 범위:** Runtime·Data·FSM 소유권, 개체 ID, 저장 형식과 청크 비활성화 시 영속 상태 보존. 별도 모델 풀은 실제 필요가 확인될 때 재검토한다.
+
+
 

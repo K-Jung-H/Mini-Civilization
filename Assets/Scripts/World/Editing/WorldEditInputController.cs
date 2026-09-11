@@ -57,6 +57,7 @@ namespace MiniCivilization.World.Editing
         [SerializeField] private WorldEditConfirmationView confirmationView;
 
         private bool isDragging;
+        private WorldRuntime observedRuntime;
         private bool isPending;
         private bool pendingExecutable;
         private TilePickResult dragStart;
@@ -91,6 +92,8 @@ namespace MiniCivilization.World.Editing
 
         private void OnEnable()
         {
+            if (worldManager != null) worldManager.WorldChanged += SynchronizeWorld;
+            SynchronizeWorld();
             if (toolState != null)
             {
                 toolState.StateChanged += OnToolStateChanged;
@@ -101,6 +104,7 @@ namespace MiniCivilization.World.Editing
 
         private void OnDisable()
         {
+            if (worldManager != null) worldManager.WorldChanged -= SynchronizeWorld;
             if (toolState != null)
             {
                 toolState.StateChanged -= OnToolStateChanged;
@@ -113,6 +117,7 @@ namespace MiniCivilization.World.Editing
 
         private void LateUpdate()
         {
+            SynchronizeWorld();
             var mouse = Mouse.current;
             if (mouse == null
                 || worldManager == null
@@ -211,6 +216,7 @@ namespace MiniCivilization.World.Editing
             WorldTileSelectionState selection,
             WorldEditConfirmationView confirmation = null)
         {
+            if (worldManager != null) worldManager.WorldChanged -= SynchronizeWorld;
             if (isActiveAndEnabled && toolState != null)
             {
                 toolState.StateChanged -= OnToolStateChanged;
@@ -223,6 +229,9 @@ namespace MiniCivilization.World.Editing
             toolState = state;
             selectionState = selection;
             confirmationView = confirmation;
+            observedRuntime = manager != null ? manager.CurrentWorldRuntime : null;
+            if (isActiveAndEnabled && worldManager != null)
+                worldManager.WorldChanged += SynchronizeWorld;
 
             if (isActiveAndEnabled && toolState != null)
             {
@@ -254,7 +263,7 @@ namespace MiniCivilization.World.Editing
             pendingExecutable = false;
             selectionState?.ClearEditSelected();
             selectionState?.ClearEditPreview();
-            confirmationView?.Hide();
+            confirmationView?.SetPending(false);
         }
 
         public void CancelPending()
@@ -262,7 +271,7 @@ namespace MiniCivilization.World.Editing
             if (!isPending
                 && selectionState?.EditSelected == null)
             {
-                confirmationView?.Hide();
+                confirmationView?.SetPending(false);
                 return;
             }
 
@@ -270,7 +279,7 @@ namespace MiniCivilization.World.Editing
             pendingExecutable = false;
             selectionState?.ClearEditSelected();
             selectionState?.ClearEditPreview();
-            confirmationView?.Hide();
+            confirmationView?.SetPending(false);
             PendingCancelled?.Invoke();
         }
 
@@ -371,10 +380,7 @@ namespace MiniCivilization.World.Editing
             pendingTool = dragTool;
             isPending = true;
             pendingExecutable = false;
-            var screenPosition = Mouse.current != null
-                ? Mouse.current.position.ReadValue()
-                : Vector2.zero;
-            confirmationView?.Show(screenPosition, false);
+            confirmationView?.SetPending(true);
             selectionState.CommitEditHovered();
             PendingSelectionChanged?.Invoke(
                 selectionState.EditSelected,
@@ -622,7 +628,7 @@ namespace MiniCivilization.World.Editing
 
         private void BindConfirmationView()
         {
-            if (confirmationView == null)
+            if (!isActiveAndEnabled || confirmationView == null)
             {
                 return;
             }
@@ -646,6 +652,7 @@ namespace MiniCivilization.World.Editing
 
         private void RequestExecution()
         {
+            SynchronizeWorld();
             if (!isPending
                 || !pendingExecutable
                 || selectionState?.EditSelected == null)
@@ -657,6 +664,17 @@ namespace MiniCivilization.World.Editing
                 selectionState.EditSelected,
                 pendingTool);
         }
+
+        private void SynchronizeWorld()
+        {
+            var runtime = worldManager != null ? worldManager.CurrentWorldRuntime : null;
+            if (ReferenceEquals(observedRuntime, runtime)) return;
+            observedRuntime = runtime;
+            CancelPending();
+            CancelDrag();
+        }
     }
 }
+
+
 

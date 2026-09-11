@@ -1,6 +1,6 @@
 using MiniCivilization.World.Runtime;
+using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace MiniCivilization.World.Presentation
 {
@@ -8,10 +8,12 @@ namespace MiniCivilization.World.Presentation
     public sealed class WorldStreamingProgressView : MonoBehaviour
     {
         [SerializeField] private GameObject panelRoot;
-        [SerializeField] private Text stageText;
-        [SerializeField] private Text completedText;
+        [SerializeField] private TMP_Text stageText;
+        [SerializeField] private TMP_Text completedText;
+        [SerializeField] private RectTransform progressFill;
 
         private WorldManager worldManager;
+        private bool subscribed;
 
         private void OnEnable()
         {
@@ -40,18 +42,20 @@ namespace MiniCivilization.World.Presentation
 
         private void Subscribe()
         {
-            if (worldManager != null)
+            if (!subscribed && isActiveAndEnabled && worldManager != null)
             {
                 worldManager.StreamingProgressChanged += OnProgressChanged;
+                subscribed = true;
             }
         }
 
         private void Unsubscribe()
         {
-            if (worldManager != null)
+            if (subscribed && worldManager != null)
             {
                 worldManager.StreamingProgressChanged -= OnProgressChanged;
             }
+            subscribed = false;
         }
 
         private void OnProgressChanged(WorldStreamingProgress progress) =>
@@ -64,6 +68,14 @@ namespace MiniCivilization.World.Presentation
 
         private void Refresh(WorldStreamingProgress progress)
         {
+            if (progressFill != null)
+            {
+                var fraction = progress.RequestedChunkCount == 0
+                    ? 0f
+                    : progress.CompletedChunkCount / (float)progress.RequestedChunkCount;
+                progressFill.anchorMax = new Vector2(Mathf.Clamp01(fraction), 1f);
+            }
+
             if (panelRoot != null)
             {
                 panelRoot.SetActive(progress.IsGenerating);

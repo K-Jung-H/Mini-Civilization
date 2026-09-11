@@ -99,7 +99,6 @@ namespace MiniCivilization.World.Editing
         public bool HasActiveTool => Action.IsSupported || IsEntityTool;
         public bool IsReady =>
             HasActiveTool && Mode != WorldEditMode.None;
-        public bool CapturesPointer => IsReady;
 
         public WorldEditToolSnapshot(
             WorldEditMode mode,
@@ -141,7 +140,6 @@ namespace MiniCivilization.World.Editing
         public WorldEditAction Action => current.Action;
         public EntityDefinition EntityDefinition => current.EntityDefinition;
         public int BrushSize => current.BrushSize;
-        public bool CapturesPointer => current.CapturesPointer;
         public bool IsToolReady => current.IsReady;
         public bool BlocksCellSelection => current.IsReady;
         public event Action<WorldEditToolSnapshot> StateChanged;

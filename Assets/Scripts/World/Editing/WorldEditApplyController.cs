@@ -60,7 +60,7 @@ namespace MiniCivilization.World.Editing
 
         private void Subscribe()
         {
-            if (isSubscribed || editController == null)
+            if (isSubscribed || !isActiveAndEnabled || editController == null)
             {
                 return;
             }
@@ -658,4 +658,5 @@ namespace MiniCivilization.World.Editing
         }
     }
 }
+
 

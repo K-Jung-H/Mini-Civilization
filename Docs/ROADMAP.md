@@ -74,7 +74,7 @@
 ### Main Scene UI 재설계
 
 - **상태:** Canvas 직속 TMP Box와 고정 컨트롤을 씬에 배치하고 기존 World Edit UI·Toolbar 상태 의존성을 제거했다. 사용자 실행·해상도별 배치 확인 대기이며 런타임 검증 완료로 판정하지 않는다.
-- **설계 기준:** DEC-009. 현재 구현 구조는 PROJECT.md를 따른다.
+- **설계 기준:** DEC-009 / DEC-010 / DEC-011. 현재 구현 구조는 PROJECT.md를 따른다.
 - **대상:** `Assets/Content/Scenes/Main Scene.unity`와 연결된 UI·Interaction 코드 및 UI 항목 Prefab.
 - **목표:** 중앙 World View를 유지하면서 단일 Entity / World Workspace, 도구별 Options, 독립적인 Simulation·Inspector Box를 제공한다.
 - **우선 범위:** 기존 기능의 UI 재구성, 미지원 항목 표시, Cell 기반 Entity Inspector 선택 연결. 미구현 World 도구·Simulation 제어는 아래 후속 작업으로 분리한다.
@@ -83,7 +83,7 @@
 | 순서 | 사용자 기능 단계 | 완료 기준 | 상태 |
 |---|---|---|---|
 | UI-1 | 표시와 도구·선택 상태 분리 | Workspace 표시 여부로 Mode·Cell 선택 가능 여부를 결정하지 않는다. X·Launcher가 Active Tool·선택·Pending을 해제하지 않는다. 명시적 도구 해제와 실제 도구 변경의 취소 경로는 유지한다. | Active Tool 계약 수정 완료, 사용자 확인 대기 |
-| UI-2 | 고정 Workspace와 독립 Box | 좌측 Workspace, 우측 Simulation·Inspector와 각각의 Launcher를 배치한다. 세 Box의 8가지 확장 조합을 지원하고 World View·Camera·좌표계는 유지한다. 기존 확인·진행·Undo/Redo UI와 직렬화 참조를 보존한다. | Launcher·History·내부 스크롤 수정 완료, 사용자 확인 대기 |
+| UI-2 | 고정 Workspace와 독립 Box | 좌측 Workspace·독립 SelectMode Palette, 우측 Simulation·Inspector를 배치한다. Simulation은 높이 축소와 같은 위치의 확대 버튼을 사용하고 Inspector 영역·Launcher가 그 아래로 함께 이동한다. 세 Box의 8가지 확장 조합을 지원하고 World View·Camera·좌표계는 유지한다. 기존 확인·진행·Undo/Redo UI와 직렬화 참조를 보존한다. | Launcher·History·내부 스크롤 수정 완료, 사용자 확인 대기 |
 | UI-3 | Context Palette와 Tool Options | Entity / World Tab이 같은 Palette를 사용한다. 승인된 Category와 Road를 표시하고 기존 도구를 연결한다. Category 탐색 시 도구·Options 해제, 항목 선택 시 필요한 Options만 활성화한다. 미지원 기능은 실행할 수 없다. Area는 기존 3D Box로 유지한다. | 도구 연결·복귀·선택 표시 구현 완료, 사용자 확인 대기 |
 | UI-4 | Cell Inspector | 기존 Cell 정보 조회·표시를 재사용한다. Inspector 축소가 선택을 해제하지 않고 재확장 시 최신 정보를 표시한다. 월드 교체·대상 무효화와 정보 갱신을 처리한다. | Context 상태 및 월드 없음 표시 수정 완료, 사용자 확인 대기 |
 | UI-5 | Cell 기반 Entity Inspector | 선택 Cell에 Entity가 0개면 Cell 정보, 1개면 Entity 정보, 여러 개면 정렬된 선택 목록을 표시한다. Cell 정보·목록으로 복귀할 수 있고 Entity ID로 개체 정체성을 유지한다. | Context·정렬 목록·Entity 변경 추적 구현 완료, 사용자 확인 대기 |
@@ -93,7 +93,7 @@
 
 현재 구현 경계는 MainSceneUIView의 씬 참조·Context 표시, WorkspaceItemView/Workspace Item.prefab의 데이터 행 표시, WorldEditToolState의 도구 상태, WorldEditApplyController의 실행·History 연결이다. 기존 Toolbar·Catalog View는 Main Scene에서 사용하지 않는다. Cell 조회·월드 Pointer 차단과 확인·진행 UI는 기존 시스템을 유지한다.
 
-추가 사용자 확인: Play 전 Canvas 직속 Box가 보이는지, Tool Options 전환 시 Tab/History 크기가 고정되는지, 모드·Brush Size를 반복 변경할 수 있는지, Back 버튼과 스크롤이 동작하는지 확인한다. Entity·Road의 Thumbnail이 없는 데이터와 Terraform은 문자 기호를 표시하며 전용 아트 연결은 별도 콘텐츠 작업이다.
+추가 사용자 확인: 최초 실행 시 Workspace·Simulation·Inspector가 모두 축소되고 SelectMode가 숨겨져 있는지 확인한다. Box를 펼친 후 컴포넌트 재활성화로 표시 상태가 초기화되지 않아야 한다. Inspector를 접은 동안 변경한 대상 정보는 재확장 시 반영되고 목록 왕복 시 기존 행을 재사용해야 한다. Play 전 Canvas 직속 Box가 배치되어 있는지, Active Tool 선택/해제 시 독립 SelectMode Palette 전체가 표시/숨김되는지, Workspace 축소 시 도구와 SelectMode가 유지되는지 확인한다. Simulation 축소 시 폭·상단·버튼 규격이 유지되는지, Inspector의 확장 영역과 Launcher 양쪽이 높이 변화에 맞춰 이동하는지 확인한다. 동일 Tool 재선택으로 일반 Cell 선택에 복귀하는지, Brush에서만 Size 행과 Palette 높이가 늘어나는지 확인한다. 고정 취소·적용 버튼은 Pending이 없으면 비활성이고, 취소·적용 후에도 Tool은 유지되어야 한다. 모드·Brush Size 반복 변경, Back 버튼과 스크롤도 확인한다. Entity·Road의 Thumbnail이 없는 데이터와 Terraform은 문자 기호를 표시하며 전용 아트 연결은 별도 콘텐츠 작업이다.
 ### UI 후속 기능
 
 | 작업 | 범위·선행 조건 | 상태 |
@@ -110,10 +110,11 @@
 
 agent는 코드 변경 단계에서 컴파일 오류 확인까지만 수행한다. 다음 런타임 확인은 사용자가 수행하며 결과를 전달한 뒤 완료 상태를 갱신한다.
 
-- 각 Box를 X로 접고 Launcher로 펼쳐 8가지 조합을 확인한다. 다른 Box 상태, Active Tool, 선택 Context, Pending 편집과 Simulation 진행이 유지되어야 한다.
+- Workspace·Inspector는 X와 Launcher, Simulation은 X와 같은 자리의 확대 버튼을 사용하여 8가지 조합을 확인한다. 다른 Box 상태, Active Tool, 선택 Context, Pending 편집과 Simulation 진행이 유지되어야 한다.
 - Tab·Category로 돌아가면 도구가 해제되고 Options가 숨겨져야 한다. Deer 또는 지원되는 World 항목 선택 시에만 필요한 Options가 표시되고 Building은 Single만 허용되어야 한다. 미지원 항목은 실행되지 않아야 한다.
 - UI 위 클릭·Drag 및 Pending 중 X·Launcher 클릭을 수행한다. 월드에 적용되지 않고 표시 전용 클릭이 Pending을 취소하지 않아야 한다. 기존 UI 진입 시 Drag 차단·명시적 취소 규칙은 유지되어야 한다.
-- Single·Brush·3D Area로 기존 편집과 실행·취소·Undo/Redo를 확인한다. UI 이동 전과 같은 월드 변경 결과를 유지해야 한다.
+- Entity·Terraform·Road 활성 항목을 재선택하면 도구·Pending이 해제되고 현재 Category는 유지되어야 한다. Brush → Single/Area 전환 시 Size 행의 빈 공간이 남지 않아야 한다.
+- Single·Brush·3D Area로 고정 취소·적용 버튼과 Undo/Redo를 확인한다. UI 이동 전과 같은 월드 변경 결과를 유지해야 한다.
 - Entity가 0개·1개·여러 개인 Cell을 각각 선택한다. Cell 정보·Entity 자동 선택·정렬 목록이 대응하고 Cell 정보·목록으로 돌아갈 수 있어야 한다.
 - Inspector를 접은 동안 대상 상태를 변경한 뒤 펼친다. 최신 정보가 표시되어야 하며 삭제·언로드·월드 교체 후 다른 개체를 이전 선택으로 표시하지 않아야 한다.
 - Box 확장·축소 전후 같은 화면 지점의 Cell Picking과 Camera viewport를 확인한다. UI가 가리지 않는 World View의 좌표와 월드 논리 크기가 바뀌지 않아야 한다.
@@ -125,4 +126,6 @@ agent는 코드 변경 단계에서 컴파일 오류 확인까지만 수행한�
 ## 취소
 
 - 없음.
+
+
 
