@@ -46,7 +46,6 @@ namespace MiniCivilization.World.Interaction
         private readonly List<int> outlineIndices = new();
         private readonly HashSet<CellEdge> outlineEdges = new();
 
-        private WorldTileSelectionState subscribedState;
         private WorldManager subscribedManager;
         private Mesh unitCubeMesh;
         private Mesh primaryOutlineMesh;
@@ -59,12 +58,50 @@ namespace MiniCivilization.World.Interaction
         private MaterialPropertyBlock propertyBlock;
         private Bounds instanceBounds;
         private Color activeColor;
-        private bool instancesDirty = true;
+        private (WorldData World, IWorldCellSelection Primary, IWorldCellSelection Secondary,
+            IWorldCellSelection Invalid, CellCoordinate? Cell, Color Color,
+            Matrix4x4 Root, float Padding) displayed;
+        private bool hasDisplay;
+
+        private (WorldData World, IWorldCellSelection Primary, IWorldCellSelection Secondary,
+            IWorldCellSelection Invalid, CellCoordinate? Cell, Color Color,
+            Matrix4x4 Root, float Padding) GetDisplay()
+        {
+            var world = worldManager != null ? worldManager.CurrentWorldData : null;
+            IWorldCellSelection primary = null, secondary = null, invalid = null;
+            CellCoordinate? cell = null;
+            var color = hoverColor;
+            if (selectionState != null && world != null)
+            {
+                primary = selectionState.EditPrimaryPreview;
+                secondary = selectionState.EditSecondaryPreview;
+                invalid = selectionState.EditInvalidPreview;
+                if (primary != null || secondary != null || invalid != null)
+                    color = editSelectedColor;
+                else if (selectionState.EditHovered != null)
+                {
+                    primary = selectionState.EditHovered;
+                    color = editHoverColor;
+                }
+                else if (selectionState.EditSelected != null)
+                {
+                    primary = selectionState.EditSelected;
+                    color = editSelectedColor;
+                }
+                else if (selectionState.Selected.HasValue)
+                {
+                    cell = selectionState.Selected.Value.Cell;
+                    color = selectedColor;
+                }
+                else cell = selectionState.Hovered?.Cell;
+            }
+            return (world, primary, secondary, invalid, cell, color, GetRenderRootMatrix(), cellPadding);
+        }
 
         private void OnEnable()
         {
             Subscribe();
-            instancesDirty = true;
+            hasDisplay = false;
         }
 
         private void OnDisable()
@@ -74,8 +111,11 @@ namespace MiniCivilization.World.Interaction
 
         private void LateUpdate()
         {
-            if (instancesDirty)
+            var next = GetDisplay();
+            if (!hasDisplay || !displayed.Equals(next))
             {
+                displayed = next;
+                hasDisplay = true;
                 RebuildInstances();
             }
 
@@ -92,7 +132,7 @@ namespace MiniCivilization.World.Interaction
             selectionState = state;
             highlightMaterial = material;
             Subscribe();
-            instancesDirty = true;
+            hasDisplay = false;
         }
 
         private void Subscribe()
@@ -100,16 +140,6 @@ namespace MiniCivilization.World.Interaction
             if (!isActiveAndEnabled)
             {
                 return;
-            }
-
-            if (selectionState != null && subscribedState != selectionState)
-            {
-                subscribedState = selectionState;
-                subscribedState.HoverChanged += OnSelectionStateChanged;
-                subscribedState.SelectionChanged += OnSelectionStateChanged;
-                subscribedState.EditHoverChanged += OnEditStateChanged;
-                subscribedState.EditSelectionChanged += OnEditStateChanged;
-                subscribedState.EditPreviewChanged += OnEditPreviewChanged;
             }
 
             if (worldManager != null && subscribedManager != worldManager)
@@ -121,16 +151,6 @@ namespace MiniCivilization.World.Interaction
 
         private void Unsubscribe()
         {
-            if (subscribedState != null)
-            {
-                subscribedState.HoverChanged -= OnSelectionStateChanged;
-                subscribedState.SelectionChanged -= OnSelectionStateChanged;
-                subscribedState.EditHoverChanged -= OnEditStateChanged;
-                subscribedState.EditSelectionChanged -= OnEditStateChanged;
-                subscribedState.EditPreviewChanged -= OnEditPreviewChanged;
-                subscribedState = null;
-            }
-
             if (subscribedManager != null)
             {
                 subscribedManager.WorldChanged -= OnWorldChanged;
@@ -138,24 +158,13 @@ namespace MiniCivilization.World.Interaction
             }
         }
 
-        private void OnSelectionStateChanged(TilePickResult? _) =>
-            instancesDirty = true;
-
-        private void OnEditStateChanged(IWorldCellSelection _) =>
-            instancesDirty = true;
-
-        private void OnEditPreviewChanged() => instancesDirty = true;
-
         private void OnWorldChanged()
         {
-            ClearMatrices();
-            selectionState?.Clear();
-            instancesDirty = true;
+            hasDisplay = false;
         }
 
         private void RebuildInstances()
         {
-            instancesDirty = false;
             ClearMatrices();
             if (!TryGetWorld(out var world))
             {
@@ -164,110 +173,33 @@ namespace MiniCivilization.World.Interaction
 
             EnsureOutlineMeshes();
 
-            if (selectionState?.EditPrimaryPreview != null
-                || selectionState?.EditSecondaryPreview != null
-                || selectionState?.EditInvalidPreview != null)
+            activeColor = displayed.Color;
+            AppendSelection(displayed.Primary, world, primaryMatrices, primaryOutlineMesh);
+            AppendSelection(displayed.Secondary, world, secondaryMatrices, secondaryOutlineMesh);
+            AppendSelection(displayed.Invalid, world, invalidMatrices, invalidOutlineMesh);
+            if (displayed.Cell.HasValue)
             {
-                AppendSelection(
-                    selectionState.EditPrimaryPreview,
-                    world,
-                    primaryMatrices);
-                AppendSelection(
-                    selectionState.EditSecondaryPreview,
-                    world,
-                    secondaryMatrices);
-                AppendSelection(
-                    selectionState.EditInvalidPreview,
-                    world,
-                    invalidMatrices);
-                RebuildSelectionOutline(
-                    selectionState.EditPrimaryPreview,
-                    world,
-                    primaryOutlineMesh);
-                RebuildSelectionOutline(
-                    selectionState.EditSecondaryPreview,
-                    world,
-                    secondaryOutlineMesh);
-                RebuildSelectionOutline(
-                    selectionState.EditInvalidPreview,
-                    world,
-                    invalidOutlineMesh);
-                activeColor = editSelectedColor;
-            }
-            else if (selectionState?.EditHovered != null)
-            {
-                activeColor = editHoverColor;
-                AppendSelection(
-                    selectionState.EditHovered,
-                    world,
-                    primaryMatrices);
-                RebuildSelectionOutline(
-                    selectionState.EditHovered,
-                    world,
-                    primaryOutlineMesh);
-            }
-            else if (selectionState?.EditSelected != null)
-            {
-                activeColor = editSelectedColor;
-                AppendSelection(
-                    selectionState.EditSelected,
-                    world,
-                    primaryMatrices);
-                RebuildSelectionOutline(
-                    selectionState.EditSelected,
-                    world,
-                    primaryOutlineMesh);
-            }
-            else if (selectionState?.Selected != null)
-            {
-                activeColor = selectedColor;
-                AppendCell(
-                    selectionState.Selected.Value.Cell,
-                    world.CellSize,
-                    primaryMatrices);
-                RebuildCellOutline(
-                    selectionState.Selected.Value.Cell,
-                    world.CellSize,
-                    primaryOutlineMesh);
-            }
-            else if (selectionState?.Hovered != null)
-            {
-                activeColor = hoverColor;
-                AppendCell(
-                    selectionState.Hovered.Value.Cell,
-                    world.CellSize,
-                    primaryMatrices);
-                RebuildCellOutline(
-                    selectionState.Hovered.Value.Cell,
-                    world.CellSize,
-                    primaryOutlineMesh);
+                var cell = displayed.Cell.Value;
+                AppendCell(cell, world.CellSize, primaryMatrices);
+                RebuildCellOutline(cell, world.CellSize, primaryOutlineMesh);
             }
 
             RecalculateInstanceBounds();
         }
 
         private void AppendSelection(
-            IWorldCellSelection selection,
-            WorldData world,
-            List<Matrix4x4> target)
+            IWorldCellSelection selection, WorldData world,
+            List<Matrix4x4> target, Mesh outline)
         {
-            if (selection == null)
-            {
-                return;
-            }
-
-            if (selection is WorldCellBoxSelection box)
-            {
-                AppendBox(box.Bounds, world.CellSize, target);
-                return;
-            }
-
+            if (selection == null) return;
             selectedCells.Clear();
             selection.CopyCellsTo(selectedCells, world);
-            for (var index = 0; index < selectedCells.Count; index++)
-            {
-                AppendCell(selectedCells[index], world.CellSize, target);
-            }
+            if (selection is WorldCellBoxSelection box)
+                AppendBox(box.Bounds, world.CellSize, target);
+            else
+                for (var index = 0; index < selectedCells.Count; index++)
+                    AppendCell(selectedCells[index], world.CellSize, target);
+            RebuildOutlineMesh(selectedCells, world.CellSize, outline);
         }
 
         private void AppendCell(
@@ -312,21 +244,6 @@ namespace MiniCivilization.World.Interaction
                     center,
                     Quaternion.identity,
                     paddedSize));
-        }
-
-        private void RebuildSelectionOutline(
-            IWorldCellSelection selection,
-            WorldData world,
-            Mesh target)
-        {
-            if (target == null)
-            {
-                return;
-            }
-
-            selectedCells.Clear();
-            selection?.CopyCellsTo(selectedCells, world);
-            RebuildOutlineMesh(selectedCells, world.CellSize, target);
         }
 
         private void RebuildCellOutline(

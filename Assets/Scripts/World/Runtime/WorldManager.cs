@@ -238,16 +238,19 @@ namespace MiniCivilization.World.Runtime
                 UnbindRuntime();
                 CurrentWorldRuntime = null;
                 generationConfiguration = null;
+                WorldChanged?.Invoke();
                 throw;
             }
         }
 
         private void DisposeWorldRuntime()
         {
+            var hadRuntime = CurrentWorldRuntime != null;
             DisposeStreamingCoordinator();
             UnbindRuntime();
             CurrentWorldRuntime = null;
             generationConfiguration = null;
+            if (hadRuntime) WorldChanged?.Invoke();
         }
 
         private void DisposeStreamingCoordinator()
@@ -345,19 +348,27 @@ namespace MiniCivilization.World.Runtime
 
         private void OnEditChanged(WorldChangeSet changeSet)
         {
-            if (CurrentWorldRuntime.AffectsWayPointGraph(changeSet))
+            // Persistence and the other consumers must still run if presentation fails.
+            ApplyCommittedEffect(() => TrackDirty(changeSet));
+            ApplyCommittedEffect(MarkDirty);
+            ApplyCommittedEffect(() =>
             {
-                CurrentWorldRuntime.RebuildWayPointGraph();
-            }
+                if (CurrentWorldRuntime.AffectsWayPointGraph(changeSet))
+                    CurrentWorldRuntime.RebuildWayPointGraph();
+            });
+            ApplyCommittedEffect(() => waterFlowController.ApplyChanges(changeSet));
+            ApplyCommittedEffect(() => worldRenderer.ApplyChanges(changeSet));
+        }
 
-            waterFlowController.ApplyChanges(changeSet);
-            worldRenderer.ApplyChanges(changeSet);
-            TrackDirty(changeSet);
-            MarkDirty();
+        private void ApplyCommittedEffect(System.Action effect)
+        {
+            try { effect(); }
+            catch (System.Exception error) { Debug.LogException(error, this); }
         }
 
         private void OnWaterChanged(WorldChangeSet changeSet)
         {
+            editController.OnExternalWorldChangeCommitted(changeSet);
             worldRenderer.ApplyChanges(changeSet);
             TrackDirty(changeSet);
             MarkDirty();

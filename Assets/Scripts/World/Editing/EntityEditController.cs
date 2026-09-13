@@ -58,13 +58,21 @@ namespace MiniCivilization.World.Editing
             EntityDefinition definition,
             IWorldCellSelection selection)
         {
+            selectedCells.Clear();
+            if (selection != null && entityManager?.Runtime != null)
+                selection.CopyCellsTo(selectedCells, entityManager.Runtime.Data);
+            return EvaluateCells(definition, selectedCells);
+        }
+
+        internal EntityPlacementPreview EvaluateCells(EntityDefinition definition, IReadOnlyList<CellCoordinate> cells)
+        {
             var runtime = entityManager?.Runtime;
             var entities = entityManager?.Entities;
             if (!TryGetTypeKey(
                     definition,
                     runtime,
                     entities,
-                    selection,
+                    cells,
                     out var typeKey))
             {
                 return new EntityPlacementPreview(
@@ -75,21 +83,19 @@ namespace MiniCivilization.World.Editing
                     null);
             }
 
-            selectedCells.Clear();
-            selection.CopyCellsTo(selectedCells, runtime.Data);
             if (typeKey.Category == EntityCategory.Building)
             {
                 return EvaluateBuilding(
                     typeKey,
-                    selectedCells[0],
+                    cells[0],
                     entities);
             }
 
             validCells.Clear();
             invalidCells.Clear();
-            for (var index = 0; index < selectedCells.Count; index++)
+            for (var index = 0; index < cells.Count; index++)
             {
-                var coordinate = selectedCells[index];
+                var coordinate = cells[index];
                 if (HasGroundPlacementSupport(runtime.Data, coordinate))
                 {
                     validCells.Add(coordinate);
@@ -109,48 +115,69 @@ namespace MiniCivilization.World.Editing
                 valid);
         }
 
-        public bool Apply(
-            EntityDefinition definition,
-            IWorldCellSelection selection)
+        public bool Apply(EntityDefinition definition, IWorldCellSelection selection) =>
+            ApplyEvaluated(definition, Evaluate(definition, selection)).Succeeded > 0;
+
+        internal readonly struct PlacementResult
         {
-            var runtime = entityManager?.Runtime;
-            var entities = entityManager?.Entities;
-            if (!TryGetTypeKey(
-                    definition,
-                    runtime,
-                    entities,
-                    selection,
-                    out var typeKey))
+            public readonly int Succeeded;
+            public readonly int Failed;
+            public PlacementResult(int succeeded, int failed)
             {
-                return false;
+                Succeeded = succeeded;
+                Failed = failed;
             }
-
-            selectedCells.Clear();
-            selection.CopyCellsTo(selectedCells, runtime.Data);
-            if (typeKey.Category == EntityCategory.Building)
-            {
-                return TryPlaceBuilding(
-                    entities,
-                    typeKey,
-                    selectedCells[0]);
-            }
-
-            var added = false;
-            for (var index = 0; index < selectedCells.Count; index++)
-            {
-                var coordinate = selectedCells[index];
-                if (!HasGroundPlacementSupport(runtime.Data, coordinate))
-                {
-                    continue;
-                }
-
-                entities.Add(entities.Create(typeKey, coordinate));
-                added = true;
-            }
-
-            return added;
         }
 
+        internal PlacementResult ApplyEvaluated(EntityDefinition definition, EntityPlacementPreview evaluation)
+        {
+            var entities = entityManager?.Entities;
+            if (evaluation == null || !evaluation.CanExecute || entities == null
+                || definition == null || entityManager.Catalog == null
+                || !entityManager.Catalog.TryGetTypeKey(definition, out var typeKey))
+                return default;
+
+            var succeeded = 0;
+            var failed = typeKey.Category == EntityCategory.Building ? 0 : evaluation.InvalidCells.Count;
+            if (failed > 0)
+                Debug.LogWarning($"Entity placement: {failed} cells rejected by ground/water support rules.", this);
+            foreach (var coordinate in evaluation.EntityAnchors)
+            {
+                EntityData data = null;
+                try
+                {
+                    if (typeKey.Category == EntityCategory.Building)
+                    {
+                        if (!TryPlaceBuilding(entities, typeKey, coordinate))
+                            throw new InvalidOperationException("Building placement was rejected.");
+                    }
+                    else
+                    {
+                        if (!ReferenceEquals(entities, entityManager.Entities)
+                            || !HasGroundPlacementSupport(entityManager.Runtime.Data, coordinate))
+                            throw new InvalidOperationException("Placement target is no longer available.");
+                        data = entities.Create(typeKey, coordinate);
+                        entities.Add(data);
+                        if (!entities.TryGet(data.Id, out _))
+                            throw new InvalidOperationException("Entity registration did not remain available.");
+                    }
+                    succeeded++;
+                }
+                catch (Exception error)
+                {
+                    failed++;
+                    Debug.LogWarning($"Entity placement failed at {coordinate}: {error}", this);
+                    // Add can throw from a notification after registration. Remove that attempt only.
+                    if (data != null && entities.TryGet(data.Id, out _))
+                    {
+                        try { entities.Remove(data.Id); }
+                        catch (Exception cleanupError) { Debug.LogException(cleanupError, this); }
+                    }
+                }
+            }
+            Debug.Log($"Entity placement completed: success={succeeded}, failed={failed}.", this);
+            return new PlacementResult(succeeded, failed);
+        }
         public void ShowPreview(
             EntityDefinition definition,
             EntityPlacementPreview preview)
@@ -205,14 +232,14 @@ namespace MiniCivilization.World.Editing
             EntityDefinition definition,
             WorldRuntime runtime,
             EntitySystem entities,
-            IWorldCellSelection selection,
+            IReadOnlyList<CellCoordinate> cells,
             out EntityTypeKey typeKey)
         {
             typeKey = default;
             if (definition == null
                 || runtime == null
                 || entities == null
-                || selection == null
+                || cells == null
                 || entityManager.Catalog == null
                 || !entityManager.Catalog.TryGetTypeKey(
                     definition,
@@ -221,11 +248,12 @@ namespace MiniCivilization.World.Editing
                 return false;
             }
 
-            selectedCells.Clear();
-            selection.CopyCellsTo(selectedCells, runtime.Data);
-            return selectedCells.Count != 0
+            foreach (var cell in cells)
+                if (!runtime.Data.Contains(cell.X, cell.Y, cell.Z)
+                    || !runtime.Data.IsChunkLoaded(cell.X, cell.Z)) return false;
+            return cells.Count != 0
                 && (typeKey.Category != EntityCategory.Building
-                    || selectedCells.Count == 1);
+                    || cells.Count == 1);
         }
 
         private bool TryPlaceBuilding(
@@ -275,7 +303,20 @@ namespace MiniCivilization.World.Editing
                         correction.Surface);
                 }
 
-                worldEditController.CommitWithoutHistory(transaction);
+                worldEditController.CommitExternalChange(transaction, () =>
+                {
+                    try
+                    {
+                        entities.Add(data);
+                    }
+                    catch
+                    {
+                        // Add may fail while publishing an already registered entity.
+                        if (entities.TryGet(data.Id, out _))
+                            entities.Remove(data.Id);
+                        throw;
+                    }
+                });
             }
             catch
             {
@@ -287,7 +328,6 @@ namespace MiniCivilization.World.Editing
                 throw;
             }
 
-            entities.Add(data);
             return true;
         }
 

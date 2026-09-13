@@ -9,44 +9,6 @@ using UnityEngine.InputSystem;
 
 namespace MiniCivilization.World.Editing
 {
-    public readonly struct WorldEditDragSnapshot
-    {
-        public readonly WorldEditToolSnapshot Tool;
-        public readonly TilePickResult Start;
-        public readonly TilePickResult Current;
-        public readonly CellBounds Bounds;
-        public readonly IWorldCellSelection Selection;
-
-        public WorldEditDragSnapshot(
-            WorldEditToolSnapshot tool,
-            TilePickResult start,
-            TilePickResult current,
-            IWorldCellSelection selection = null)
-        {
-            Tool = tool;
-            Start = start;
-            Current = current;
-            Selection = selection;
-            Bounds = selection?.Bounds
-                ?? BuildBounds(start.Cell, current.Cell);
-        }
-
-        private static CellBounds BuildBounds(
-            CellCoordinate start,
-            CellCoordinate current)
-        {
-            return new CellBounds(
-                new CellCoordinate(
-                    Math.Min(start.X, current.X),
-                    Math.Min(start.Y, current.Y),
-                    Math.Min(start.Z, current.Z)),
-                new CellCoordinate(
-                    Math.Max(start.X, current.X),
-                    Math.Max(start.Y, current.Y),
-                    Math.Max(start.Z, current.Z)));
-        }
-    }
-
     [DisallowMultipleComponent]
     public sealed class WorldEditInputController : MonoBehaviour
     {
@@ -58,8 +20,7 @@ namespace MiniCivilization.World.Editing
 
         private bool isDragging;
         private WorldRuntime observedRuntime;
-        private bool isPending;
-        private bool pendingExecutable;
+        private IWorldCellSelection pendingSelection;
         private TilePickResult dragStart;
         private TilePickResult dragCurrent;
         private WorldEditToolSnapshot dragTool;
@@ -67,23 +28,16 @@ namespace MiniCivilization.World.Editing
         private readonly List<CellCoordinate> brushCells = new();
         private TilePickResult? idlePreviewAnchor;
         private int brushPreviewSize;
+        private long idlePreviewRevision;
         private WorldEditToolSnapshot pendingTool;
 
-        public bool IsDragging => isDragging;
-        public bool IsPending => isPending;
-        public WorldEditDragSnapshot? CurrentDrag =>
-            isDragging
-                ? new WorldEditDragSnapshot(
-                    dragTool,
-                    dragStart,
-                    dragCurrent,
-                    selectionState?.EditHovered)
-                : null;
-
-        public event Action<WorldEditDragSnapshot> DragStarted;
-        public event Action<WorldEditDragSnapshot> DragChanged;
-        public event Action<WorldEditDragSnapshot> DragCompleted;
-        public event Action DragCancelled;
+        public bool IsPending => pendingSelection != null;
+        internal bool TryGetPending(out IWorldCellSelection selection, out WorldEditToolSnapshot tool)
+        {
+            selection = pendingSelection;
+            tool = pendingTool;
+            return IsPending;
+        }
         public event Action<IWorldCellSelection, WorldEditToolSnapshot>
             PendingSelectionChanged;
         public event Action<IWorldCellSelection, WorldEditToolSnapshot>
@@ -132,7 +86,7 @@ namespace MiniCivilization.World.Editing
             if ((Keyboard.current?.escapeKey.wasPressedThisFrame ?? false)
                 || mouse.rightButton.wasPressedThisFrame)
             {
-                if (isPending)
+                if (IsPending)
                 {
                     CancelPending();
                 }
@@ -143,7 +97,7 @@ namespace MiniCivilization.World.Editing
                 return;
             }
 
-            if (isPending)
+            if (IsPending)
             {
                 if (mouse.leftButton.wasPressedThisFrame
                     && (EventSystem.current == null
@@ -243,44 +197,38 @@ namespace MiniCivilization.World.Editing
 
         public void SetPendingExecutable(bool executable)
         {
-            if (!isPending)
+            if (!IsPending)
             {
                 return;
             }
 
-            pendingExecutable = executable;
             confirmationView?.SetExecutable(executable);
         }
 
         public void CompletePendingExecution()
         {
-            if (!isPending)
-            {
-                return;
-            }
-
-            isPending = false;
-            pendingExecutable = false;
-            selectionState?.ClearEditSelected();
-            selectionState?.ClearEditPreview();
-            confirmationView?.SetPending(false);
+            EndPending(false);
         }
 
         public void CancelPending()
         {
-            if (!isPending
-                && selectionState?.EditSelected == null)
+            EndPending(true);
+        }
+
+        private void EndPending(bool cancelled)
+        {
+            var hadPending = IsPending;
+            if (!hadPending)
             {
                 confirmationView?.SetPending(false);
                 return;
             }
-
-            isPending = false;
-            pendingExecutable = false;
+            pendingSelection = null;
+            pendingTool = default;
             selectionState?.ClearEditSelected();
             selectionState?.ClearEditPreview();
             confirmationView?.SetPending(false);
-            PendingCancelled?.Invoke();
+            if (cancelled) PendingCancelled?.Invoke();
         }
 
         public void CancelDrag()
@@ -289,13 +237,7 @@ namespace MiniCivilization.World.Editing
             brushCellIndices.Clear();
             brushCells.Clear();
             idlePreviewAnchor = null;
-            if (!isDragging)
-            {
-                return;
-            }
-
             isDragging = false;
-            DragCancelled?.Invoke();
         }
 
         private void BeginDrag(TilePickResult pick)
@@ -326,8 +268,6 @@ namespace MiniCivilization.World.Editing
                 RefreshAreaPreview();
             }
 
-            var snapshot = CreateSnapshot();
-            DragStarted?.Invoke(snapshot);
         }
 
         private void UpdateDrag(TilePickResult pick)
@@ -359,13 +299,10 @@ namespace MiniCivilization.World.Editing
                 RefreshAreaPreview();
             }
 
-            var snapshot = CreateSnapshot();
-            DragChanged?.Invoke(snapshot);
         }
 
         private void CompleteDrag()
         {
-            var snapshot = CreateSnapshot();
             var selection = selectionState?.EditHovered;
             isDragging = false;
             brushCellIndices.Clear();
@@ -373,27 +310,17 @@ namespace MiniCivilization.World.Editing
             idlePreviewAnchor = null;
             if (selection == null)
             {
-                DragCompleted?.Invoke(snapshot);
-                return;
+                    return;
             }
 
             pendingTool = dragTool;
-            isPending = true;
-            pendingExecutable = false;
+            pendingSelection = selection;
             confirmationView?.SetPending(true);
             selectionState.CommitEditHovered();
             PendingSelectionChanged?.Invoke(
-                selectionState.EditSelected,
+                pendingSelection,
                 pendingTool);
-            DragCompleted?.Invoke(snapshot);
         }
-
-        private WorldEditDragSnapshot CreateSnapshot() =>
-            new(
-                dragTool,
-                dragStart,
-                dragCurrent,
-                selectionState?.EditHovered);
 
         private void RefreshAreaPreview()
         {
@@ -433,9 +360,10 @@ namespace MiniCivilization.World.Editing
 
         private void RefreshIdleBrushPreview(TilePickResult hovered)
         {
-            var size = Mathf.Clamp(toolState.BrushSize, 1, 3);
+            var size = toolState.BrushSize;
             if (idlePreviewAnchor.HasValue
                 && idlePreviewAnchor.Value.Equals(hovered)
+                && idlePreviewRevision == worldManager.CurrentWorldData.CellRevision
                 && brushPreviewSize == size
                 && selectionState.EditHovered is WorldCellSetSelection)
             {
@@ -460,6 +388,7 @@ namespace MiniCivilization.World.Editing
             RefreshBrushStrokePreview();
             idlePreviewAnchor = hovered;
             brushPreviewSize = size;
+            idlePreviewRevision = worldManager.CurrentWorldData.CellRevision;
         }
 
         private void ClearIdleBrushPreview()
@@ -505,7 +434,7 @@ namespace MiniCivilization.World.Editing
                     t));
                 AddBrushFootprint(
                     new CellCoordinate(x, fallbackY, z),
-                    Mathf.Clamp(dragTool.BrushSize, 1, 3),
+                    dragTool.BrushSize,
                     dragTool.CellSelectionPolicy);
             }
         }
@@ -516,6 +445,7 @@ namespace MiniCivilization.World.Editing
             if (!isDragging
                 && idlePreviewAnchor.HasValue
                 && idlePreviewAnchor.Value.Equals(source)
+                && idlePreviewRevision == worldManager.CurrentWorldData.CellRevision
                 && selectionState?.EditHovered != null)
             {
                 return;
@@ -542,6 +472,7 @@ namespace MiniCivilization.World.Editing
             if (!isDragging)
             {
                 idlePreviewAnchor = source;
+                idlePreviewRevision = worldManager.CurrentWorldData.CellRevision;
             }
         }
 
@@ -604,7 +535,7 @@ namespace MiniCivilization.World.Editing
 
         private void OnToolStateChanged(WorldEditToolSnapshot next)
         {
-            if (isPending && !pendingTool.Equals(next))
+            if (IsPending && !pendingTool.Equals(next))
             {
                 CancelPending();
                 CancelDrag();
@@ -653,15 +584,13 @@ namespace MiniCivilization.World.Editing
         private void RequestExecution()
         {
             SynchronizeWorld();
-            if (!isPending
-                || !pendingExecutable
-                || selectionState?.EditSelected == null)
+            if (!IsPending)
             {
                 return;
             }
 
             ExecutionRequested?.Invoke(
-                selectionState.EditSelected,
+                pendingSelection,
                 pendingTool);
         }
 

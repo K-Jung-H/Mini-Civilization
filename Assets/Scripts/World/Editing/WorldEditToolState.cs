@@ -85,6 +85,9 @@ namespace MiniCivilization.World.Editing
     public readonly struct WorldEditToolSnapshot :
         IEquatable<WorldEditToolSnapshot>
     {
+        public const int MinimumBrushSize = 1;
+        public const int MaximumBrushSize = 3;
+
         public readonly WorldEditMode Mode;
         public readonly WorldEditAction Action;
         public readonly EntityDefinition EntityDefinition;
@@ -97,8 +100,15 @@ namespace MiniCivilization.World.Editing
                 : WorldEditCellSelectionPolicy.SurfaceCell;
         public bool IsEntityTool => EntityDefinition != null;
         public bool HasActiveTool => Action.IsSupported || IsEntityTool;
-        public bool IsReady =>
-            HasActiveTool && Mode != WorldEditMode.None;
+        private bool SingleOnly => IsEntityTool
+            && EntityDefinition.TypeKey.Category == EntityCategory.Building;
+        public bool SupportsMode(WorldEditMode mode) => HasActiveTool
+            && (mode == WorldEditMode.Single
+                || !SingleOnly && (mode == WorldEditMode.Brush || mode == WorldEditMode.Area));
+        public bool UsesBrushSize => SupportsMode(WorldEditMode.Brush) && Mode == WorldEditMode.Brush;
+        // Rectangle remains an unavailable placeholder alongside the area modes.
+        public bool ShowsRectanglePlaceholder => SupportsMode(WorldEditMode.Area);
+        public bool IsReady => SupportsMode(Mode);
 
         public WorldEditToolSnapshot(
             WorldEditMode mode,
@@ -109,7 +119,7 @@ namespace MiniCivilization.World.Editing
             Mode = mode;
             Action = action;
             EntityDefinition = entityDefinition;
-            BrushSize = Math.Clamp(brushSize, 1, 3);
+            BrushSize = Math.Clamp(brushSize, MinimumBrushSize, MaximumBrushSize);
         }
 
         public bool Equals(WorldEditToolSnapshot other)
@@ -155,17 +165,20 @@ namespace MiniCivilization.World.Editing
 
         public void SelectMode(WorldEditMode mode)
         {
-            if (mode != WorldEditMode.Single && mode != WorldEditMode.Area && mode != WorldEditMode.Brush)
+            if (!current.SupportsMode(mode))
                 return;
             Set(new WorldEditToolSnapshot(mode, current.Action, current.EntityDefinition, current.BrushSize));
         }
 
-        public void SelectBrushSize(int size) =>
+        public void SelectBrushSize(int size)
+        {
+            if (!current.UsesBrushSize) return;
             Set(new WorldEditToolSnapshot(current.Mode, current.Action, current.EntityDefinition, size));
+        }
 
         private void Set(WorldEditToolSnapshot next)
         {
-            if (next.EntityDefinition != null && next.EntityDefinition.TypeKey.Category == EntityCategory.Building)
+            if (next.HasActiveTool && !next.SupportsMode(next.Mode))
                 next = new WorldEditToolSnapshot(WorldEditMode.Single, next.Action, next.EntityDefinition, next.BrushSize);
             if (current.Equals(next)) return;
             current = next;

@@ -73,7 +73,7 @@
 
 ### Main Scene UI 재설계
 
-- **상태:** Canvas 직속 TMP Box와 고정 컨트롤을 씬에 배치하고 기존 World Edit UI·Toolbar 상태 의존성을 제거했다. 사용자 실행·해상도별 배치 확인 대기이며 런타임 검증 완료로 판정하지 않는다.
+- **상태:** UI·World Edit 프로토타입 완료. 사용자가 전체 동작 확인 통과 및 완료 처리를 승인했다. 정량 성능 측정 완료를 의미하지 않는다.
 - **설계 기준:** DEC-009 / DEC-010 / DEC-011. 현재 구현 구조는 PROJECT.md를 따른다.
 - **대상:** `Assets/Content/Scenes/Main Scene.unity`와 연결된 UI·Interaction 코드 및 UI 항목 Prefab.
 - **목표:** 중앙 World View를 유지하면서 단일 Entity / World Workspace, 도구별 Options, 독립적인 Simulation·Inspector Box를 제공한다.
@@ -82,18 +82,45 @@
 
 | 순서 | 사용자 기능 단계 | 완료 기준 | 상태 |
 |---|---|---|---|
-| UI-1 | 표시와 도구·선택 상태 분리 | Workspace 표시 여부로 Mode·Cell 선택 가능 여부를 결정하지 않는다. X·Launcher가 Active Tool·선택·Pending을 해제하지 않는다. 명시적 도구 해제와 실제 도구 변경의 취소 경로는 유지한다. | Active Tool 계약 수정 완료, 사용자 확인 대기 |
-| UI-2 | 고정 Workspace와 독립 Box | 좌측 Workspace·독립 SelectMode Palette, 우측 Simulation·Inspector를 배치한다. Simulation은 높이 축소와 같은 위치의 확대 버튼을 사용하고 Inspector 영역·Launcher가 그 아래로 함께 이동한다. 세 Box의 8가지 확장 조합을 지원하고 World View·Camera·좌표계는 유지한다. 기존 확인·진행·Undo/Redo UI와 직렬화 참조를 보존한다. | Launcher·History·내부 스크롤 수정 완료, 사용자 확인 대기 |
-| UI-3 | Context Palette와 Tool Options | Entity / World Tab이 같은 Palette를 사용한다. 승인된 Category와 Road를 표시하고 기존 도구를 연결한다. Category 탐색 시 도구·Options 해제, 항목 선택 시 필요한 Options만 활성화한다. 미지원 기능은 실행할 수 없다. Area는 기존 3D Box로 유지한다. | 도구 연결·복귀·선택 표시 구현 완료, 사용자 확인 대기 |
-| UI-4 | Cell Inspector | 기존 Cell 정보 조회·표시를 재사용한다. Inspector 축소가 선택을 해제하지 않고 재확장 시 최신 정보를 표시한다. 월드 교체·대상 무효화와 정보 갱신을 처리한다. | Context 상태 및 월드 없음 표시 수정 완료, 사용자 확인 대기 |
-| UI-5 | Cell 기반 Entity Inspector | 선택 Cell에 Entity가 0개면 Cell 정보, 1개면 Entity 정보, 여러 개면 정렬된 선택 목록을 표시한다. Cell 정보·목록으로 복귀할 수 있고 Entity ID로 개체 정체성을 유지한다. | Context·정렬 목록·Entity 변경 추적 구현 완료, 사용자 확인 대기 |
-| UI-6 | 사용자 통합 확인 | 아래 재현 항목을 사용자가 확인하고 결과에 따른 결함을 정리한다. 구현 완료와 사용자 검증 완료를 구분하여 기록한다. | 컴파일 확인 후 사용자 실행 확인 대기 |
+| UI-1 | 표시와 도구·선택 상태 분리 | Workspace 표시 여부로 Mode·Cell 선택 가능 여부를 결정하지 않는다. X·Launcher가 Active Tool·선택·Pending을 해제하지 않는다. 명시적 도구 해제와 실제 도구 변경의 취소 경로는 유지한다. | 완료 — 사용자 동작 확인 통과 |
+| UI-2 | 고정 Workspace와 독립 Box | 좌측 Workspace·독립 SelectMode Palette, 우측 Simulation·Inspector를 배치한다. Simulation은 높이 축소와 같은 위치의 확대 버튼을 사용하고 Inspector 영역·Launcher가 그 아래로 함께 이동한다. 세 Box의 8가지 확장 조합을 지원하고 World View·Camera·좌표계는 유지한다. 기존 확인·진행·Undo/Redo UI와 직렬화 참조를 보존한다. | 완료 — 사용자 동작 확인 통과 |
+| UI-3 | Context Palette와 Tool Options | Entity / World Tab이 같은 Palette를 사용한다. 승인된 Category와 Road를 표시하고 기존 도구를 연결한다. Category 탐색 시 도구·Options 해제, 항목 선택 시 필요한 Options만 활성화한다. 미지원 기능은 실행할 수 없다. Area는 기존 3D Box로 유지한다. | 완료 — 사용자 동작 확인 통과 |
+| UI-4 | Cell Inspector | 기존 Cell 정보 조회·표시를 재사용한다. Inspector 축소가 선택을 해제하지 않고 재확장 시 최신 정보를 표시한다. 월드 교체·대상 무효화와 정보 갱신을 처리한다. | 완료 — 사용자 동작 확인 통과 |
+| UI-5 | Cell 기반 Entity Inspector | 선택 Cell에 Entity가 0개면 Cell 정보, 1개면 Entity 정보, 여러 개면 정렬된 선택 목록을 표시한다. Cell 정보·목록으로 복귀할 수 있고 Entity ID로 개체 정체성을 유지한다. | 완료 — 사용자 동작 확인 통과 |
+| UI-6 | 사용자 통합 확인 | 아래 재현 항목을 사용자가 확인하고 결과에 따른 결함을 정리한다. 구현 완료와 사용자 검증 완료를 구분하여 기록한다. | 완료 — 사용자 동작 확인 통과 |
 
 진행 순서는 UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6이다. 상태 분리를 먼저 수행하여 새 Box의 표시 제어가 기존 편집·선택 취소 경로를 다시 호출하지 않게 한다. 단계별 실제 구현 후에만 PROJECT.md를 갱신한다.
 
 현재 구현 경계는 MainSceneUIView의 씬 참조·Context 표시, WorkspaceItemView/Workspace Item.prefab의 데이터 행 표시, WorldEditToolState의 도구 상태, WorldEditApplyController의 실행·History 연결이다. 기존 Toolbar·Catalog View는 Main Scene에서 사용하지 않는다. Cell 조회·월드 Pointer 차단과 확인·진행 UI는 기존 시스템을 유지한다.
 
 추가 사용자 확인: 최초 실행 시 Workspace·Simulation·Inspector가 모두 축소되고 SelectMode가 숨겨져 있는지 확인한다. Box를 펼친 후 컴포넌트 재활성화로 표시 상태가 초기화되지 않아야 한다. Inspector를 접은 동안 변경한 대상 정보는 재확장 시 반영되고 목록 왕복 시 기존 행을 재사용해야 한다. Play 전 Canvas 직속 Box가 배치되어 있는지, Active Tool 선택/해제 시 독립 SelectMode Palette 전체가 표시/숨김되는지, Workspace 축소 시 도구와 SelectMode가 유지되는지 확인한다. Simulation 축소 시 폭·상단·버튼 규격이 유지되는지, Inspector의 확장 영역과 Launcher 양쪽이 높이 변화에 맞춰 이동하는지 확인한다. 동일 Tool 재선택으로 일반 Cell 선택에 복귀하는지, Brush에서만 Size 행과 Palette 높이가 늘어나는지 확인한다. 고정 취소·적용 버튼은 Pending이 없으면 비활성이고, 취소·적용 후에도 Tool은 유지되어야 한다. 모드·Brush Size 반복 변경, Back 버튼과 스크롤도 확인한다. Entity·Road의 Thumbnail이 없는 데이터와 Terraform은 문자 기호를 표시하며 전용 아트 연결은 별도 콘텐츠 작업이다.
+### UI·World Edit의 상태 일관성과 구조 정리
+
+- **상태:** UI·World Edit 프로토타입 완료. 사용자가 전체 동작 확인 통과 및 완료 처리를 승인했다. 정량 성능 측정 완료를 의미하지 않는다.
+- **기준:** DEC-012. Undo/Redo는 직접 World 편집에만 적용하며 Entity와 그로 인한 World 변경은 제외한다. 실패 복구와 기존 이력의 충돌 처리는 별도로 보장한다.
+- **유지 범위:** Canvas 직속 TMP UI, 기존 도구 상태·월드 데이터 소유권, 3D Area, 독립 Box 표시 규칙과 직렬화 참조를 보존한다. 새 도구·Simulation 제어·저장 형식 변경은 포함하지 않는다.
+- **구조 원칙:** 책임 경계 정리를 먼저 수행한다. 구체 클래스·Component 분리는 각 단계에서 필요한 범위로 확정하며, 단순 파일 분할이나 공유 캐시 추가를 완료 기준으로 삼지 않는다.
+
+| 순서 | 사용자 기능 목표 | 완료 기준 | 상태 |
+|---|---|---|---|
+| WE-1 | 선택·Pending 수명의 일관성 | 입력·취소·완료·월드 교체에 따른 편집 상태 전환의 소유 책임을 명확히 한다. Inspector·Highlighter 표시 여부에 관계없이 무효한 Cell 선택을 처리하고 Box 축소는 편집 상태를 유지한다. Pending 영역의 내용·미로드 영역 재평가는 WE-2에서 처리한다. | 완료 — 사용자 동작 확인 통과 |
+| WE-2 | Preview와 실행 판단의 일치 | 평가와 표시를 분리하고 미로드 영역·관련 World/Entity 변화에 대한 재평가 경계를 정한다. 적용 직전 유효성 확인을 유지하며 UI는 편집 판단 결과를 표시한다. | 완료 — 사용자 동작 확인 통과 |
+| WE-3 | Entity 부수 변경의 실패 복구와 이력 보호 | Entity 및 부수 World 변경은 Undo/Redo에 기록하지 않는다. 배치 실패 시 해당 작업의 World 변경을 복구한다. Undo 범위 밖의 작업이 World를 실제 변경하고 전체 작업이 성공하면 기존 World Undo/Redo 이력을 모두 폐기한다. World 변경 없음·취소·실패 후 복구에서는 이력을 유지한다. | 완료 — 사용자 동작 확인 통과 |
+| WE-4 | Inspector 책임의 독립성 | Inspector의 Context·조회·표시 책임을 Workspace 조작과 분리하고 Scene 참조를 이전한다. 선택 데이터의 소유권과 Box 표시 규칙은 유지한다. | 완료 — 사용자 동작 확인 통과 |
+| WE-5 | 대규모 편집의 불필요한 계산 축소 | 한 번의 평가에서 선택 목록을 재사용하고 실제 표시 대상이 바뀔 때 하이라이트를 재생성한다. 지속 캐시·범용 풀 도입은 필요성이 확인된 경우에만 검토한다. | 완료 — 사용자 동작 확인 통과 |
+
+**확정된 이력 정책:** DEC-012에 따라 범위 밖 작업의 실제 World 변경 및 작업 전체 성공을 기준으로 Undo·Redo 양쪽 이력을 폐기한다. 개별 기록의 영역 충돌 판정은 도입하지 않는다. 건물 배치와 물 시뮬레이션 경로에 반영했으며 사용자 동작 확인을 통과했다.
+
+**WE-2 사용자 확인:** Pending 중 대상 Chunk를 언로드하면 적용이 비활성화되고 재로드 시 다시 평가되어야 한다. 건물 중심은 로드됐지만 외곽·Terrain Anchor가 미로드인 경우도 예외 없이 배치 불가여야 한다. 같은 Cell에 포인터를 둔 채 지형·물·점유 상태가 바뀌면 Preview가 갱신되어야 한다. 유효 표시 이후 적용 직전 상태가 변해도 최신 평가로 실행을 판단해야 한다.
+
+**WE-4 사용자 확인:** 최초 Inspector 축소, 재활성화 후 확장 상태 유지, Cell의 Entity 0개·1개·여러 개에 따른 표시와 목록 복귀를 확인한다. 접은 동안 선택·Entity·월드가 변경되면 재확장 시 최신 정보를 보여야 한다. Simulation 높이 변경 시 Inspector와 Launcher가 함께 이동하고 선택·편집 상태는 유지되어야 한다.
+
+**Streaming Undo/Redo:** 미로드 대상 기록 실행 보류·재로드 후 재허용 및 실패 트랜잭션 정리 완료, 사용자 동작 확인 통과. 영역 제거 후 대상 Chunk 언로드 시 Undo가 비활성화되고 복귀 후 복원되는지 확인한다. Redo에도 동일하게 적용하며, 여러 Chunk 기록은 하나라도 미로드이면 전체가 보류되어야 한다. 보류 중 새 World 편집은 가능해야 하며 기존 외부 World 변경 성공 시 이력 폐기 정책은 유지한다.
+
+**WE-5 사용자 확인:** 큰 Area를 확정하고 포인터를 움직일 때 확정 표시가 유지되며 `WorldTileHighlighter.RebuildInstances`가 반복 호출되지 않는지 Profiler로 확인한다. Pending 대상 변경·Chunk 언로드/재로드 시 유효·무효 Preview가 갱신되어야 한다. 같은 Preview 결과의 재평가는 메쉬를 재생성하지 않아야 한다. Single·Brush·Area의 면·외곽선, 취소·적용·도구 해제·월드 교체 후 표시 제거도 확인한다. 실제 성능 개선 수치는 아직 측정하지 않았다.
+
+**사용자 확인:** Inspector를 접은 상태의 대상 언로드·월드 교체, Pending 중 관련 World 변경 후 Preview·적용 가능 여부, Entity 배치 실패 후 World 복구, 직접 Terraform·Road Undo/Redo와 Entity 작업의 이력 제외를 확인한다. Undo·Redo 기록이 있는 상태에서 World를 실제 변경하는 범위 밖 작업이 성공하면 변경 영역과 관계없이 두 이력이 모두 비워져야 한다. World 변경 없는 Entity 작업과 취소·실패 후 복구에서는 기존 이력이 유지되어야 한다. 큰 Area 확정 후 포인터 이동 시 불필요한 하이라이트 재생성 비용은 사용자가 측정한다. agent는 코드 변경 시 컴파일 오류 확인까지만 수행한다.
+
 ### UI 후속 기능
 
 | 작업 | 범위·선행 조건 | 상태 |
@@ -106,9 +133,36 @@
 
 후속 기능은 UI 기반 이후 별도 작업으로 수행한다. 기능별 상세 우선순위·지원 옵션·시간 제어 방식은 아직 확정하지 않는다. 속성 변경·행동 가중치 연결은 기존 Entity 보완 로드맵 이후 논의하며, Inspector만으로 충족되지 않는 초기 5·6단계 및 두 번째 Animal 검증은 필요한 조작 수단 마련 후 재개한다.
 
+### 프로토타입 최종 정리
+
+- **상태:** 1~6단계 완료. 사용자 전체 동작 확인 통과를 근거로 프로토타입을 완료 처리한다.
+
+확정된 번호 순서 1 → 2 → 3 → 4 → 5 → 6으로 진행한다. 기존 WE 단계와 별개이며, 범위는 UI·World Edit의 실패 일관성과 확장 경계 정리다. Scene 배치·도메인 데이터 소유권·저장 형식을 유지하며 새 기능, 범용 UI 프레임워크, 공유 캐시·Manager 추가는 포함하지 않는다.
+
+| 단계 | 범위 및 완료 기준 | 상태 |
+|---|---|---|
+| 1 | Inspector의 Cell/목록 복귀도 기존 대상 유효성 검사 경로를 사용한다. 언로드·선택 해제·월드 교체 후 오래된 대상을 직접 읽지 않는다. | 완료 — 사용자 동작 확인 통과 |
+| 2 | 성공·부분 성공·변경 없음·실패 결과를 구분하고 Pending·Preview·버튼 상태를 결과에 맞게 정리한다. | 완료 — 사용자 동작 확인 통과 |
+| 3 | 다중 Entity 배치는 부분 성공을 허용한다. 개체별 실패를 정리하고 나머지 배치를 진행하며, 실제 등록 성공·실패 개수와 실패 원인을 로그로 출력한다. | 완료 — 사용자 동작 확인 통과 |
+| 4 | World 확정과 후속 변경 통지의 오류를 구분한다. 통지 실패가 완료된 Undo/Redo 기록을 잘못 복원하지 않도록 한다. | 완료 — 사용자 동작 확인 통과 |
+| 5 | 지원 모드·옵션 규칙을 한 곳에서 정의하고 UI 표시와 상태 검증에 함께 사용한다. | 완료 — 사용자 동작 확인 통과 |
+| 6 | 실제 참조를 확인해 사용하지 않는 공개 이벤트·스냅샷·변수를 제거한다. | 완료 — 사용자 동작 확인 통과 |
+
+6단계 사용자 확인: Single 선택·Brush 드래그·Area 확정 후 Preview와 적용/취소가 유지되는지 확인한다. 드래그 중 UI 진입·우클릭·Escape·Tool 변경 시 취소되는지도 확인한다. Scene 직렬화 필드와 실제 Pending 이벤트 연결은 변경하지 않았다. 프로토타입 최종 정리 1~6단계 구현과 사용자 동작 확인을 완료했다.
+
+5단계 사용자 확인: Building 선택 시 Single만 제공하고 다른 모드 요청은 거부해야 한다. 일반 Entity·Terraform·Road는 Single/Brush/Area 전환이 가능하며 Brush에서만 Size가 표시·변경되어야 한다. Brush 크기 1~3을 바꾸고 다른 모드 왕복 시 값을 유지하는지 확인한다. Rectangle은 기존 미지원 표시를 유지한다. 활성 도구 재선택·Category 이동 후 도구 해제와 Pending 취소도 확인한다.
+
+4단계 사용자 확인: Terraform/Road 적용·Undo·Redo 및 건물 배치 후 World와 이력 방향이 일치하는지 확인한다. 개발용 통지 구독자에서 예외를 발생시키는 경우에도 완료된 변경과 이력은 유지되고 나머지 구독자는 실행되어야 한다. 렌더링 통지 오류가 저장 dirty 처리나 물 갱신 호출을 막지 않아야 한다. 실제 데이터 적용 실패의 복구는 유지한다. 오류가 난 소비자 자체의 갱신 성공은 보장하지 않으며 Console에 예외가 남는다.
+
+3단계 사용자 확인: 유효·무효 지면이 섞인 Area 배치에서 실제 생성 수와 success/failed 로그를 비교한다. 무효 지면은 실패 개수에 포함하며 원인을 별도 로그로 표시한다. 개별 생성 실패 후 나머지 배치가 계속되고 성공한 개체가 유지되어야 한다. 부분 성공은 Pending을 종료해 재적용 중복을 막고, 전부 실행 실패하면 재평가 후 재시도·취소 가능해야 한다. 건물 실패 복구 및 통지 오류 경계는 기존 구현을 유지하며 후자는 4단계 대상이다.
+
+2단계 사용자 확인: 정상 적용 및 실제 변경 없는 Terraform/Road 적용은 Pending을 끝내고 Tool은 유지해야 한다. 실행 거부·예외 후에는 같은 Pending의 Preview와 적용 가능 상태를 다시 평가하여 수정·취소할 수 있어야 한다. 실패 원인은 Console에서 확인한다. 복구 중 대상이 미로드이면 적용은 비활성화되어야 한다. Entity 중간 실패의 부분 성공 처리와 확정 후 통지 오류 구분은 각각 3·4단계에서 완료한다.
+
+1단계 사용자 확인: Entity Inspector에서 Cell/목록으로 정상 복귀하는지 확인한다. 대상 Chunk 언로드·선택 해제·월드 교체 직후 복귀를 시도해도 예외 없이 최신 선택 또는 대상 없음 안내를 표시해야 한다. UI 탐색이 World 선택·편집 상태를 변경하지 않아야 한다. agent는 컴파일만 확인하며 런타임 검증은 사용자가 수행한다.
+
 ### UI 사용자 확인 절차
 
-agent는 코드 변경 단계에서 컴파일 오류 확인까지만 수행한다. 다음 런타임 확인은 사용자가 수행하며 결과를 전달한 뒤 완료 상태를 갱신한다.
+agent는 코드 변경 단계에서 컴파일 오류 확인까지만 수행한다. 아래 항목은 향후 변경 시 사용할 확인 절차로 유지한다. 이번 프로토타입은 사용자 전체 동작 확인 통과로 완료했다.
 
 - Workspace·Inspector는 X와 Launcher, Simulation은 X와 같은 자리의 확대 버튼을 사용하여 8가지 조합을 확인한다. 다른 Box 상태, Active Tool, 선택 Context, Pending 편집과 Simulation 진행이 유지되어야 한다.
 - Tab·Category로 돌아가면 도구가 해제되고 Options가 숨겨져야 한다. Deer 또는 지원되는 World 항목 선택 시에만 필요한 Options가 표시되고 Building은 Single만 허용되어야 한다. 미지원 항목은 실행되지 않아야 한다.

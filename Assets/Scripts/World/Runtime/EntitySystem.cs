@@ -605,7 +605,8 @@ namespace MiniCivilization.World.Runtime
                 if (!world.Contains(
                         coordinate.X,
                         coordinate.Y,
-                        coordinate.Z))
+                        coordinate.Z)
+                    || !world.IsChunkLoaded(coordinate.X, coordinate.Z))
                 {
                     invalidCells.Add(coordinate);
                     continue;
@@ -644,7 +645,8 @@ namespace MiniCivilization.World.Runtime
                 if (!world.Contains(
                         coordinate.X,
                         coordinate.Y,
-                        coordinate.Z))
+                        coordinate.Z)
+                    || !world.IsChunkLoaded(coordinate.X, coordinate.Z))
                 {
                     invalidCells.Add(coordinate);
                     continue;
@@ -730,7 +732,8 @@ namespace MiniCivilization.World.Runtime
                 if (!world.Contains(
                         coordinate.X,
                         coordinate.Y,
-                        coordinate.Z))
+                        coordinate.Z)
+                    || !world.IsChunkLoaded(coordinate.X, coordinate.Z))
                 {
                     continue;
                 }
@@ -770,7 +773,8 @@ namespace MiniCivilization.World.Runtime
                 if (!world.Contains(
                         coordinate.X,
                         coordinate.Y,
-                        coordinate.Z))
+                        coordinate.Z)
+                    || !world.IsChunkLoaded(coordinate.X, coordinate.Z))
                 {
                     continue;
                 }

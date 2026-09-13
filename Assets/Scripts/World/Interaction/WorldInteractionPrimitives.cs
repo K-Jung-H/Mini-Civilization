@@ -199,6 +199,10 @@ namespace MiniCivilization.World.Interaction
                 new CellBounds(minimum, maximum));
         }
 
+        internal bool HasSameCells(WorldCellSetSelection other) =>
+            other != null && Count == other.Count
+            && cellCoordinates.SetEquals(other.cellCoordinates);
+
         public bool Contains(CellCoordinate coordinate) =>
             cellCoordinates.Contains(coordinate);
 

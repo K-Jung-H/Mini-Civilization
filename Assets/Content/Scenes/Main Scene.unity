@@ -1375,16 +1375,12 @@ MonoBehaviour:
   palette: {fileID: 1501621365}
   toolOptions: {fileID: 1457115053}
   paletteTitle: {fileID: 645090264}
-  inspectorTitle: {fileID: 332741452}
-  inspectorBody: {fileID: 793542719}
-  inspectorActions: {fileID: 124268041}
   undoButton: {fileID: 158974010}
   redoButton: {fileID: 1432481490}
   entityTabButton: {fileID: 1027336420}
   worldTabButton: {fileID: 253535107}
   workspaceBox: {fileID: 820497760}
   simulationBox: {fileID: 1763992120}
-  inspectorBox: {fileID: 66860872}
   workspaceCloseButton: {fileID: 207582550}
   workspaceLauncher: {fileID: 1402958460}
   simulationCloseButton: {fileID: 1850304733}
@@ -1393,8 +1389,6 @@ MonoBehaviour:
   simulationExpandedHeight: 180
   simulationCollapsedHeight: 92
   rightColumnGap: 20
-  inspectorCloseButton: {fileID: 2042447599}
-  inspectorLauncher: {fileID: 669206374}
   itemPrefab: {fileID: 8058985041493500615, guid: fb2d1631f7a74c449949aca689b5fd8a, type: 3}
   backButton: {fileID: 1514624459}
   activeToolLabel: {fileID: 1264218302}
@@ -1413,6 +1407,7 @@ MonoBehaviour:
   - {fileID: 0}
   - {fileID: 0}
   - {fileID: 0}
+  inspectorView: {fileID: 210000012}
 --- !u!1 &253535105
 GameObject:
   m_ObjectHideFlags: 0
@@ -9373,6 +9368,7 @@ GameObject:
   - component: {fileID: 8017234081965372401}
   - component: {fileID: 8150000000000000010}
   - component: {fileID: 210000011}
+  - component: {fileID: 210000012}
   m_Layer: 0
   m_Name: World UI
   m_TagString: Untagged
@@ -10334,3 +10330,22 @@ SceneRoots:
   - {fileID: 832575519}
   - {fileID: 1900000001}
   - {fileID: 2069906079}
+--- !u!114 &210000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6472401242640069952}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 84b0c1a7f0624ee09b5b58e2a918b711, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: MiniCivilization.World::MiniCivilization.World.Presentation.WorldInspectorView
+  inspectorTitle: {fileID: 332741452}
+  inspectorBody: {fileID: 793542719}
+  inspectorActions: {fileID: 124268041}
+  inspectorBox: {fileID: 66860872}
+  inspectorCloseButton: {fileID: 2042447599}
+  inspectorLauncher: {fileID: 669206374}
+  itemPrefab: {fileID: 8058985041493500615, guid: fb2d1631f7a74c449949aca689b5fd8a, type: 3}

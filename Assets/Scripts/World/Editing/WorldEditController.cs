@@ -21,8 +21,17 @@ namespace MiniCivilization.World.Editing
 
         public WorldData BoundWorld => boundWorld;
         public bool HasActiveTransaction => activeTransaction != null;
-        public bool CanUndo => activeTransaction == null && undoRecords.Count > 0;
-        public bool CanRedo => activeTransaction == null && redoRecords.Count > 0;
+        public bool CanUndo => CanApplyHistory(undoRecords);
+        public bool CanRedo => CanApplyHistory(redoRecords);
+        private bool CanApplyHistory(Stack<WorldEditRecord> records)
+        {
+            if (activeTransaction != null || boundWorld == null || records.Count == 0)
+                return false;
+            foreach (var chunk in records.Peek().Chunks)
+                if (!boundWorld.IsChunkLoaded(chunk)) return false;
+            return true;
+        }
+
         public int HistoryLimit => historyLimit;
 
         public event Action<WorldChangeSet> ChangeCommitted;
@@ -60,7 +69,7 @@ namespace MiniCivilization.World.Editing
         {
             undoRecords.Clear();
             redoRecords.Clear();
-            HistoryChanged?.Invoke();
+            NotifyHistoryChanged();
         }
 
         public WorldEditTransaction BeginTransaction()
@@ -86,10 +95,21 @@ namespace MiniCivilization.World.Editing
             return Commit(transaction, true);
         }
 
-        internal WorldChangeSet CommitWithoutHistory(
-            WorldEditTransaction transaction)
+        internal WorldChangeSet CommitExternalChange(
+            WorldEditTransaction transaction,
+            Action completeRelatedOperation)
         {
-            return Commit(transaction, false);
+            if (completeRelatedOperation == null)
+                throw new ArgumentNullException(nameof(completeRelatedOperation));
+            return Commit(transaction, false, completeRelatedOperation);
+        }
+
+        public void OnExternalWorldChangeCommitted(WorldChangeSet changeSet)
+        {
+            if (changeSet != null && ReferenceEquals(changeSet.World, boundWorld)
+                && changeSet.ChangedCells.Count > 0
+                && (undoRecords.Count > 0 || redoRecords.Count > 0))
+                ClearHistory();
         }
 
         public void Rollback(WorldEditTransaction transaction)
@@ -162,20 +182,22 @@ namespace MiniCivilization.World.Editing
             }
 
             var record = undoRecords.Pop();
+            WorldChangeSet changeSet;
             try
             {
-                ApplyRecord(record, usePreviousValues: true);
+                changeSet = ApplyRecord(record, usePreviousValues: true);
             }
             catch
             {
                 undoRecords.Push(record);
-                HistoryChanged?.Invoke();
+                NotifyHistoryChanged();
                 throw;
             }
 
             redoRecords.Push(record);
             TrimHistory(redoRecords);
-            HistoryChanged?.Invoke();
+            NotifyHistoryChanged();
+            NotifyCommitted(changeSet);
             return true;
         }
 
@@ -187,30 +209,44 @@ namespace MiniCivilization.World.Editing
             }
 
             var record = redoRecords.Pop();
+            WorldChangeSet changeSet;
             try
             {
-                ApplyRecord(record, usePreviousValues: false);
+                changeSet = ApplyRecord(record, usePreviousValues: false);
             }
             catch
             {
                 redoRecords.Push(record);
-                HistoryChanged?.Invoke();
+                NotifyHistoryChanged();
                 throw;
             }
 
             undoRecords.Push(record);
             TrimHistory(undoRecords);
-            HistoryChanged?.Invoke();
+            NotifyHistoryChanged();
+            NotifyCommitted(changeSet);
             return true;
         }
 
         private WorldChangeSet Commit(
             WorldEditTransaction transaction,
-            bool recordUndo)
+            bool recordUndo,
+            Action completeRelatedOperation = null,
+            bool notifyCommitted = true)
         {
             EnsureActiveTransaction(transaction);
             if (!transaction.HasChanges)
             {
+                try
+                {
+                    completeRelatedOperation?.Invoke();
+                }
+                catch
+                {
+                    transaction.Cancel();
+                    activeTransaction = null;
+                    throw;
+                }
                 transaction.Complete();
                 activeTransaction = null;
                 return null;
@@ -218,6 +254,7 @@ namespace MiniCivilization.World.Editing
 
             var cellChanges = transaction.CopyCellChanges();
             var changedColumns = new HashSet<CellColumnCoordinate>();
+            WorldChangeSet changeSet;
 
             try
             {
@@ -243,34 +280,66 @@ namespace MiniCivilization.World.Editing
                     }
 
                 }
+                var affectedSections = BuildAffectedSections(cellChanges);
+                changeSet = BuildChangeSet(cellChanges, changedColumns, affectedSections);
+                // Keep the transaction active until the related operation succeeds.
+                completeRelatedOperation?.Invoke();
             }
             catch
             {
-                RestorePreviousValues(cellChanges);
-                RebuildColumns(changedColumns);
-                transaction.Cancel();
-                activeTransaction = null;
+                try
+                {
+                    RestorePreviousValues(cellChanges);
+                    RebuildColumns(changedColumns);
+                }
+                finally
+                {
+                    transaction.Cancel();
+                    activeTransaction = null;
+                }
                 throw;
             }
 
-            var affectedSections = BuildAffectedSections(cellChanges);
-            var changeSet = BuildChangeSet(
-                cellChanges,
-                changedColumns,
-                affectedSections);
             transaction.Complete();
             activeTransaction = null;
 
             if (recordUndo)
             {
-                undoRecords.Push(new WorldEditRecord(cellChanges));
+                undoRecords.Push(new WorldEditRecord(cellChanges, boundWorld));
                 TrimHistory(undoRecords);
                 redoRecords.Clear();
-                HistoryChanged?.Invoke();
+                NotifyHistoryChanged();
+            }
+            else if (completeRelatedOperation != null)
+            {
+                OnExternalWorldChangeCommitted(changeSet);
             }
 
-            ChangeCommitted?.Invoke(changeSet);
+            if (notifyCommitted) NotifyCommitted(changeSet);
             return changeSet;
+        }
+
+        private void NotifyHistoryChanged()
+        {
+            var handlers = HistoryChanged;
+            if (handlers == null) return;
+            foreach (Action handler in handlers.GetInvocationList())
+            {
+                try { handler(); }
+                catch (Exception error) { Debug.LogException(error, this); }
+            }
+        }
+
+        private void NotifyCommitted(WorldChangeSet changeSet)
+        {
+            var handlers = ChangeCommitted;
+            if (changeSet == null || handlers == null) return;
+            // The world and history are already committed. Observer failures cannot undo them.
+            foreach (Action<WorldChangeSet> handler in handlers.GetInvocationList())
+            {
+                try { handler(changeSet); }
+                catch (Exception error) { Debug.LogException(error, this); }
+            }
         }
 
         private void TrimHistory(Stack<WorldEditRecord> records)
@@ -288,22 +357,31 @@ namespace MiniCivilization.World.Editing
             }
         }
 
-        private void ApplyRecord(
+        private WorldChangeSet ApplyRecord(
             WorldEditRecord record,
             bool usePreviousValues)
         {
             var transaction = BeginTransaction();
-            for (var index = 0; index < record.CellChanges.Length; index++)
+            try
             {
-                var change = record.CellChanges[index];
-                transaction.SetCell(
-                    change.Coordinate.X,
-                    change.Coordinate.Y,
-                    change.Coordinate.Z,
-                    usePreviousValues ? change.Previous : change.Current);
-            }
+                for (var index = 0; index < record.CellChanges.Length; index++)
+                {
+                    var change = record.CellChanges[index];
+                    transaction.SetCell(
+                        change.Coordinate.X,
+                        change.Coordinate.Y,
+                        change.Coordinate.Z,
+                        usePreviousValues ? change.Previous : change.Current);
+                }
 
-            Commit(transaction, false);
+                return Commit(transaction, false, notifyCommitted: false);
+            }
+            finally
+            {
+                // SetCell can fail before Commit takes responsibility for cleanup.
+                if (ReferenceEquals(activeTransaction, transaction))
+                    Rollback(transaction);
+            }
         }
 
         private void RestorePreviousValues(CellEdit[] cellChanges)
@@ -529,9 +607,15 @@ namespace MiniCivilization.World.Editing
         {
             public readonly CellEdit[] CellChanges;
 
-            public WorldEditRecord(CellEdit[] cellChanges)
+            public readonly HashSet<ChunkCoordinate> Chunks = new();
+
+            public WorldEditRecord(CellEdit[] cellChanges, WorldData world)
             {
                 CellChanges = cellChanges;
+                foreach (var change in cellChanges)
+                    Chunks.Add(new ChunkCoordinate(
+                        WorldCoordinateUtility.FloorDivide(change.Coordinate.X, world.ChunkSizeX),
+                        WorldCoordinateUtility.FloorDivide(change.Coordinate.Z, world.ChunkSizeZ)));
             }
         }
     }

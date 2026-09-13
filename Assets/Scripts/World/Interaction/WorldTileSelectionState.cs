@@ -66,8 +66,9 @@ namespace MiniCivilization.World.Interaction
             }
 
             EditSelected = EditHovered;
+            EditHovered = null;
             EditSelectionChanged?.Invoke(EditSelected);
-            ReplaceEditHovered(null);
+            EditHoverChanged?.Invoke(null);
         }
 
         public void ReplaceEditSelected(IWorldCellSelection next)
@@ -93,9 +94,9 @@ namespace MiniCivilization.World.Interaction
             IWorldCellSelection secondary,
             IWorldCellSelection invalid)
         {
-            if (ReferenceEquals(EditPrimaryPreview, primary)
-                && ReferenceEquals(EditSecondaryPreview, secondary)
-                && ReferenceEquals(EditInvalidPreview, invalid))
+            if (SamePreview(EditPrimaryPreview, primary)
+                && SamePreview(EditSecondaryPreview, secondary)
+                && SamePreview(EditInvalidPreview, invalid))
             {
                 return;
             }
@@ -105,6 +106,11 @@ namespace MiniCivilization.World.Interaction
             EditInvalidPreview = invalid;
             EditPreviewChanged?.Invoke();
         }
+
+        private static bool SamePreview(IWorldCellSelection current, IWorldCellSelection next) =>
+            ReferenceEquals(current, next)
+            || current is WorldCellSetSelection cells
+                && next is WorldCellSetSelection nextCells && cells.HasSameCells(nextCells);
 
         public void ClearEditPreview() =>
             ReplaceEditPreview(null, null, null);

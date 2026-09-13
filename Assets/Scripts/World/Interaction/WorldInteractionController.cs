@@ -19,10 +19,37 @@ namespace MiniCivilization.World.Interaction
         [Header("Raycast")]
         [SerializeField, Min(1f)] private float maxDistance = 1000f;
 
-        private WorldData observedWorld;
+        private WorldRuntime observedRuntime;
+
+        private void OnEnable()
+        {
+            if (worldManager != null) worldManager.WorldChanged += SynchronizeSelection;
+            SynchronizeSelection();
+        }
+
+        private void SynchronizeSelection()
+        {
+            if (selectionState == null) return;
+            var runtime = worldManager != null ? worldManager.CurrentWorldRuntime : null;
+            if (!ReferenceEquals(observedRuntime, runtime))
+            {
+                observedRuntime = runtime;
+                selectionState.SetHovered(null);
+                selectionState.SetSelected(null);
+            }
+            if (selectionState.Selected.HasValue)
+            {
+                var cell = selectionState.Selected.Value.Cell;
+                var world = runtime?.Data;
+                if (world == null || !world.Contains(cell.X, cell.Y, cell.Z)
+                    || !world.IsChunkLoaded(cell.X, cell.Z))
+                    selectionState.SetSelected(null);
+            }
+        }
 
         private void Update()
         {
+            SynchronizeSelection();
             var mouse = Mouse.current;
             if (mouse == null
                 || interactionCamera == null
@@ -32,12 +59,6 @@ namespace MiniCivilization.World.Interaction
             {
                 selectionState?.SetHovered(null);
                 return;
-            }
-
-            if (observedWorld != worldManager.CurrentWorldData)
-            {
-                observedWorld = worldManager.CurrentWorldData;
-                selectionState.Clear();
             }
 
             var blocksCellSelection = editToolState != null
@@ -101,17 +122,25 @@ namespace MiniCivilization.World.Interaction
             WorldEditToolState toolState,
             float rayDistance)
         {
+            if (worldManager != null) worldManager.WorldChanged -= SynchronizeSelection;
             interactionCamera = camera;
             worldManager = manager;
             selectionState = state;
             editToolState = toolState;
             maxDistance = Mathf.Max(1f, rayDistance);
+            if (isActiveAndEnabled)
+            {
+                if (worldManager != null) worldManager.WorldChanged += SynchronizeSelection;
+                SynchronizeSelection();
+            }
         }
 
         private void OnDisable()
         {
-            observedWorld = null;
-            selectionState?.Clear();
+            if (worldManager != null) worldManager.WorldChanged -= SynchronizeSelection;
+            observedRuntime = null;
+            selectionState?.SetHovered(null);
+            selectionState?.SetSelected(null);
         }
     }
 }

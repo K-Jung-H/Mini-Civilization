@@ -35,20 +35,20 @@ namespace MiniCivilization.World.Presentation
             editApplyController?.Configure(manager.EditController, selectionState, editToolState,
                 editInputController, entityEditController, manager.EntityManager);
             var mainSceneView = GetComponent<MainSceneUIView>();
-            if (mainSceneView == null)
+            var inspectorView = GetComponent<WorldInspectorView>();
+            if (mainSceneView == null || inspectorView == null)
             {
                 Debug.LogError(
-                    $"{nameof(WorldUIManager)} requires a serialized {nameof(MainSceneUIView)}.",
+                    $"{nameof(WorldUIManager)} requires serialized MainSceneUIView and WorldInspectorView components.",
                     this);
                 return;
             }
+            inspectorView.Configure(manager, selectionState, infoProvider);
             mainSceneView.Configure(
                 manager,
                 editToolState,
                 editApplyController,
-                roadVisualCatalog,
-                selectionState,
-                infoProvider);
+                roadVisualCatalog);
         }
 
     }

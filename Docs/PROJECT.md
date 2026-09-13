@@ -48,17 +48,29 @@ Terrain, Climate, Hydrology는 Pattern Tile로 생성된다. 생성·수문 세�
 
 Workspace는 Entity / World Tab이 하나의 Palette를 공유한다. Entity는 Animal / Nature / Human / Building Catalog를 기존 EntityDefinition으로 구성한다. World는 Biome / Water / Terrain / Terraform / Road를 표시하며 현재 지원되는 Terraform과 Road만 기존 WorldEditAction으로 연결한다. 미지원 Category와 Rectangle은 비활성 상태로 표시한다. Tool Options는 Active Tool이 있을 때만 Single / Brush / 기존 3D Area와 필요한 Brush Size를 표시하며 Building의 Single 제한을 유지한다. 현재 Tab·Palette 항목·Interaction Mode·Brush Size는 선택 색상으로 구분한다. Tab·Category로 돌아가거나 이미 활성화된 Palette 항목을 다시 선택하면 도구가 해제된다. 항목 재선택은 현재 Category를 유지한다.
 
-WorldEditToolState가 Active Tool·Mode·Brush Size를 직접 소유한다. MainSceneUIView는 명시적인 도구 선택 명령을 호출하며 Undo/Redo는 WorldEditApplyController에 연결한다. SelectMode Palette는 Workspace 밖의 독립 Box로 배치되어 Active Tool이 있을 때만 전체가 표시된다. Workspace를 접어도 도구가 활성화되어 있으면 유지되며 도구 활성 여부가 Workspace 크기를 바꾸지 않는다. Brush에서는 Brush Size 행과 간격만큼 SelectMode 높이를 늘리고 Single·Area에서는 줄인다. 상단·폭은 유지하며 확인 버튼은 하단을 따른다. Palette 제목 우측의 정사각 Back 버튼은 Category 안에서만 활성화한다. Palette와 Inspector는 세로 ScrollRect와 자동 숨김 Scrollbar를 사용한다. Entity·Road는 기존 Thumbnail을 연결하며 이미지가 없는 항목은 문자 기호를 표시한다. WorldInteractionController와 WorldEditInputController는 기존 EventSystem의 UI Pointer 차단, DDA Cell Picking, 편집 Preview·확인 경로를 유지한다.
+WorldEditToolState가 Active Tool·Mode·Brush Size를 직접 소유한다. WorldEditToolSnapshot의 지원 모드·Brush 옵션 규칙을 상태 검증과 UI가 함께 사용한다. Building은 Single만 허용하고 나머지 기존 도구는 Single/Brush/Area를 지원한다. Brush 크기는 Snapshot에서 1~3으로 제한하며 Brush 모드에서만 변경한다. MainSceneUIView는 명시적인 도구 선택 명령을 호출하며 Undo/Redo는 WorldEditApplyController에 연결한다. SelectMode Palette는 Workspace 밖의 독립 Box로 배치되어 Active Tool이 있을 때만 전체가 표시된다. Workspace를 접어도 도구가 활성화되어 있으면 유지되며 도구 활성 여부가 Workspace 크기를 바꾸지 않는다. Brush에서는 Brush Size 행과 간격만큼 SelectMode 높이를 늘리고 Single·Area에서는 줄인다. 상단·폭은 유지하며 확인 버튼은 하단을 따른다. Palette 제목 우측의 정사각 Back 버튼은 Category 안에서만 활성화한다. Palette와 Inspector는 세로 ScrollRect와 자동 숨김 Scrollbar를 사용한다. Entity·Road는 기존 Thumbnail을 연결하며 이미지가 없는 항목은 문자 기호를 표시한다. WorldInteractionController와 WorldEditInputController는 기존 EventSystem의 UI Pointer 차단, DDA Cell Picking, 편집 Preview·확인 경로를 유지한다.
 
 Inspector는 펼쳐진 동안 0.2초 간격으로 선택 대상의 값을 확인하고 표시 데이터가 달라졌을 때 본문을 갱신한다. 선택·월드·관련 Entity 변경 및 재확장 시 Cell의 Entity ID 목록을 기존 EntitySystem 조회 경로에서 다시 확인하고 정렬한다. 0개면 Cell, 1개면 해당 Entity, 여러 개면 선택 목록을 표시하며 목록 행은 기존 항목 Prefab 인스턴스를 재사용한다. Entity Context는 Entity ID로 유지하고 EntityData의 이름·나이·Trait 및 Runtime의 방향·Activity를 읽는다. Inspector 표시를 접어도 선택은 유지되며 대상 삭제·언로드 후에는 유효성을 다시 확인한다.
 
-Cell 선택 Context는 MainSceneUIView의 Inspector 한 곳에서 표시한다. EntityCatalog·RoadVisualCatalog 데이터와 Streaming 진행 UI의 기존 참조는 유지한다. Edit Selection Confirmation은 SelectMode 하단에 취소 / 적용 버튼을 가로로 배치한다. WorldEditConfirmationView는 Pending 여부와 실행 가능 상태만 버튼에 표시하며 위치 이동·Panel 표시 제어를 하지 않는다. 취소·적용 처리는 기존 WorldEditInputController와 WorldEditApplyController를 사용한다.
+`WorldInspectorView`는 Inspector의 Cell·Entity Context, 데이터 조회·표시, 목록 행 재사용, 독립 확장·축소와 관련 Scene 참조를 소유한다. `WorldUIManager`가 기존 선택 상태·정보 Provider·WorldManager를 연결한다. 컴포넌트는 Box 외부의 World UI에 있어 축소 중에도 변경 통지를 받는다. `MainSceneUIView`는 Workspace·SelectMode·Simulation을 담당하고 Simulation 높이 변경 시 Inspector에 상단 위치만 전달한다. 일반 Cell 선택과 월드 데이터의 소유권은 기존 런타임에 남는다. EntityCatalog·RoadVisualCatalog 데이터와 Streaming 진행 UI의 기존 참조는 유지한다. Edit Selection Confirmation은 SelectMode 하단에 취소 / 적용 버튼을 가로로 배치한다. WorldEditConfirmationView는 Pending 여부와 실행 가능 상태만 버튼에 표시하며 위치 이동·Panel 표시 제어를 하지 않는다. 취소·적용 처리는 기존 WorldEditInputController와 WorldEditApplyController를 사용한다.
+
+일반 Cell 선택의 월드 교체·제거·선택 Chunk 언로드 처리는 `WorldInteractionController`가 담당하며 UI 표시 여부와 무관하게 동작한다. `WorldEditInputController`는 Pending 영역·도구 스냅샷을 소유하고 취소·완료 전환을 한 경로로 처리한다. `WorldTileSelectionState.EditSelected`는 표시용 영역이며 실행 대상은 Input이 보유한 Pending 영역이다. ApplyController는 실행 결과에 따라 Input에 완료를 요청하며 확정 영역을 다시 쓰지 않는다. Inspector와 Highlighter는 선택을 해제하지 않는다. `WorldManager.WorldChanged`는 월드 준비 완료뿐 아니라 제거·준비 실패 후에도 통지하며 각 입력 Controller는 자신이 소유한 상태만 정리한다.
 
 Workspace·Simulation·Inspector는 씬 배치와 최초 초기화에서 모두 축소 상태로 시작한다. 이후 컴포넌트 재활성화는 사용자가 선택한 확장 상태를 초기화하지 않는다. 이 상태는 영구 저장하지 않는다. Simulation Box는 확장 시 월드 로드 여부와 제어 미지원 안내를, 축소 시 월드 로드 여부만 표시한다. 상단과 폭은 고정하고 높이만 줄이며 X와 같은 위치·규격의 확대 버튼으로 복귀한다. Inspector 영역과 Launcher는 Simulation의 현재 높이 아래에 같은 간격으로 따라 이동한다. Inspector의 표시 여부와 선택 Context는 이 이동과 독립적이다. EntityManager와 WorldWaterFlowController는 각각 기존 업데이트 경로에서 계속 시뮬레이션을 처리한다. 공통 시간·Pause/Play·Speed 제어는 아직 구현되어 있지 않다.
 
 ## 변경 전파
 
 `WorldManager`는 런타임을 생성하고 Editing, WaterFlow, Renderer, EntityManager, Persistence를 연결한다. 월드 편집과 물 계산 결과는 ChangeSet으로 전달되어 렌더링, 저장 dirty 처리, 필요한 내비게이션·Waypoint 갱신을 유도한다.
+
+편집 평가는 `WorldEditApplyController.Evaluate`에서 수행하고, `Present`는 평가 결과를 Preview로 표시한다. Entity 배치 규칙은 기존 `EntityEditController`에 유지하며 평가에 전달한 Cell 목록을 다시 복사하지 않는다. 적용 직전에 새로 평가한 결과를 실행에 사용하고 Transaction의 최종 보호 규칙은 유지한다. Input은 실행 가능 여부를 별도 저장하지 않고 평가 결과를 확인 버튼에 전달한다. Pending·Hover의 World/Entity 변경은 기존 Cell revision과 World 변경 번호를 0.2초 간격으로 비교해 재평가한다. 변경 번호는 월드 전체 기준이며 영역별 갱신 최적화는 아직 적용하지 않았다. 미로드 Cell이 포함된 선택은 전체 적용을 막고, 건물 외곽·Terrain Anchor의 미로드 Cell도 배치 불가로 처리한다. 재로드 이후에는 같은 Pending을 다시 평가한다.
+
+## World 편집 이력의 현재 구현
+
+Undo/Redo는 다음 기록의 대상 Chunk 데이터가 모두 로드되어야 실행된다. 미로드이면 기록을 보존하고 그 기록을 넘어 진행하지 않는다. `WorldEditApplyController`는 기존 0.2초 갱신에서 실행 가능 상태가 달라질 때 버튼을 갱신하고, 실제 호출에서도 `WorldEditController`가 다시 검사한다. 기록 적용 준비 중 실패한 트랜잭션도 정리하여 이후 편집을 막지 않는다.
+
+`WorldEditController`는 직접 Terraform·Road 편집의 Cell 변경 기록으로 Undo/Redo를 처리한다. Entity 배치는 이력을 남기지 않는다. 건물의 부수 지형·Road 변경은 `CommitExternalChange`에서 Entity 등록까지 성공한 뒤 확정하며, World 변경이 있으면 Undo·Redo 이력을 모두 폐기한다. 등록 실패 시 Entity 정리와 World 값·파생 데이터 복구를 수행하며 기존 이력은 유지한다. World 변경 없는 배치도 이력을 유지한다. 물 시뮬레이션의 실제 Cell 변경은 `WorldManager.OnWaterChanged`에서 같은 이력 폐기 경로로 전달한다. Undo/Redo 자체의 재적용은 외부 작업으로 취급하지 않는다. 사용자 확인 상태는 ROADMAP.md를 따른다.
+
+World 편집의 확정 후 통지는 구독자별 예외를 로그로 기록하고 계속한다. Undo/Redo는 이력 이동 완료 후 변경을 통지하며, 통지 오류 때문에 적용된 기록을 이전 스택으로 복원하지 않는다. `WorldManager`의 편집 후 저장 dirty·Waypoint·물·렌더링 처리는 각각 오류를 격리한다. 확정 전 Cell·파생 데이터 적용 및 관련 작업 실패의 복구 경계는 유지한다.
 
 ## Entity 실행 구조
 
